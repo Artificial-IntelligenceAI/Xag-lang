@@ -1,0 +1,317 @@
+//! The oracle: write a program, ask every engine what it says, and report any
+//! engine that says something different.
+//!
+//! A case costs about forty milliseconds and nearly all of it is spent in
+//! processes — compiling, linking, running. So the work is spread across every
+//! core by an atomic counter rather than a fixed split, because cases differ in
+//! cost and a thread that finishes early should take the next one rather than
+//! wait for its share.
+
+mod gen;
+mod rng;
+
+use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::time::Instant;
+
+struct Settings {
+    xagc: PathBuf,
+    cases: u64,
+    first_seed: u64,
+    jobs: usize,
+    workspace: PathBuf,
+    keep_going: bool,
+    shrink: bool,
+    size: u32,
+}
+
+#[derive(Debug)]
+struct Answer {
+    said: String,
+    status: i32,
+}
+
+struct Finding {
+    seed: u64,
+    program: String,
+    interpreter: Answer,
+    native: Answer,
+}
+
+fn main() {
+    let settings = match read_settings() {
+        Ok(settings) => settings,
+        Err(trouble) => {
+            eprintln!("xag-oracle: {trouble}");
+            eprintln!(
+                "\n  xag-oracle --xagc <path> [--cases N] [--seed S] [--jobs J]\n\
+                 \x20            [--dir D] [--keep-going] [--no-shrink]\n"
+            );
+            std::process::exit(2);
+        }
+    };
+
+    let next = AtomicU64::new(settings.first_seed);
+    let end = settings.first_seed + settings.cases;
+    let done = AtomicUsize::new(0);
+    let rejected = AtomicUsize::new(0);
+    let skipped = AtomicUsize::new(0);
+    let findings: Mutex<Vec<Finding>> = Mutex::new(Vec::new());
+    let started = Instant::now();
+
+    println!(
+        "asking {} case(s) across {} thread(s), seeds {}..{}",
+        settings.cases, settings.jobs, settings.first_seed, end
+    );
+
+    std::thread::scope(|scope| {
+        for worker in 0..settings.jobs {
+            let (next, done, rejected, skipped, findings, settings) =
+                (&next, &done, &rejected, &skipped, &findings, &settings);
+            scope.spawn(move || {
+                // One directory per thread, so no two cases ever contend for a
+                // name and nothing has to be locked to write a file.
+                let room = settings.workspace.join(format!("worker{worker}"));
+                let _ = std::fs::create_dir_all(&room);
+                let mut program = String::with_capacity(4096);
+
+                loop {
+                    let seed = next.fetch_add(1, Ordering::Relaxed);
+                    if seed >= end {
+                        break;
+                    }
+                    gen::generate(seed, settings.size, &mut program);
+                    match ask(settings, &room, &program) {
+                        Verdict::Agreed => {}
+                        Verdict::Skipped => {
+                            skipped.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Verdict::Rejected(why) => {
+                            rejected.fetch_add(1, Ordering::Relaxed);
+                            if rejected.load(Ordering::Relaxed) <= 3 {
+                                eprintln!(
+                                    "\nseed {seed}: the generator wrote something the \
+                                     compiler would not take —\n{why}"
+                                );
+                            }
+                        }
+                        Verdict::Differed(interpreter, native) => {
+                            let smaller = if settings.shrink {
+                                shrink(settings, &room, &program)
+                            } else {
+                                program.clone()
+                            };
+                            findings.lock().unwrap().push(Finding {
+                                seed,
+                                program: smaller,
+                                interpreter,
+                                native,
+                            });
+                            if !settings.keep_going {
+                                next.store(end, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    let so_far = done.fetch_add(1, Ordering::Relaxed) + 1;
+                    if so_far % 200 == 0 {
+                        let rate = so_far as f64 / started.elapsed().as_secs_f64();
+                        print!("\r{so_far} cases, {rate:.0}/s");
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+                }
+            });
+        }
+    });
+
+    let elapsed = started.elapsed().as_secs_f64();
+    let ran = done.load(Ordering::Relaxed);
+    let lines = ran as f64 * settings.size as f64;
+    println!(
+        "\r{ran} case(s) in {elapsed:.1}s — {:.0}/s, ~{:.0} statements/s{}",
+        ran as f64 / elapsed.max(1e-9),
+        lines / elapsed.max(1e-9),
+        {
+            let mut notes = String::new();
+            if rejected.load(Ordering::Relaxed) > 0 {
+                notes.push_str(&format!(", {} rejected", rejected.load(Ordering::Relaxed)));
+            }
+            if skipped.load(Ordering::Relaxed) > 0 {
+                notes.push_str(&format!(", {} skipped", skipped.load(Ordering::Relaxed)));
+            }
+            notes
+        }
+    );
+
+    let found = findings.into_inner().unwrap();
+    if found.is_empty() {
+        println!("every engine agreed.");
+        return;
+    }
+    for finding in &found {
+        println!("\n──────── seed {} ────────", finding.seed);
+        println!("{}", finding.program);
+        println!(
+            "test interpreter (status {}):\n{}",
+            finding.interpreter.status, finding.interpreter.said
+        );
+        println!(
+            "native (status {}):\n{}",
+            finding.native.status, finding.native.said
+        );
+    }
+    println!("\n{} disagreement(s).", found.len());
+    std::process::exit(1);
+}
+
+enum Verdict {
+    Agreed,
+    Skipped,
+    Rejected(String),
+    Differed(Answer, Answer),
+}
+
+/// One program, put to every engine.
+fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
+    let source = room.join("case.xag");
+    if std::fs::write(&source, program).is_err() {
+        return Verdict::Rejected("the case could not be written".to_string());
+    }
+
+    let interpreted = run(Command::new(&settings.xagc).arg("run").arg(&source));
+    if interpreted.status != 0 && interpreted.said.contains("Rule(s) broken") {
+        return Verdict::Rejected(interpreted.said);
+    }
+    // A case that outstays its welcome, or that runs past what the test
+    // interpreter will follow, says nothing about whether the engines agree.
+    if interpreted.status == -2 || interpreted.said.contains("longer than this engine") {
+        return Verdict::Skipped;
+    }
+
+    let built = run(Command::new(&settings.xagc).arg("build").arg(&source));
+    if built.status != 0 {
+        return Verdict::Rejected(built.said);
+    }
+    let binary = room.join("case");
+    let native = run(&mut Command::new(&binary));
+    let _ = std::fs::remove_file(&binary);
+    if native.status == -2 {
+        return Verdict::Skipped;
+    }
+
+    if interpreted.said == native.said && interpreted.status == native.status {
+        Verdict::Agreed
+    } else {
+        Verdict::Differed(interpreted, native)
+    }
+}
+
+/// Take lines away for as long as the engines keep disagreeing. A finding that
+/// arrives as forty lines is a finding somebody still has to read.
+fn shrink(settings: &Settings, room: &Path, program: &str) -> String {
+    let mut best: Vec<String> = program.lines().map(|line| line.to_string()).collect();
+    let mut improved = true;
+    let mut rounds = 0;
+    while improved && rounds < 8 {
+        improved = false;
+        rounds += 1;
+        let mut at = best.len();
+        while at > 0 {
+            at -= 1;
+            let mut tried = best.clone();
+            tried.remove(at);
+            let text = tried.join("\n");
+            if matches!(ask(settings, room, &text), Verdict::Differed(_, _)) {
+                best = tried;
+                improved = true;
+            }
+        }
+    }
+    best.join("\n")
+}
+
+/// A program that will not stop is not a disagreement, it is a case to put down.
+/// Status -2 says so, and the caller treats it as neither a finding nor a fault.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn run(command: &mut Command) -> Answer {
+    let mut child = match command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(trouble) => return Answer { said: trouble.to_string(), status: -1 },
+    };
+
+    // Read both pipes on their own threads: a child that fills one and is never
+    // drained would wait forever, and so would this.
+    let mut out = child.stdout.take().unwrap();
+    let mut err = child.stderr.take().unwrap();
+    let reading = std::thread::spawn(move || {
+        let mut said = Vec::new();
+        let _ = out.read_to_end(&mut said);
+        said
+    });
+    let reading_err = std::thread::spawn(move || {
+        let mut said = Vec::new();
+        let _ = err.read_to_end(&mut said);
+        said
+    });
+
+    let began = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code().unwrap_or(-1),
+            Ok(None) => {
+                if began.elapsed() > PATIENCE {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break -2;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(_) => break -1,
+        }
+    };
+
+    let mut said = String::from_utf8_lossy(&reading.join().unwrap_or_default()).into_owned();
+    let stderr = reading_err.join().unwrap_or_default();
+    if !stderr.is_empty() {
+        said.push_str(&String::from_utf8_lossy(&stderr));
+    }
+    Answer { said, status }
+}
+
+fn read_settings() -> Result<Settings, String> {
+    let mut xagc: Option<PathBuf> = None;
+    let mut cases = 200u64;
+    let mut first_seed = 1u64;
+    let mut jobs = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let mut workspace = std::env::temp_dir().join("xag-oracle");
+    let mut keep_going = false;
+    let mut shrink = true;
+    let mut size = 250u32;
+
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        let mut value = || args.next().ok_or_else(|| format!("{arg} wants a value"));
+        match arg.as_str() {
+            "--xagc" => xagc = Some(PathBuf::from(value()?)),
+            "--cases" => cases = value()?.parse().map_err(|_| "--cases wants a number")?,
+            "--seed" => first_seed = value()?.parse().map_err(|_| "--seed wants a number")?,
+            "--jobs" => jobs = value()?.parse().map_err(|_| "--jobs wants a number")?,
+            "--dir" => workspace = PathBuf::from(value()?),
+            "--keep-going" => keep_going = true,
+            "--no-shrink" => shrink = false,
+            "--size" => size = value()?.parse().map_err(|_| "--size wants a number")?,
+            other => return Err(format!("{other} is not something this asks for")),
+        }
+    }
+
+    let xagc = xagc.ok_or("--xagc is wanted: the compiler to ask")?;
+    if !xagc.exists() {
+        return Err(format!("{} is not there", xagc.display()));
+    }
+    std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    Ok(Settings { xagc, cases, first_seed, jobs: jobs.max(1), workspace, keep_going, shrink, size })
+}

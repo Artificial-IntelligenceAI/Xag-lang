@@ -66,7 +66,14 @@ private:
   // Following a loan to the slot it names. A loan of a loan is still one slot.
   Value *behind(Value &value) {
     Value *at = &value;
-    while (at->kind == Value::Kind::Loan) {
+    // A loan chain is short in any program that means anything. Counting the
+    // hops turns a loan that somehow points at itself into something this
+    // engine says out loud, rather than something it does forever.
+    for (unsigned hops = 0; at->kind == Value::Kind::Loan; ++hops) {
+      if (hops > 64) {
+        trouble_ = "a loan led back to itself";
+        return nullptr;
+      }
       if (at->frame >= frames_.size() || at->slot >= frames_[at->frame].locals.size())
         return nullptr;
       at = &frames_[at->frame].locals[at->slot];
@@ -90,9 +97,12 @@ private:
   void put(unsigned slot, Value value) {
     Frame &frame = frames_.back();
     Value *target = &frame.locals[slot];
-    // Writing to a name that holds a loan writes through it, which is what
-    // being lent for writing means.
-    if (target->kind == Value::Kind::Loan)
+    // Writing a *value* to a name that holds a loan writes through it, which is
+    // what being lent for writing means. Writing a *loan* to it replaces the
+    // loan — the second time round a loop, `_2 = ref _1` would otherwise write
+    // the new loan through the old one and into `_1`, leaving `_1` lent to
+    // itself and anything following it going round forever.
+    if (target->kind == Value::Kind::Loan && value.kind != Value::Kind::Loan)
       if (Value *lent = behind(*target))
         target = lent;
     endValue(*target);

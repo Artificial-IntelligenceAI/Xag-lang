@@ -43,6 +43,29 @@ All three engines call one runtime, so none of them can disagree about what
 joining or counting means. `Xag-Config.toml` holds what this project has decided
 once for every file in it.
 
+## The oracle
+
+`generator/` writes Xag programs and asks every engine what they say. Two engines
+detect a disagreement; three localise it, so a third is coming.
+
+```sh
+cd generator && cargo build --release
+./target/release/xag-oracle --xagc ../build/xagc --cases 100
+```
+
+It has no dependencies. The random numbers and the threading are a few lines
+each, and a fuzzer is the last place to want a supply chain. Work is handed out
+by an atomic counter rather than split in advance, because cases differ in cost
+and a thread that finishes early should take the next one.
+
+The thing that decides its speed is not compiling or running. macOS spends about
+170ms scanning every freshly linked binary before it will run it once, which is
+four times what everything else costs put together — and it is paid per *binary*,
+not per statement. So `--size` matters more than `--cases`: bigger programs
+amortise it. Past about 400 statements the reference interpreter, which is slow
+on purpose, stops finishing inside the timeout and cases start being skipped
+rather than tested.
+
 ## Reporting a problem
 
 Wrong diagnostics, confusing ones, and anything Xag accepts that it should not:

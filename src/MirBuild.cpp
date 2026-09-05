@@ -261,7 +261,9 @@ private:
     }
     case ExprKind::Written:
     case ExprKind::Escape: {
-      const unsigned into = temporary(typeRef(spell(type)), copies(type));
+      // Text written into a temporary is text that temporary owns.
+      const unsigned into = owns(type) ? owningTemporary(typeRef(spell(type)))
+                                       : temporary(typeRef(spell(type)), copies(type));
       emit(Statement{StatementKind::Assign, e.span, into,
                      RValue{RValueKind::Use, {}, {}, 0, {operandOf(e)}, typeRef(spell(type))}});
       return into;
