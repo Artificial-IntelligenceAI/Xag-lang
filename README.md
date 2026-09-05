@@ -8,6 +8,8 @@ Early work in progress — nothing here is stable yet.
 
 ## License
 
+Copyright 2026 Tankun Sriket
+
 Licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
