@@ -11,9 +11,33 @@
 
 use crate::rng::Rng;
 
+/// Every whole-number type there is. A size is always written, so the generator
+/// has to choose one — and two different ones never meet in an expression,
+/// because nothing converts on its own.
+const WHOLE: [&str; 10] = [
+    "int8", "int16", "int32", "int64", "int128", "uint8", "uint16", "uint32", "uint64",
+    "uint128",
+];
+
+fn signed(which: u8) -> bool {
+    which < 5
+}
+
+/// A literal that fits, whatever was written. `int8` holds 127 and no more, and
+/// nothing unsigned holds anything below zero.
+fn literal_range(which: u8) -> (i64, i64) {
+    let low = if signed(which) {
+        if which == 0 { -100 } else { -1000 }
+    } else {
+        0
+    };
+    let high = if which == 0 || which == 5 { 100 } else { 1000 };
+    (low, high)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Ty {
-    I64,
+    Whole(u8),
     Bool,
     Str,
 }
@@ -21,12 +45,16 @@ pub enum Ty {
 impl Ty {
     fn written(self) -> &'static str {
         match self {
-            Ty::I64 => "i64",
+            Ty::Whole(which) => WHOLE[which as usize],
             Ty::Bool => "bool",
             Ty::Str => "str",
         }
     }
 }
+
+/// What `count` answers with, which is the one whole type the generator does
+/// not get to choose.
+const COUNTED: Ty = Ty::Whole(3);
 
 #[derive(Clone)]
 struct Var {
@@ -113,6 +141,33 @@ impl<'a> Writer<'a> {
         seen
     }
 
+    fn pick_whole(&mut self) -> Ty {
+        Ty::Whole(self.rng.below(WHOLE.len() as u32) as u8)
+    }
+
+    /// A whole type some visible name already has, so an expression can be
+    /// built out of more than literals.
+    fn whole_in_scope(&mut self) -> Option<Ty> {
+        let mut seen: Vec<Ty> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if matches!(var.ty, Ty::Whole(_)) && !var.moved {
+                    seen.push(var.ty);
+                }
+            }
+        }
+        for var in &self.consts {
+            if matches!(var.ty, Ty::Whole(_)) {
+                seen.push(var.ty);
+            }
+        }
+        if seen.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        Some(seen[at])
+    }
+
     fn pick_name(&mut self, ty: Ty) -> Option<String> {
         // Names are copied out before the generator is asked to choose, so that
         // reading the scope and drawing a number are not asking at once.
@@ -137,13 +192,13 @@ impl<'a> Writer<'a> {
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
-            answers: Ty::I64, // never called for its answer
+            answers: COUNTED, // never called for its answer
         });
 
         let constants = self.rng.below(3);
         for _ in 0..constants {
             let name = self.fresh();
-            let ty = if self.rng.chance(70) { Ty::I64 } else { Ty::Str };
+            let ty = if self.rng.chance(70) { self.pick_whole() } else { Ty::Str };
             self.out.push_str("const.");
             self.out.push_str(ty.written());
             self.out.push_str(" '");
@@ -176,7 +231,12 @@ impl<'a> Writer<'a> {
         let name = format!("f{}", self.funs.len());
         let count = self.rng.below(3);
         let mut params = Vec::new();
-        self.out.push_str("fn.i64 ");
+        // One whole type throughout: what it takes, what it works in, and what
+        // it answers with, since none of them convert into each other.
+        let ty = self.pick_whole();
+        self.out.push_str("fn.");
+        self.out.push_str(ty.written());
+        self.out.push(' ');
         self.out.push_str(&name);
         self.out.push_str(" [");
         self.scopes.push(Vec::new());
@@ -185,11 +245,12 @@ impl<'a> Writer<'a> {
                 self.out.push_str(", ");
             }
             let param = self.fresh();
-            self.out.push_str("i64 '");
+            self.out.push_str(ty.written());
+            self.out.push_str(" '");
             self.out.push_str(&param);
             self.out.push('\'');
-            params.push(Ty::I64);
-            self.declare(Var { name: param, ty: Ty::I64, mutable: false, moved: false });
+            params.push(ty);
+            self.declare(Var { name: param, ty, mutable: false, moved: false });
         }
         self.out.push_str("] {\n");
         self.indent = 1;
@@ -197,11 +258,11 @@ impl<'a> Writer<'a> {
         self.body(statements);
         self.pad();
         self.out.push_str("give [");
-        self.expr(Ty::I64, 2);
+        self.expr(ty, 2);
         self.out.push_str("];\n}\n\n");
         self.scopes.pop();
         self.indent = 0;
-        self.funs.push(Fun { name, params, answers: Ty::I64 });
+        self.funs.push(Fun { name, params, answers: ty });
     }
 
     fn body(&mut self, statements: u32) {
@@ -262,7 +323,7 @@ impl<'a> Writer<'a> {
 
     fn declaration(&mut self) {
         let ty = match self.rng.below(10) {
-            0..=5 => Ty::I64,
+            0..=5 => self.pick_whole(),
             6..=7 => Ty::Bool,
             _ => Ty::Str,
         };
@@ -283,21 +344,26 @@ impl<'a> Writer<'a> {
     }
 
     fn assignment(&mut self) {
-        let choices: Vec<String> = self
-            .visible(Ty::I64, true)
-            .iter()
-            .map(|v| v.name.clone())
-            .collect();
+        // Whatever is set, it is set to something of its own type.
+        let mut choices: Vec<(String, Ty)> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if matches!(var.ty, Ty::Whole(_)) && var.mutable && !var.moved {
+                    choices.push((var.name.clone(), var.ty));
+                }
+            }
+        }
         if choices.is_empty() {
             self.print();
             return;
         }
         let at = self.rng.below(choices.len() as u32) as usize;
+        let (name, ty) = choices[at].clone();
         self.pad();
         self.out.push_str("set '");
-        self.out.push_str(&choices[at]);
+        self.out.push_str(&name);
         self.out.push_str("' = [");
-        self.expr(Ty::I64, 2);
+        self.expr(ty, 2);
         self.out.push_str("];\n");
     }
 
@@ -313,8 +379,9 @@ impl<'a> Writer<'a> {
             1 => {
                 // A print says nothing about what it is given, so what it is
                 // given has to say for itself.
+                let ty = self.whole_in_scope().unwrap_or(COUNTED);
                 self.out.push('(');
-                self.i64_typed(2);
+                self.whole_typed(ty, 2);
                 self.out.push_str(") ");
             }
             _ => {
@@ -323,8 +390,9 @@ impl<'a> Writer<'a> {
                     self.out.push_str(&name);
                     self.out.push_str("' ");
                 } else {
+                    let ty = self.whole_in_scope().unwrap_or(COUNTED);
                     self.out.push('(');
-                    self.i64_typed(2);
+                    self.whole_typed(ty, 2);
                     self.out.push_str(") ");
                 }
             }
@@ -361,10 +429,13 @@ impl<'a> Writer<'a> {
 
     fn counted_loop(&mut self) {
         let counter = self.fresh();
+        let ty = self.pick_whole();
         let first = self.rng.between(1, 3);
         let last = first + self.rng.between(0, 3);
         self.pad();
-        self.out.push_str("loop.range.i64 '");
+        self.out.push_str("loop.range.");
+        self.out.push_str(ty.written());
+        self.out.push_str(" '");
         self.out.push_str(&counter);
         self.out.push_str("' = [*");
         push_number(self.out, first);
@@ -374,7 +445,7 @@ impl<'a> Writer<'a> {
         self.indent += 1;
         self.scopes.push(vec![Var {
             name: counter,
-            ty: Ty::I64,
+            ty,
             mutable: false,
             moved: false,
         }]);
@@ -401,8 +472,9 @@ impl<'a> Writer<'a> {
         // A comparison takes no type from anywhere, so its left side has to
         // say what it is. And both sides are bracketed, because `mod` beside a
         // comparison has no agreed order and Xag refuses to invent one.
+        let ty = self.whole_in_scope().unwrap_or(COUNTED);
         self.out.push('(');
-        self.i64_typed(1);
+        self.whole_typed(ty, 1);
         self.out.push(')');
         self.out.push(' ');
         let compares = match self.rng.below(6) {
@@ -415,16 +487,16 @@ impl<'a> Writer<'a> {
         };
         self.out.push_str(compares);
         self.out.push_str(" (");
-        self.expr(Ty::I64, 1);
+        self.expr(ty, 1);
         self.out.push(')');
     }
 
     /// Something that says what it is without being told: a name, a call, a
     /// count, or a literal with arithmetic done to it.
-    fn i64_typed(&mut self, depth: u32) {
-        let number = self.pick_name(Ty::I64);
-        let text = self.pick_name(Ty::Str);
-        let callable = self.funs.iter().any(|f| f.name != "consume");
+    fn whole_typed(&mut self, ty: Ty, depth: u32) {
+        let number = self.pick_name(ty);
+        let text = if ty == COUNTED { self.pick_name(Ty::Str) } else { None };
+        let callable = self.funs.iter().any(|f| f.answers == ty && f.name != "consume");
         match self.rng.below(4) {
             0 if number.is_some() => {
                 let name = number.unwrap();
@@ -438,10 +510,13 @@ impl<'a> Writer<'a> {
                 self.out.push_str(&name);
                 self.out.push_str("']");
             }
-            2 if callable => self.call(depth),
+            2 if callable => self.call(ty, depth),
             _ => {
-                self.literal(Ty::I64);
-                self.out.push_str(" + *0*");
+                // A written value says its own type the way it always could:
+                // `str:*hello*` and `int32:*161*` are one notation, not two.
+                self.out.push_str(ty.written());
+                self.out.push(':');
+                self.literal(ty);
             }
         }
     }
@@ -477,27 +552,27 @@ impl<'a> Writer<'a> {
                     self.literal(Ty::Str);
                 }
             }
-            Ty::I64 => self.number(depth),
+            Ty::Whole(_) => self.number(ty, depth),
         }
     }
 
-    fn number(&mut self, depth: u32) {
+    fn number(&mut self, ty: Ty, depth: u32) {
         if depth == 0 {
-            match self.pick_name(Ty::I64) {
+            match self.pick_name(ty) {
                 Some(name) => {
                     self.out.push('\'');
                     self.out.push_str(&name);
                     self.out.push('\'');
                 }
-                None => self.literal(Ty::I64),
+                None => self.literal(ty),
             }
             return;
         }
         match self.rng.below(10) {
-            0..=2 => self.expr(Ty::I64, 0),
-            3 => self.literal(Ty::I64),
+            0..=2 => self.expr(ty, 0),
+            3 => self.literal(ty),
             4..=6 => {
-                self.expr(Ty::I64, depth - 1);
+                self.expr(ty, depth - 1);
                 self.out.push(' ');
                 let operator = match self.rng.below(4) {
                     0 => "+",
@@ -512,6 +587,7 @@ impl<'a> Writer<'a> {
                 self.out.push('*');
                 push_number(self.out, exponent);
                 self.out.push('*');
+                let _ = ty;
             }
             7 => {
                 // A divisor is written, and never zero: dividing by zero stops
@@ -520,7 +596,7 @@ impl<'a> Writer<'a> {
                 // Both sides, not just the whole: `('a' + *4* mod *2*)` still
                 // has a `+` and a `mod` side by side inside the brackets.
                 self.out.push_str("((");
-                self.expr(Ty::I64, depth - 1);
+                self.expr(ty, depth - 1);
                 self.out.push_str(") ");
                 let operator = if self.rng.chance(50) { "/" } else { "mod" };
                 self.out.push_str(operator);
@@ -530,44 +606,50 @@ impl<'a> Writer<'a> {
                 self.out.push_str("*)");
             }
             8 => {
-                if let Some(name) = self.pick_name(Ty::Str) {
-                    self.out.push_str("count[ref '");
-                    self.out.push_str(&name);
-                    self.out.push_str("']");
-                } else {
-                    self.literal(Ty::I64);
+                // `count` answers with one type and no other, so it only fits
+                // where that type was asked for.
+                let text = if ty == COUNTED { self.pick_name(Ty::Str) } else { None };
+                match text {
+                    Some(name) => {
+                        self.out.push_str("count[ref '");
+                        self.out.push_str(&name);
+                        self.out.push_str("']");
+                    }
+                    None => self.literal(ty),
                 }
             }
-            _ => self.call(depth),
+            _ => self.call(ty, depth),
         }
     }
 
-    fn call(&mut self, depth: u32) {
+    fn call(&mut self, ty: Ty, depth: u32) {
         let callable: Vec<usize> = (0..self.funs.len())
-            .filter(|&i| self.funs[i].answers == Ty::I64 && self.funs[i].name != "consume")
+            .filter(|&i| self.funs[i].answers == ty && self.funs[i].name != "consume")
             .collect();
         if callable.is_empty() {
-            self.literal(Ty::I64);
+            self.literal(ty);
             return;
         }
         let at = callable[self.rng.below(callable.len() as u32) as usize];
         let name = self.funs[at].name.clone();
-        let arity = self.funs[at].params.len();
+        let params = self.funs[at].params.clone();
+        let arity = params.len();
         self.out.push_str(&name);
         self.out.push('[');
         for i in 0..arity {
             if i > 0 {
                 self.out.push_str(", ");
             }
-            self.expr(Ty::I64, depth.saturating_sub(1));
+            self.expr(params[i], depth.saturating_sub(1));
         }
         self.out.push(']');
     }
 
     fn literal(&mut self, ty: Ty) {
         match ty {
-            Ty::I64 => {
-                let value = self.rng.between(-20, 100);
+            Ty::Whole(which) => {
+                let (low, high) = literal_range(which);
+                let value = self.rng.between(low, high);
                 self.out.push('*');
                 push_number(self.out, value);
                 self.out.push('*');

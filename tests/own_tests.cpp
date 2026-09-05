@@ -55,7 +55,7 @@ Owned run(const std::string &text) {
 }
 
 const char *kKeep = "fn.nothing keep [str 'text'] { print.stdout['text' \n]; }\n";
-const char *kLook = "fn.i64 look [ref.str 'text'] { give [count['text']]; }\n";
+const char *kLook = "fn.int64 look [ref.str 'text'] { give [count['text']]; }\n";
 const char *kEdit = "fn.nothing edit [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n";
 
 Owned withHelpers(const std::string &body) {
@@ -102,16 +102,16 @@ void aTransferIsSpelled() {
   // And the word has to be the one the parameter asked for.
   CHECK(withHelpers("var.str 's' = [*hi*];\n    keep[ref 's'];").code(0) == "E0406");
   CHECK(withHelpers("var.str 's' = [*hi*];\n    look[move 's'];").code(0) == "E0406");
-  CHECK(withHelpers("var.str 's' = [*hi*];\n    var.i64 'n' = [look[ref 's']];").ok());
+  CHECK(withHelpers("var.str 's' = [*hi*];\n    var.int64 'n' = [look[ref 's']];").ok());
 }
 
 void smallValuesAreNotMoved() {
-  // An `i64` is handed over by being copied, so nothing is spelled.
-  CHECK(run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\n"
-            "START { var.i64 'a' = [*2*]; var.i64 'b' = [twice['a']];"
+  // An `int64` is handed over by being copied, so nothing is spelled.
+  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { var.int64 'a' = [*2*]; var.int64 'b' = [twice['a']];"
             " print.stdout['a' \n]; }\n").ok());
-  CHECK(run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\n"
-            "START { var.i64 'a' = [*2*]; var.i64 'b' = [twice[move 'a']]; }\n")
+  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { var.int64 'a' = [*2*]; var.int64 'b' = [twice[move 'a']]; }\n")
             .code(0) == "E0405");
 }
 
@@ -121,7 +121,7 @@ void aBorrowIsNotYoursToGiveAway() {
             .code(0) == "E0404");
   // Passing a loan along is not a transfer, so nothing is spelled again.
   CHECK(run(std::string(kLook) +
-            "fn.i64 pass [ref.str 'text'] { give [look['text']]; }\nSTART { }\n").ok());
+            "fn.int64 pass [ref.str 'text'] { give [look['text']]; }\nSTART { }\n").ok());
 }
 
 void aLoanIsLentBeforeItIsWritten() {
@@ -171,13 +171,13 @@ void anArmThatMovesMovesForEveryArm() {
 
 void aLoopWouldMoveItTwice() {
   const Owned p = withHelpers("var.str 's' = [*hi*];\n"
-                              "    loop.range.i64 'i' = [*1*, *3*] {\n"
+                              "    loop.range.int64 'i' = [*1*, *3*] {\n"
                               "        keep[move 's'];\n    }");
   CHECK(p.code(0) == "E0403");
 }
 
 void giveIsAlreadyTheWord() {
-  CHECK(run("fn.i64 total [] { var.i64 'n' = [*1*]; give ['n']; }\nSTART { }\n").ok());
+  CHECK(run("fn.int64 total [] { var.int64 'n' = [*1*]; give ['n']; }\nSTART { }\n").ok());
   CHECK(run("fn.str greet [] { var.str 's' = [*hi*]; give ['s']; }\nSTART { }\n").ok());
   // Spelling `move` there would be a second way to write one thing.
   CHECK(run("fn.str greet [] { var.str 's' = [*hi*]; give [move 's']; }\nSTART { }\n")

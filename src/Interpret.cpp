@@ -1,5 +1,7 @@
 #include "xag/Interpret.h"
 
+#include "xag/Check.h"
+
 #include "xag_runtime.h"
 
 #include <cstdlib>
@@ -17,7 +19,7 @@ namespace {
 // run time rather than assumed.
 struct Value {
   enum class Kind { Nothing, Number, Text, Loan } kind = Kind::Nothing;
-  int64_t number = 0;
+  XagInt number = 0;
   XagStr text{nullptr, 0, 0};
   bool owns = false;
   unsigned frame = 0; // Loan: which frame the lent slot lives in
@@ -116,7 +118,10 @@ private:
     if (!at)
       return "";
     switch (at->kind) {
-    case Value::Kind::Number: return std::to_string(at->number);
+    case Value::Kind::Number: {
+      // Only for comparing text, where the number never reaches.
+      return std::to_string(static_cast<long long>(at->number));
+    }
     case Value::Kind::Text:   return std::string(at->text.bytes ? at->text.bytes : "",
                                                  at->text.length);
     default:                  return "";
@@ -130,9 +135,10 @@ private:
     case OperandKind::Written: {
       const std::string &type = typeOf(operand.type);
       Value value;
-      if (type == "i64") {
+      const Type named = typeNamed(type);
+      if (isWhole(named)) {
         value.kind = Value::Kind::Number;
-        value.number = std::strtoll(operand.written.c_str(), nullptr, 10);
+        value.number = readWhole(operand.written, named);
       } else if (type == "bool") {
         value.kind = Value::Kind::Number;
         value.number = operand.written == "true" ? 1 : 0;
@@ -153,6 +159,17 @@ private:
     }
     }
     return Value{};
+  }
+
+  // A written whole number, cut to what its type holds.
+  static XagInt readWhole(const std::string &text, Type type) {
+    const bool negative = !text.empty() && text[0] == '-';
+    __uint128_t magnitude = 0;
+    for (unsigned i = negative ? 1 : 0; i < text.size(); ++i)
+      magnitude = magnitude * 10 + static_cast<unsigned>(text[i] - '0');
+    const XagInt value =
+        negative ? -static_cast<XagInt>(magnitude) : static_cast<XagInt>(magnitude);
+    return xag_int_fit(value, widthOf(type), isSigned(type) ? 1 : 0);
   }
 
   // Escapes stand outside a written value, so the only ones that reach here are
@@ -257,21 +274,34 @@ private:
       else if (op == ">==") answer.number = seen >= 0;
       else trouble_ = "`" + op + "` was asked of text";
     } else if (a && b) {
-      const int64_t x = a->number, y = b->number;
-      if (op == "+") answer.number = xag_i64_add(x, y);
-      else if (op == "-") answer.number = xag_i64_sub(x, y);
-      else if (op == "x") answer.number = xag_i64_mul(x, y);
-      else if (op == "/") answer.number = xag_i64_div(x, y);
-      else if (op == "mod") answer.number = xag_i64_mod(x, y);
-      else if (op == "^") answer.number = xag_i64_pow(x, y);
+      const XagInt x = a->number, y = b->number;
+      // A comparison answers a `bool`, so what it was *given* decides how the
+      // two sides are read; everything else answers with its own type.
+      const Type given = typeNamed(typeOf(value.operands[0].type));
+      const Type made = typeNamed(typeOf(value.type));
+      const Type arithmetic = isWhole(made) ? made : given;
+      const unsigned width = widthOf(arithmetic);
+      const int sign = isSigned(arithmetic) ? 1 : 0;
+      const bool unsignedCompare = isWhole(given) && !isSigned(given);
+      const __uint128_t ux = static_cast<__uint128_t>(x), uy = static_cast<__uint128_t>(y);
+
+      if (op == "+")
+        answer.number = xag_int_fit(static_cast<XagInt>(ux + uy), width, sign);
+      else if (op == "-")
+        answer.number = xag_int_fit(static_cast<XagInt>(ux - uy), width, sign);
+      else if (op == "x")
+        answer.number = xag_int_fit(static_cast<XagInt>(ux * uy), width, sign);
+      else if (op == "/") answer.number = xag_int_div(x, y, width, sign);
+      else if (op == "mod") answer.number = xag_int_mod(x, y, width, sign);
+      else if (op == "^") answer.number = xag_int_pow(x, y, width, sign);
       else if (op == "and") answer.number = (x != 0) && (y != 0);
       else if (op == "or") answer.number = (x != 0) || (y != 0);
       else if (op == "==") answer.number = x == y;
       else if (op == "!==") answer.number = x != y;
-      else if (op == "<") answer.number = x < y;
-      else if (op == ">") answer.number = x > y;
-      else if (op == "<==") answer.number = x <= y;
-      else if (op == ">==") answer.number = x >= y;
+      else if (op == "<") answer.number = unsignedCompare ? ux < uy : x < y;
+      else if (op == ">") answer.number = unsignedCompare ? ux > uy : x > y;
+      else if (op == "<==") answer.number = unsignedCompare ? ux <= uy : x <= y;
+      else if (op == ">==") answer.number = unsignedCompare ? ux >= uy : x >= y;
       else trouble_ = "`" + op + "` is not an operator this engine knows";
     }
 
@@ -287,8 +317,13 @@ private:
         Value *at = behind(piece);
         if (at && at->kind == Value::Kind::Text)
           xag_print(&at->text);
-        else if (at && at->kind == Value::Kind::Number)
-          xag_print_i64(at->number);
+        else if (at && at->kind == Value::Kind::Number) {
+          const Type named = typeNamed(typeOf(operand.type));
+          if (isWhole(named))
+            xag_print_int(at->number, widthOf(named), isSigned(named) ? 1 : 0);
+          else
+            xag_print_bool(at->number != 0);
+        }
         endValue(piece);
       }
       return Value{};

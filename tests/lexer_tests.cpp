@@ -62,12 +62,12 @@ void escapesStandOutside() {
 }
 
 void chainsAreWordsAndDots() {
-  const xag::LexResult r = lexText("var.mut.i64 ['total'] = [*0*];");
+  const xag::LexResult r = lexText("var.mut.int64 ['total'] = [*0*];");
   CHECK(r.ok());
   CHECK(r.tokens[0].kind == xag::TokenKind::Word && r.tokens[0].text == "var");
   CHECK(r.tokens[1].kind == xag::TokenKind::Dot);
   CHECK(r.tokens[2].text == "mut");
-  CHECK(r.tokens[4].text == "i64");
+  CHECK(r.tokens[4].text == "int64");
   CHECK(r.tokens.back().kind == xag::TokenKind::End);
 }
 

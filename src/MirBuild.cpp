@@ -7,18 +7,11 @@
 namespace xag {
 namespace {
 
-const char *spell(Type type) {
-  switch (type) {
-  case Type::I64:     return "i64";
-  case Type::Str:     return "str";
-  case Type::Bool:    return "bool";
-  case Type::Nothing: return "nothing";
-  case Type::Unknown: return "?";
-  }
-  return "?";
-}
+const char *spell(Type type) { return type == Type::Unknown ? "?" : name(type); }
 
-bool copies(Type type) { return type == Type::I64 || type == Type::Bool; }
+// A number is handed over by being copied, however wide it is: there is nothing
+// in one to give back.
+bool copies(Type type) { return isNumber(type) || type == Type::Bool; }
 
 // Only text holds anything that has to be given back. `nothing` is not a value
 // that copies, but it is not one that owns either.
@@ -146,7 +139,8 @@ private:
   }
 
   static bool copiesNamed(const std::string &type) {
-    return type == "i64" || type == "bool";
+    return type == "bool" || (type != "str" && type != "nothing" &&
+                              typeNamed(type) != Type::Unknown);
   }
 
   // A parameter's type is written on its chain, loan and all: `ref str`.
@@ -454,7 +448,10 @@ private:
       emit(Statement{StatementKind::Assign, s.span, counter,
                      RValue{RValueKind::Binary, "+", {}, 0,
                             {Operand{OperandKind::Copy, counter, {}, body_.locals[counter].type},
-                             Operand{OperandKind::Written, 0, "1", typeRef("i64")}},
+                             // The step is a number of the counter's own type,
+                             // whatever size the counter was written with.
+                             Operand{OperandKind::Written, 0, "1",
+                                     body_.locals[counter].type}},
                             body_.locals[counter].type}});
       finish(Terminator{TerminatorKind::Goto, s.span, {}, {}, {header}, false, {}});
       current_ = after;

@@ -79,16 +79,24 @@ private:
 
   // ---- types
 
-  llvm::Type *typeFor(const std::string &name) {
-    if (name == "i64")
-      return builder_.getInt64Ty();
-    if (name == "bool")
+  llvm::Type *typeFor(const std::string &spelled) {
+    if (spelled == "bool")
       return builder_.getInt1Ty();
-    if (name == "str")
+    if (spelled == "str")
       return str_;
-    if (isLoan(name))
+    if (isLoan(spelled))
       return builder_.getPtrTy();
+    const Type named = typeNamed(spelled);
+    if (isWhole(named))
+      return builder_.getIntNTy(widthOf(named));
     return builder_.getInt8Ty(); // `nothing`, and anything unknown
+  }
+
+  // A whole number widened to the carrier every runtime call speaks in.
+  llvm::Value *widened(llvm::Value *value, Type named) {
+    auto *carrier = builder_.getInt128Ty();
+    return isSigned(named) ? builder_.CreateSExt(value, carrier)
+                           : builder_.CreateZExt(value, carrier);
   }
 
   const std::string &nameOf(TypeRef type) const {
@@ -113,11 +121,12 @@ private:
     add("xag_str_compare", i64, {ptr, ptr});
     add("xag_str_drop", voidTy, {ptr});
     add("xag_print", voidTy, {ptr});
-    add("xag_print_i64", voidTy, {i64});
     add("xag_print_bool", voidTy, {i32});
-    for (const char *op : {"xag_i64_add", "xag_i64_sub", "xag_i64_mul", "xag_i64_div",
-                           "xag_i64_mod", "xag_i64_pow"})
-      add(op, i64, {i64, i64});
+    auto *i128 = builder_.getInt128Ty();
+    add("xag_print_int", voidTy, {i128, i32, i32});
+    for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
+      add(op, i128, {i128, i128, i32, i32});
+    (void)i64;
   }
 
   // ---- declaring
@@ -197,12 +206,18 @@ private:
   llvm::Value *read(const Operand &operand) {
     const std::string &type = nameOf(operand.type);
     switch (operand.kind) {
-    case OperandKind::Written:
-      if (type == "i64")
-        return builder_.getInt64(std::strtoll(operand.written.c_str(), nullptr, 10));
+    case OperandKind::Written: {
       if (type == "bool")
         return builder_.getInt1(operand.written == "true");
+      const Type named = typeNamed(type);
+      if (isWhole(named)) {
+        // Read at the width it was written with. The checker has already said
+        // it fits, which is what makes reading it here safe at any width.
+        const llvm::APInt bits(widthOf(named), operand.written, 10);
+        return llvm::ConstantInt::get(builder_.getIntNTy(widthOf(named)), bits);
+      }
       return textOf(unescape(operand.written));
+    }
     case OperandKind::Copy:
       return builder_.CreateLoad(typeFor(localType(operand.local)), slots_[operand.local]);
     case OperandKind::Move: {
@@ -330,32 +345,60 @@ private:
     auto *left = read(value.operands[0]);
     auto *right = read(value.operands[1]);
 
-    // Arithmetic goes through the runtime, so that what wrapping and division
-    // mean is written once and every engine reads the same answer.
-    const std::unordered_map<std::string, const char *> arithmetic{
-        {"+", "xag_i64_add"}, {"-", "xag_i64_sub"}, {"x", "xag_i64_mul"},
-        {"/", "xag_i64_div"}, {"mod", "xag_i64_mod"}, {"^", "xag_i64_pow"}};
-    auto found = arithmetic.find(op);
-    if (found != arithmetic.end())
-      return builder_.CreateCall(runtime_[found->second], {left, right});
-
     if (op == "and") return builder_.CreateAnd(left, right);
     if (op == "or") return builder_.CreateOr(left, right);
+
+    const Type given = typeNamed(leftType);
+    const Type made = typeNamed(nameOf(value.type));
+    const Type working = isWhole(made) ? made : given;
+    const bool unsignedly = isWhole(given) && !isSigned(given);
+
     if (op == "==") return builder_.CreateICmpEQ(left, right);
     if (op == "!==") return builder_.CreateICmpNE(left, right);
-    if (op == "<") return builder_.CreateICmpSLT(left, right);
-    if (op == ">") return builder_.CreateICmpSGT(left, right);
-    if (op == "<==") return builder_.CreateICmpSLE(left, right);
-    if (op == ">==") return builder_.CreateICmpSGE(left, right);
-    return nullptr;
+    if (op == "<")
+      return unsignedly ? builder_.CreateICmpULT(left, right)
+                        : builder_.CreateICmpSLT(left, right);
+    if (op == ">")
+      return unsignedly ? builder_.CreateICmpUGT(left, right)
+                        : builder_.CreateICmpSGT(left, right);
+    if (op == "<==")
+      return unsignedly ? builder_.CreateICmpULE(left, right)
+                        : builder_.CreateICmpSLE(left, right);
+    if (op == ">==")
+      return unsignedly ? builder_.CreateICmpUGE(left, right)
+                        : builder_.CreateICmpSGE(left, right);
+
+    // Under `overflow = "wrap"` a machine's own add is exactly the answer, so
+    // there is nothing to be gained by calling out for it and a great deal to
+    // be lost: a call is something the optimiser cannot see through.
+    if (op == "+") return builder_.CreateAdd(left, right);
+    if (op == "-") return builder_.CreateSub(left, right);
+    if (op == "x") return builder_.CreateMul(left, right);
+
+    // What is left is what a choice was made about, and a choice is written in
+    // one place: dividing by zero stops, and a negative power has no answer.
+    const char *called = op == "/" ? "xag_int_div" : op == "mod" ? "xag_int_mod"
+                                                                 : "xag_int_pow";
+    if (op != "/" && op != "mod" && op != "^")
+      return nullptr;
+    auto *answered = builder_.CreateCall(
+        runtime_[called],
+        {widened(left, working), widened(right, working),
+         builder_.getInt32(widthOf(working)),
+         builder_.getInt32(isSigned(working) ? 1 : 0)});
+    return builder_.CreateTrunc(answered, typeFor(nameOf(value.type)));
   }
 
   llvm::Value *call(const RValue &value) {
     if (value.callee == "print.stdout") {
       for (const Operand &operand : value.operands) {
         const std::string &type = nameOf(operand.type);
-        if (type == "i64")
-          builder_.CreateCall(runtime_["xag_print_i64"], {read(operand)});
+        const Type named = typeNamed(type);
+        if (isWhole(named))
+          builder_.CreateCall(runtime_["xag_print_int"],
+                              {widened(read(operand), named),
+                               builder_.getInt32(widthOf(named)),
+                               builder_.getInt32(isSigned(named) ? 1 : 0)});
         else if (type == "bool")
           builder_.CreateCall(runtime_["xag_print_bool"],
                               {builder_.CreateZExt(read(operand), builder_.getInt32Ty())});

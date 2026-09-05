@@ -1,5 +1,7 @@
 #include "xag/Own.h"
 
+#include "xag/Check.h"
+
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -10,9 +12,17 @@ namespace {
 // How a name holds what it names.
 enum class Mode { Owned, Ref, RefMut };
 
-// `i64` and `bool` are small enough that handing one over costs nothing and
-// leaves the original where it was, so they are never moved. `str` is.
-bool copyType(std::string_view type) { return type == "i64" || type == "bool"; }
+// A number is small enough that handing one over costs nothing and leaves the
+// original where it was, so numbers are never moved. `str` is.
+//
+// This asks the one place that knows what a type is, rather than comparing the
+// spelling here as well — which is how `int64` arriving quietly broke it.
+bool copyType(std::string_view type) {
+  if (type == "bool")
+    return true;
+  const Type named = typeNamed(type);
+  return isNumber(named);
+}
 
 Mode modeOfChain(const Chain &chain) {
   for (const ChainSegment &seg : chain.segments) {

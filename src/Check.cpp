@@ -6,26 +6,67 @@
 
 namespace xag {
 
+namespace {
+
+struct Named {
+  const char *word;
+  Type type;
+  unsigned width;
+};
+
+// Every type there is, with the size it carries. Written once so that naming a
+// type, spelling one, and asking how wide one is cannot drift apart.
+constexpr Named kTypes[] = {
+    {"nothing", Type::Nothing, 0}, {"bool", Type::Bool, 0}, {"str", Type::Str, 0},
+    {"int8", Type::Int8, 8},       {"int16", Type::Int16, 16},
+    {"int32", Type::Int32, 32},    {"int64", Type::Int64, 64},
+    {"int128", Type::Int128, 128}, {"uint8", Type::Uint8, 8},
+    {"uint16", Type::Uint16, 16},  {"uint32", Type::Uint32, 32},
+    {"uint64", Type::Uint64, 64},  {"uint128", Type::Uint128, 128},
+    {"bin16", Type::Bin16, 16},    {"bin32", Type::Bin32, 32},
+    {"bin64", Type::Bin64, 64},    {"bin128", Type::Bin128, 128},
+    {"deci32", Type::Deci32, 32},  {"deci64", Type::Deci64, 64},
+    {"deci128", Type::Deci128, 128},
+};
+
+} // namespace
+
 const char *name(Type type) {
-  switch (type) {
-  case Type::I64:     return "i64";
-  case Type::Str:     return "str";
-  case Type::Bool:    return "bool";
-  case Type::Nothing: return "nothing";
-  case Type::Unknown: return "unknown";
-  }
+  for (const Named &known : kTypes)
+    if (known.type == type)
+      return known.word;
   return "unknown";
 }
 
-namespace {
-
 Type typeNamed(std::string_view word) {
-  if (word == "i64") return Type::I64;
-  if (word == "str") return Type::Str;
-  if (word == "bool") return Type::Bool;
-  if (word == "nothing") return Type::Nothing;
+  for (const Named &known : kTypes)
+    if (known.word == word)
+      return known.type;
   return Type::Unknown;
 }
+
+unsigned widthOf(Type type) {
+  for (const Named &known : kTypes)
+    if (known.type == type)
+      return known.width;
+  return 0;
+}
+
+bool isSigned(Type type) {
+  return type >= Type::Int8 && type <= Type::Int128;
+}
+bool isWhole(Type type) {
+  return type >= Type::Int8 && type <= Type::Uint128;
+}
+bool isBinary(Type type) {
+  return type >= Type::Bin16 && type <= Type::Bin128;
+}
+bool isDecimal(Type type) {
+  return type >= Type::Deci32 && type <= Type::Deci128;
+}
+bool isNumber(Type type) { return isWhole(type) || isBinary(type) || isDecimal(type); }
+
+namespace {
 
 bool looksLikeWholeNumber(std::string_view text) {
   if (text.empty())
@@ -37,6 +78,30 @@ bool looksLikeWholeNumber(std::string_view text) {
     if (text[i] < '0' || text[i] > '9')
       return false;
   return true;
+}
+
+// Whether a written whole number is one the type can hold. A size that is
+// always written is a size that can always be checked against.
+bool fitsWithin(std::string_view text, Type type) {
+  const unsigned width = widthOf(type);
+  const bool negative = !text.empty() && text[0] == '-';
+  if (negative && !isSigned(type))
+    return false;
+
+  __uint128_t magnitude = 0;
+  const __uint128_t ceiling = isSigned(type)
+                                  ? (static_cast<__uint128_t>(1) << (width - 1))
+                                  : ~static_cast<__uint128_t>(0);
+  for (unsigned i = negative ? 1 : 0; i < text.size(); ++i) {
+    magnitude = magnitude * 10 + static_cast<unsigned>(text[i] - '0');
+    if (width < 128 && magnitude > (static_cast<__uint128_t>(1) << width))
+      return false;
+  }
+  if (isSigned(type))
+    return negative ? magnitude <= ceiling : magnitude < ceiling;
+  if (width == 128)
+    return true;
+  return magnitude < (static_cast<__uint128_t>(1) << width);
 }
 
 struct Symbol {
@@ -144,7 +209,7 @@ private:
 
   void collect() {
     functions_["print.stdout"] = Signature{{}, Type::Nothing, true, Span{}};
-    functions_["count"] = Signature{{Type::Str}, Type::I64, false, Span{}};
+    functions_["count"] = Signature{{Type::Str}, Type::Int64, false, Span{}};
 
     for (const Item &item : program_.items) {
       if (item.kind == ItemKind::Const) {
@@ -189,14 +254,22 @@ private:
         complain(e.span, "E0507", "nothing here says what this written value is.",
                  {"a written value takes its type from the chain, from the parameter "
                   "it is passed to, or from itself"},
-                 {"`*1000*` is a number under `i64` and four characters under `str`, "
+                 {"`*1000*` is a number under `int64` and four characters under `str`, "
                   "so a list with no chain and no declared parameters — a print — "
                   "leaves the value to say it."});
         return Type::Unknown;
       }
-      if (expected == Type::I64 && !looksLikeWholeNumber(e.text))
-        complain(e.span, "E0509", "`*" + e.text + "*` is not a whole number.",
-                 {"a written value has to be one of the things its type holds"});
+      if (isWhole(expected)) {
+        if (!looksLikeWholeNumber(e.text))
+          complain(e.span, "E0509", "`*" + e.text + "*` is not a whole number.",
+                   {"a written value has to be one of the things its type holds"});
+        else if (!fitsWithin(e.text, expected))
+          complain(e.span, "E0509",
+                   "`*" + e.text + "*` does not fit in a `" + name(expected) + "`.",
+                   {"a written value has to be one of the things its type holds"},
+                   {"the size is written, so what will and will not go in it is "
+                    "settled before the program runs."});
+      }
       if (expected == Type::Bool && e.text != "true" && e.text != "false")
         complain(e.span, "E0509", "`*" + e.text + "*` is not `true` or `false`.",
                  {"a written value has to be one of the things its type holds"});
@@ -235,7 +308,7 @@ private:
     }
 
     case ExprKind::Binary:
-      return binary(e);
+      return binary(e, expected);
 
     case ExprKind::Call:
       return call(e);
@@ -243,15 +316,21 @@ private:
     return Type::Unknown;
   }
 
-  Type binary(const Expr &e) {
+  Type binary(const Expr &e, Type expected) {
     const std::string &op = e.text;
     const bool comparing = op == "<" || op == ">" || op == "<==" || op == ">==" ||
                            op == "==" || op == "!==";
     const bool logical = op == "and" || op == "or";
-    const Type want = logical ? Type::Bool : (comparing ? Type::Unknown : Type::I64);
 
-    const Type left = expr(*e.children[0], comparing ? Type::Unknown : want);
-    const Type right = expr(*e.children[1], comparing ? left : want);
+    // Arithmetic answers with what it was given, so the type wanted here is the
+    // type wanted of it — and the right side takes whatever the left turned out
+    // to be, which is how a written value in a sum gets a size at all.
+    const Type asked = logical ? Type::Bool
+                               : (comparing ? Type::Unknown
+                                            : (isNumber(expected) ? expected : Type::Unknown));
+    const Type left = expr(*e.children[0], asked);
+    const Type right =
+        expr(*e.children[1], comparing || (!logical && asked == Type::Unknown) ? left : asked);
 
     if (comparing) {
       if (left != Type::Unknown && right != Type::Unknown && left != right)
@@ -263,15 +342,34 @@ private:
       return Type::Bool;
     }
 
-    for (const auto &[side, type] : {std::pair{"left", left}, std::pair{"right", right}}) {
-      (void)side;
-      if (type != Type::Unknown && type != want)
-        complain(e.span, "E0506",
-                 "`" + op + "` works on `" + std::string(name(want)) + "`, and this is a `" +
-                     std::string(name(type)) + "`.",
-                 {"nothing converts on its own"});
+    if (logical) {
+      for (Type side : {left, right})
+        if (side != Type::Unknown && side != Type::Bool)
+          complain(e.span, "E0506",
+                   "`" + op + "` asks about a `bool`, and this is a `" +
+                       std::string(name(side)) + "`.",
+                   {"nothing converts on its own"});
+      return Type::Bool;
     }
-    return want;
+
+    const Type answered = isNumber(left) ? left : right;
+    for (Type side : {left, right}) {
+      if (side == Type::Unknown)
+        continue;
+      if (!isNumber(side))
+        complain(e.span, "E0506",
+                 "`" + op + "` works on numbers, and this is a `" +
+                     std::string(name(side)) + "`.",
+                 {"nothing converts on its own"});
+      else if (side != answered)
+        complain(e.span, "E0506",
+                 "a `" + std::string(name(left)) + "` and a `" + std::string(name(right)) +
+                     "` are not added, subtracted or multiplied together.",
+                 {"two numbers meet when they are the same size and the same kind"},
+                 {"a size is always written, so widening one is something a program "
+                  "says rather than something that happens to it."});
+    }
+    return answered == Type::Unknown ? Type::Unknown : answered;
   }
 
   Type call(const Expr &e) {
@@ -374,7 +472,7 @@ private:
                  {"a bare chain is the safest chain, and not changing is the safest "
                   "thing a name can do."});
       for (const ExprPtr &index : s.index)
-        expr(*index, Type::I64);
+        expr(*index, Type::Int64);
       onlyValueChecked(s.value, symbol->type, s.span);
       break;
     }

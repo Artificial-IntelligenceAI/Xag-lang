@@ -1,6 +1,6 @@
 # What a name owns, what it lends, and what it gives away.
 
-fn.i64 size [ref.str 'text'] {
+fn.int64 size [ref.str 'text'] {
     give [count['text']];
 }
 

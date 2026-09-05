@@ -23,7 +23,7 @@ START {
     var.ref.str 'winner' = [longer[ref 'greeting', ref 'reply']];
     print.stdout[str:*longer: * 'winner' \n];
 
-    var.i64 'area' = [*3* x *4*];
-    var.i64 'cube' = [*2* ^ *3*];
+    var.int64 'area' = [*3* x *4*];
+    var.int64 'cube' = [*2* ^ *3*];
     print.stdout[str:*area * 'area' str:*, cube * 'cube' \n];
 }

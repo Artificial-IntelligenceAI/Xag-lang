@@ -43,27 +43,27 @@ Parsed inStart(const std::string &body) { return run("START {\n" + body + "\n}\n
 
 void wholeProgramParses() {
   const Parsed p = run(R"(
-const.i64 'LIMIT' = [*10*];
+const.int64 'LIMIT' = [*10*];
 
-fn.i64 sum-to [i64 'n'] {
-    var.mut.i64 'total' = [*0*];
-    loop.range.i64 'i' = [*1*, 'n'] {
+fn.int64 sum-to [int64 'n'] {
+    var.mut.int64 'total' = [*0*];
+    loop.range.int64 'i' = [*1*, 'n'] {
         set 'total' = ['total' + 'i'];
     }
     give ['total'];
 }
 
 START {
-    var.i64 's' = [sum-to['LIMIT']];
+    var.int64 's' = [sum-to['LIMIT']];
     print.stdout[str:*sum to * 'LIMIT' str:* = * 's' \n];
 }
 )");
   CHECK(p.ok());
-  CHECK(p.has("const const.i64 'LIMIT'"));
-  CHECK(p.has("fn fn.i64 sum-to"));
-  CHECK(p.has("param i64 'n'"));
-  CHECK(p.has("declare var.mut.i64 'total'"));
-  CHECK(p.has("loop loop.range.i64 'i'"));
+  CHECK(p.has("const const.int64 'LIMIT'"));
+  CHECK(p.has("fn fn.int64 sum-to"));
+  CHECK(p.has("param int64 'n'"));
+  CHECK(p.has("declare var.mut.int64 'total'"));
+  CHECK(p.has("loop loop.range.int64 'i'"));
   CHECK(p.has("give"));
   CHECK(p.has("call print.stdout"));
   CHECK(p.has("typed str"));
@@ -72,15 +72,15 @@ START {
 
 void aDeclarationAndACallTellApart() {
   // Both open with a dotted run of words; what follows decides.
-  const Parsed p = inStart("var.i64 'n' = [*1*];\n    print.stdout['n'];");
+  const Parsed p = inStart("var.int64 'n' = [*1*];\n    print.stdout['n'];");
   CHECK(p.ok());
-  CHECK(p.has("declare var.i64 'n'"));
+  CHECK(p.has("declare var.int64 'n'"));
   CHECK(p.has("do\n"));
   CHECK(p.has("call print.stdout"));
 }
 
 void precedenceIsMathematics() {
-  const Parsed p = inStart("var.i64 'n' = [*1* + *2* x *3*];");
+  const Parsed p = inStart("var.int64 'n' = [*1* + *2* x *3*];");
   CHECK(p.ok());
   // `+` at the root, `x` beneath it.
   CHECK(p.has("binary +\n"));
@@ -88,7 +88,7 @@ void precedenceIsMathematics() {
 }
 
 void powerLeansRight() {
-  const Parsed p = inStart("var.i64 'n' = [*2* ^ *3* ^ *2*];");
+  const Parsed p = inStart("var.int64 'n' = [*2* ^ *3* ^ *2*];");
   CHECK(p.ok());
   // The right child is itself a power, which is what leaning right means.
   const std::string expected = "binary ^\n            written *2*\n            binary ^\n";
@@ -99,7 +99,7 @@ void powerLeansRight() {
 }
 
 void unsettledOrderNeedsBrackets() {
-  const Parsed p = inStart("var.i64 'n' = [*a* mod *b* + *c*];");
+  const Parsed p = inStart("var.int64 'n' = [*a* mod *b* + *c*];");
   CHECK(!p.parsed.ok());
   CHECK(p.code(0) == "E0301");
   // Both readings are named, because naming them is the message.
@@ -111,7 +111,7 @@ void unsettledOrderNeedsBrackets() {
   CHECK(andOr.code(0) == "E0301");
 
   // A settled operator arriving after an unsettled one is the same mistake.
-  const Parsed after = inStart("var.i64 'n' = [*a* mod *b* + *c*];");
+  const Parsed after = inStart("var.int64 'n' = [*a* mod *b* + *c*];");
   CHECK(!after.parsed.ok());
   CHECK(after.code(0) == "E0301");
 }
@@ -123,7 +123,7 @@ void repeatingAnAssociativeOperatorIsFine() {
   CHECK(inStart("var.bool 'b' = ['p' or 'q' or 'r'];").ok());
 
   // `mod` is not associative, so repeating it still asks a question.
-  const Parsed m = inStart("var.i64 'n' = [*9* mod *5* mod *3*];");
+  const Parsed m = inStart("var.int64 'n' = [*9* mod *5* mod *3*];");
   CHECK(!m.parsed.ok());
   CHECK(m.code(0) == "E0301");
 
@@ -132,18 +132,18 @@ void repeatingAnAssociativeOperatorIsFine() {
 }
 
 void bracketsSettleIt() {
-  CHECK(inStart("var.i64 'n' = [(*a* mod *b*) + *c*];").ok());
+  CHECK(inStart("var.int64 'n' = [(*a* mod *b*) + *c*];").ok());
   CHECK(inStart("var.bool 'b' = [('p' and 'q') or 'r'];").ok());
-  CHECK(inStart("var.i64 'n' = [*a* mod *b*];").ok());
+  CHECK(inStart("var.int64 'n' = [*a* mod *b*];").ok());
 }
 
 void writingADefaultIsAnError() {
   for (const std::string &word : {"immut", "own", "file", "temp"}) {
-    const Parsed p = inStart("var." + word + ".i64 'n' = [*1*];");
+    const Parsed p = inStart("var." + word + ".int64 'n' = [*1*];");
     CHECK(!p.parsed.ok());
     CHECK(p.code(0) == "E0201");
   }
-  CHECK(inStart("var.mut.i64 'n' = [*1*];").ok());
+  CHECK(inStart("var.mut.int64 'n' = [*1*];").ok());
 }
 
 void transfersAreSpelled() {
@@ -169,7 +169,7 @@ void armsOfAnIf() {
 }
 
 void conditionsWearNoBrackets() {
-  const Parsed w = inStart("var.mut.i64 'left' = [*3*];\n"
+  const Parsed w = inStart("var.mut.int64 'left' = [*3*];\n"
                            "    loop.while 'left' > *0* {\n"
                            "        set 'left' = ['left' - *1*];\n    }");
   CHECK(w.ok());
@@ -181,13 +181,13 @@ void conditionsWearNoBrackets() {
 }
 
 void aVarCannotStandAtTheTopLevel() {
-  const Parsed p = run("var.i64 'n' = [*1*];\n");
+  const Parsed p = run("var.int64 'n' = [*1*];\n");
   CHECK(!p.parsed.ok());
   CHECK(p.code(0) == "E0104");
 }
 
 void readingContinuesAfterAMistake() {
-  const Parsed p = inStart("var.i64 'n' = ;\n    var.immut.i64 'm' = [*2*];");
+  const Parsed p = inStart("var.int64 'n' = ;\n    var.immut.int64 'm' = [*2*];");
   CHECK(!p.parsed.ok());
   CHECK(p.parsed.diagnostics.size() >= 2);
 }

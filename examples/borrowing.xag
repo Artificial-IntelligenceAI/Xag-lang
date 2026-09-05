@@ -1,6 +1,6 @@
 # Lending for reading, lending for writing, and handing over for good.
 
-fn.i64 size [ref.str 'text'] {
+fn.int64 size [ref.str 'text'] {
     give [count['text']];
 }
 

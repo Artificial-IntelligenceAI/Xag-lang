@@ -100,25 +100,40 @@ void countingCountsWhatAPersonWouldCount() {
 }
 
 void arithmeticIsWrittenOnce() {
-  CHECK(xag_i64_add(2, 3) == 5);
-  CHECK(xag_i64_sub(2, 3) == -1);
-  CHECK(xag_i64_mul(6, 7) == 42);
-
   // `division = "truncated"`: toward zero, remainder follows the dividend.
-  CHECK(xag_i64_div(-7, 2) == -3);
-  CHECK(xag_i64_mod(-7, 2) == -1);
-  CHECK(xag_i64_div(7, -2) == -3);
-  CHECK(xag_i64_mod(7, -2) == 1);
+  CHECK(xag_int_div(-7, 2, 64, 1) == -3);
+  CHECK(xag_int_mod(-7, 2, 64, 1) == -1);
+  CHECK(xag_int_div(7, -2, 64, 1) == -3);
+  CHECK(xag_int_mod(7, -2, 64, 1) == 1);
 
-  // `overflow = "wrap"`, and wrapping is defined rather than merely usual.
-  CHECK(xag_i64_add(INT64_MAX, 1) == INT64_MIN);
-  CHECK(xag_i64_mul(INT64_MIN, -1) == INT64_MIN);
-  CHECK(xag_i64_div(INT64_MIN, -1) == INT64_MIN);
+  // Unsigned division is unsigned all the way down.
+  CHECK(xag_int_div(255, 2, 8, 0) == 127);
+  CHECK(xag_int_mod(255, 4, 8, 0) == 3);
+
+  // The one quotient that does not fit, wrapped like every other.
+  CHECK(xag_int_div(INT64_MIN, -1, 64, 1) == INT64_MIN);
+  CHECK(xag_int_mod(INT64_MIN, -1, 64, 1) == 0);
 
   // By squaring, in one place.
-  CHECK(xag_i64_pow(2, 10) == 1024);
-  CHECK(xag_i64_pow(2, 0) == 1);
-  CHECK(xag_i64_pow(-2, 3) == -8);
+  CHECK(xag_int_pow(2, 10, 64, 1) == 1024);
+  CHECK(xag_int_pow(2, 0, 64, 1) == 1);
+  CHECK(xag_int_pow(-2, 3, 64, 1) == -8);
+  // And it wraps at the width it was asked for, not at the carrier's.
+  CHECK(xag_int_pow(2, 10, 8, 0) == 0);
+}
+
+void everySizeIsTheSizeItSays() {
+  // Wrapping happens at the written width, not at the width of the carrier.
+  CHECK(xag_int_fit(127 + 1, 8, 1) == -128);
+  CHECK(xag_int_fit(255 + 1, 8, 0) == 0);
+  CHECK(xag_int_fit(-1, 8, 0) == 255);
+  CHECK(xag_int_fit(-1, 16, 1) == -1);
+  CHECK(xag_int_fit(INT64_MAX, 64, 1) == INT64_MAX);
+  CHECK(xag_int_fit((XagInt)INT64_MAX + 1, 64, 1) == INT64_MIN);
+  CHECK(xag_int_fit(65535, 16, 1) == -1);
+  CHECK(xag_int_fit(65535, 32, 1) == 65535);
+  // 128 is the carrier's own width, so nothing is cut.
+  CHECK(xag_int_fit(-5, 128, 1) == -5);
 }
 
 void nothingIsLeftHolding() {
@@ -133,6 +148,7 @@ int main() {
   textGrowsWhereItStands();
   countingCountsWhatAPersonWouldCount();
   arithmeticIsWrittenOnce();
+  everySizeIsTheSizeItSays();
   nothingIsLeftHolding();
 
   if (failures == 0)

@@ -28,7 +28,7 @@ A quoted thing is a name wherever you meet it. It never has to be re-read as a v
 because of where it happens to sit — position is never consulted.
 
 There is no third mark for "text versus number", because the type already answers
-that: `*1000*` is a number under `i64` and four characters under `str`.
+that: `*1000*` is a number under `int64` and four characters under `str`.
 
 ### A written value states its type where nothing else does
 
@@ -73,7 +73,7 @@ A **word** wears none, so it has to be plainer: letters, digits and `_`, joined 
 `-`. Words are function names, chain segments and types.
 
 ```
-fn.i64 sum-to [i64 'n'] { ... }
+fn.int64 sum-to [int64 'n'] { ... }
 
 sum-to['LIMIT'];
 var.str 'a name with spaces 🙂' = [*fine*];
@@ -87,6 +87,62 @@ keeps it apart from subtraction — subtraction's operands are marked or bracket
 so `sum-to` is one word and `count - *1*` is three tokens.
 
 Nothing outside ASCII is a word character, though it is perfectly good inside a name.
+
+## The types, and their sizes
+
+```
+int8  int16  int32  int64  int128
+uint8 uint16 uint32 uint64 uint128
+bin16 bin32  bin64  bin128
+deci32 deci64 deci128
+bool  str  nothing
+```
+
+**A size is always written**, and it is always one the standard defines. There is
+no `int` on its own, because there is no size to assume. `bin` is IEEE 754's
+binary interchange formats and `deci` is its decimal ones; nothing off-format
+exists.
+
+A written value has to be one of the things its type holds, and because the size
+is written that can be settled before the program runs:
+
+```text
+`*128*` does not fit in a `int8`.
+
+  1 | var.int8 'n' = [*128*];
+    |                 ^^^^^ here
+
+Error code: E0509
+Rule(s) broken: a written value has to be one of the things its type holds
+```
+
+**Two sizes never meet on their own.** Nothing converts, here as anywhere:
+
+```
+var.int32 'a' = [*1*];
+var.int64 'b' = ['a' + *1*];    # a `int32` and a `int64` are not added together
+```
+
+Arithmetic answers with what it was given, and the right side of a sum takes
+whatever the left turned out to be — which is how a written value in a sum gets
+a size at all. Where nothing says, the value says it itself, in the notation it
+always could:
+
+```
+print.stdout[(int32:*161* + *0*) \n];
+```
+
+`str:*hello*` and `int32:*161*` are one notation and not two.
+
+Under `overflow = "wrap"` a sum that does not fit wraps at **the width that was
+written**, not at the width of whatever carried it:
+
+```
+var.mut.uint8 'n' = [*255*];
+set 'n' = ['n' + *1*];          # 0
+```
+
+> `bin` and `deci` are named here and not yet implemented. Whole numbers are.
 
 ## The operators
 
@@ -130,7 +186,7 @@ readings rather than picking one.
 `mod` and `+` have no agreed order, so this could be read as
 `(*a* mod *b*) + *c*` or as `*a* mod (*b* + *c*)`.
 
-  3 | var.i64 'x' = [*a* mod *b* + *c*];
+  3 | var.int64 'x' = [*a* mod *b* + *c*];
     |                 ^^^^^^^^^^^^^^^^^ which of these first?
 
 Error code: E0301
@@ -202,10 +258,10 @@ right — and neither is a declared name, which its own marks already bound. So
 neither takes brackets:
 
 ```
-var.mut.i64 'total' = [*0*];
+var.mut.int64 'total' = [*0*];
 set 'total' = ['total' + *1*];
 set 'xs'[*2*] = [*99*];
-loop.range.i64 'i' = [*1*, 'n'] { ... }
+loop.range.int64 'i' = [*1*, 'n'] { ... }
 if 'a' >== 'b' { ... }
 loop.while 'left' > *0* { ... }
 ```
@@ -222,9 +278,9 @@ Each segment answers one question, and the segment nearest the name is always th
 type.
 
 ```
-var.mut.i64 'total' = [*0*];
-fn.export.i64 add [i64 'a', i64 'b'] { give ['a' + 'b']; }
-loop.perm.range.i64 'i' = [*1*, *100*] { ... }
+var.mut.int64 'total' = [*0*];
+fn.export.int64 add [int64 'a', int64 'b'] { give ['a' + 'b']; }
+loop.perm.range.int64 'i' = [*1*, *100*] { ... }
 ```
 
 ### Every segment but the type has a default
@@ -266,7 +322,7 @@ intent and the compiler does not.
 A name owns its value until the value is moved, and then it holds nothing.
 
 ```
-fn.i64 size [ref.str 'text'] { ... }           # borrowed, read-only
+fn.int64 size [ref.str 'text'] { ... }           # borrowed, read-only
 fn.nothing excite [refmut.str 'text'] { ... }  # borrowed, writable
 fn.nothing keep [str 'text'] { ... }           # takes it — `own` is the default
 ```
@@ -294,7 +350,7 @@ fn.str greet [] {
 }
 ```
 
-Nor is a small value ever moved. An `i64` or a `bool` is handed over by being
+Nor is a small value ever moved. An `int64` or a `bool` is handed over by being
 copied and the original stays where it was, so `move` on one is refused: it would
 say a name stops holding what it held, and it does not.
 

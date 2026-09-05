@@ -57,16 +57,16 @@ void emits(const std::string &program, const std::string &wanted, int line) {
 
 void itEmitsWholePrograms() {
   EMITS("START { print.stdout[str:*hello* \\n]; }\n", "xag_print");
-  EMITS("START { var.i64 'n' = [*2* + *3*]; print.stdout['n' \\n]; }\n", "xag_i64_add");
+  EMITS("START { var.int64 'n' = [*2* + *3*]; print.stdout['n' \\n]; }\n", "xag_print_int");
   EMITS("START { var.str 's' = [*hi*]; print.stdout['s' \\n]; }\n", "xag_str_drop");
-  EMITS("const.i64 'LIMIT' = [*10*];\nSTART { print.stdout['LIMIT' \\n]; }\n",
+  EMITS("const.int64 'LIMIT' = [*10*];\nSTART { print.stdout['LIMIT' \\n]; }\n",
         "xag_const__LIMIT_");
 }
 
 void itEmitsFunctionsAndLoans() {
-  EMITS("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\n"
+  EMITS("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
         "START { print.stdout[twice[*21*] \\n]; }\n", "xag_twice");
-  EMITS("fn.i64 size [ref.str 'text'] { give [count['text']]; }\n"
+  EMITS("fn.int64 size [ref.str 'text'] { give [count['text']]; }\n"
         "START { var.str 's' = [*café*]; print.stdout[size[ref 's'] \\n]; }\n",
         "xag_str_count");
   // A function that lends its answer back must not look like one that hands it
@@ -80,17 +80,17 @@ void itEmitsFunctionsAndLoans() {
 }
 
 void itEmitsControlFlow() {
-  EMITS("START { var.mut.i64 't' = [*0*];\n"
-        "  loop.range.i64 'i' = [*1*, *10*] { set 't' = ['t' + 'i']; }\n"
+  EMITS("START { var.mut.int64 't' = [*0*];\n"
+        "  loop.range.int64 'i' = [*1*, *10*] { set 't' = ['t' + 'i']; }\n"
         "  print.stdout['t' \\n]; }\n", "block");
-  EMITS("START { var.i64 'n' = [*1*];\n"
+  EMITS("START { var.int64 'n' = [*1*];\n"
         "  if 'n' == *1* { print.stdout[str:*one* \\n]; } else { print.stdout[str:*other* \\n]; } }\n",
         "br i1");
 }
 
 void itGuardsAConditionalDrop() {
   EMITS("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
-        "START { var.str 's' = [*hi*]; var.i64 'n' = [*1*];\n"
+        "START { var.str 's' = [*hi*]; var.int64 'n' = [*1*];\n"
         "  if 'n' == *1* { keep[move 's']; } }\n",
         "xag_str_drop");
 }

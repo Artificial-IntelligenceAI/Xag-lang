@@ -190,52 +190,88 @@ void xag_print(const XagStr *text) {
     std::fwrite(text->bytes, 1, text->length, output());
 }
 
-void xag_print_i64(int64_t number) { std::fprintf(output(), "%lld", (long long)number); }
-
 void xag_print_bool(int truth) { std::fputs(truth ? "true" : "false", output()); }
 
 void xag_set_output(void *file) { out = static_cast<std::FILE *>(file); }
 
 // Wrapping is done in unsigned arithmetic, where it is defined rather than
-// merely usual.
-int64_t xag_i64_add(int64_t a, int64_t b) {
-  return static_cast<int64_t>(static_cast<uint64_t>(a) + static_cast<uint64_t>(b));
-}
-int64_t xag_i64_sub(int64_t a, int64_t b) {
-  return static_cast<int64_t>(static_cast<uint64_t>(a) - static_cast<uint64_t>(b));
-}
-int64_t xag_i64_mul(int64_t a, int64_t b) {
-  return static_cast<int64_t>(static_cast<uint64_t>(a) * static_cast<uint64_t>(b));
+// merely usual, and then cut to the width the type was written with.
+XagInt xag_int_fit(XagInt value, uint32_t width, int32_t is_signed) {
+  if (width >= 128)
+    return value;
+  const __uint128_t mask = (static_cast<__uint128_t>(1) << width) - 1;
+  __uint128_t kept = static_cast<__uint128_t>(value) & mask;
+  if (is_signed && (kept >> (width - 1)) & 1)
+    kept |= ~mask; // the sign, put back
+  return static_cast<XagInt>(kept);
 }
 
-int64_t xag_i64_div(int64_t a, int64_t b) {
+XagInt xag_int_div(XagInt a, XagInt b, uint32_t width, int32_t is_signed) {
   if (b == 0)
     xag_stop("a number was divided by zero");
-  if (a == INT64_MIN && b == -1)
-    return a; // the one quotient that does not fit, wrapped like any other
-  return a / b;
+  if (!is_signed) {
+    const __uint128_t answer =
+        static_cast<__uint128_t>(a) / static_cast<__uint128_t>(b);
+    return xag_int_fit(static_cast<XagInt>(answer), width, is_signed);
+  }
+  // The one quotient that does not fit, wrapped like every other.
+  if (b == -1)
+    return xag_int_fit(static_cast<XagInt>(-static_cast<__uint128_t>(a)), width, is_signed);
+  return xag_int_fit(a / b, width, is_signed);
 }
 
-int64_t xag_i64_mod(int64_t a, int64_t b) {
+XagInt xag_int_mod(XagInt a, XagInt b, uint32_t width, int32_t is_signed) {
   if (b == 0)
     xag_stop("a remainder was taken against zero");
-  if (a == INT64_MIN && b == -1)
+  if (!is_signed) {
+    const __uint128_t answer =
+        static_cast<__uint128_t>(a) % static_cast<__uint128_t>(b);
+    return xag_int_fit(static_cast<XagInt>(answer), width, is_signed);
+  }
+  if (b == -1)
     return 0;
-  return a % b;
+  return xag_int_fit(a % b, width, is_signed);
 }
 
 // By squaring, in one place, so that no engine writes this loop a second time.
-int64_t xag_i64_pow(int64_t base, int64_t exponent) {
-  if (exponent < 0)
+XagInt xag_int_pow(XagInt base, XagInt exponent, uint32_t width, int32_t is_signed) {
+  if (is_signed && exponent < 0)
     xag_stop("a whole number was raised to a negative power, and that is not a whole number");
-  int64_t answer = 1;
-  while (exponent > 0) {
-    if (exponent & 1)
-      answer = xag_i64_mul(answer, base);
-    base = xag_i64_mul(base, base);
-    exponent >>= 1;
+  XagInt answer = 1;
+  __uint128_t left = static_cast<__uint128_t>(exponent);
+  __uint128_t running = static_cast<__uint128_t>(base);
+  while (left > 0) {
+    if (left & 1)
+      answer = xag_int_fit(static_cast<XagInt>(static_cast<__uint128_t>(answer) * running),
+                           width, is_signed);
+    running = static_cast<__uint128_t>(
+        xag_int_fit(static_cast<XagInt>(running * running), width, is_signed));
+    left >>= 1;
   }
   return answer;
+}
+
+void xag_print_int(XagInt value, uint32_t width, int32_t is_signed) {
+  value = xag_int_fit(value, width, is_signed);
+  char digits[41];
+  unsigned at = sizeof(digits);
+  __uint128_t magnitude;
+  bool negative = false;
+  if (is_signed && value < 0) {
+    negative = true;
+    magnitude = -static_cast<__uint128_t>(value);
+  } else {
+    magnitude = static_cast<__uint128_t>(value);
+  }
+  if (magnitude == 0)
+    digits[--at] = '0';
+  while (magnitude > 0) {
+    digits[--at] = static_cast<char>('0' + static_cast<unsigned>(magnitude % 10));
+    magnitude /= 10;
+  }
+  if (negative)
+    digits[--at] = '-';
+  std::fwrite(digits + at, 1, sizeof(digits) - at, output());
 }
 
 int64_t xag_live_allocations(void) { return live; }

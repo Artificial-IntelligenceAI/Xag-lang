@@ -1,16 +1,16 @@
 # Chains, defaults, and a loop.
 
-const.i64 'LIMIT' = [*10*];
+const.int64 'LIMIT' = [*10*];
 
-fn.i64 sum-to [i64 'n'] {
-    var.mut.i64 'total' = [*0*];
-    loop.range.i64 'i' = [*1*, 'n'] {
+fn.int64 sum-to [int64 'n'] {
+    var.mut.int64 'total' = [*0*];
+    loop.range.int64 'i' = [*1*, 'n'] {
         set 'total' = ['total' + 'i'];
     }
     give ['total'];
 }
 
 START {
-    var.i64 's' = [sum-to['LIMIT']];
+    var.int64 's' = [sum-to['LIMIT']];
     print.stdout[str:*sum to * 'LIMIT' str:* = * 's' \n];
 }

@@ -68,10 +68,10 @@ Built raw(const std::string &body) { return run("START {\n" + body + "\n}\n", fa
 const char *kKeep = "fn.nothing keep [str 'text'] { print.stdout['text' \n]; }\n";
 
 void everyBodyBecomesBlocks() {
-  const Built b = run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\nSTART { }\n");
+  const Built b = run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\nSTART { }\n");
   CHECK(b.clean());
   CHECK(b.built.mir.bodies.size() == 2);
-  CHECK(b.has("fn twice -> i64"));
+  CHECK(b.has("fn twice -> int64"));
   CHECK(b.has("fn START -> nothing"));
   CHECK(b.body(0).parameters == 1);
   // Local 0 is the answer, so a one-parameter body has at least two named slots.
@@ -80,7 +80,7 @@ void everyBodyBecomesBlocks() {
 }
 
 void expressionsBecomeTemporaries() {
-  const Built b = inStart("var.i64 'n' = [*1* + *2* x *3*];");
+  const Built b = inStart("var.int64 'n' = [*1* + *2* x *3*];");
   CHECK(b.clean());
   // The nested multiply lands in its own slot before the addition reads it.
   CHECK(b.has("*2* x *3*"));
@@ -88,7 +88,7 @@ void expressionsBecomeTemporaries() {
 }
 
 void anIfBecomesASwitchAndAJoin() {
-  const Built b = inStart("var.mut.i64 'n' = [*0*];\n"
+  const Built b = inStart("var.mut.int64 'n' = [*0*];\n"
                           "    if 'n' == *0* { set 'n' = [*1*]; } else { set 'n' = [*2*]; }");
   CHECK(b.clean());
   CHECK(b.has("switch "));
@@ -96,8 +96,8 @@ void anIfBecomesASwitchAndAJoin() {
 }
 
 void aLoopBecomesABackEdge() {
-  const Built b = inStart("var.mut.i64 'total' = [*0*];\n"
-                          "    loop.range.i64 'i' = [*1*, *3*] { set 'total' = ['total' + 'i']; }");
+  const Built b = inStart("var.mut.int64 'total' = [*0*];\n"
+                          "    loop.range.int64 'i' = [*1*, *3*] { set 'total' = ['total' + 'i']; }");
   CHECK(b.clean());
   CHECK(b.has("switch "));      // the header asks whether to run again
   CHECK(b.has("<== copy"));     // counter against its last value
@@ -105,7 +105,7 @@ void aLoopBecomesABackEdge() {
 }
 
 void breakLeavesTheLoop() {
-  const Built b = inStart("var.i64 'n' = [*0*];\n"
+  const Built b = inStart("var.int64 'n' = [*0*];\n"
                           "    loop.while 'n' == *0* { break; }");
   CHECK(b.clean());
   CHECK(b.count("goto block") >= 2);
@@ -113,7 +113,7 @@ void breakLeavesTheLoop() {
 
 void switchIsGeneralFromTheStart() {
   // One value per target rather than a true/false pair, so a decision tree fits.
-  const Built b = inStart("var.mut.i64 'n' = [*0*];\n    if 'n' == *0* { set 'n' = [*1*]; }");
+  const Built b = inStart("var.mut.int64 'n' = [*0*];\n    if 'n' == *0* { set 'n' = [*1*]; }");
   CHECK(b.clean());
   CHECK(b.has("[true -> block"));
   CHECK(b.has("[else -> block"));
@@ -132,7 +132,7 @@ void whatIsOwnedIsDropped() {
   CHECK(b.clean());
   CHECK(b.has("drop "));
   // Small values are not owned in that sense, so nothing is dropped.
-  CHECK(!inStart("var.i64 'n' = [*1*];").has("drop "));
+  CHECK(!inStart("var.int64 'n' = [*1*];").has("drop "));
 }
 
 void elaborationSettlesEveryDrop() {
@@ -155,7 +155,7 @@ void elaborationSettlesEveryDrop() {
   const Built maybe = run(std::string(kKeep) +
                           "START {\n"
                           "  var.str 's' = [*hi*];\n"
-                          "  var.i64 'n' = [*1*];\n"
+                          "  var.int64 'n' = [*1*];\n"
                           "  if 'n' == *1* { keep[move 's']; }\n"
                           "}\n");
   CHECK(maybe.clean());
@@ -178,8 +178,8 @@ void joiningIsItsOwnStep() {
 }
 
 void aCallKeepsItsArguments() {
-  const Built b = run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\n"
-                      "START { var.i64 'a' = [twice[*2*]]; }\n");
+  const Built b = run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+                      "START { var.int64 'a' = [twice[*2*]]; }\n");
   CHECK(b.clean());
   CHECK(b.has("twice(*2*)"));
 }

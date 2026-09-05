@@ -41,11 +41,11 @@ Checked inStart(const std::string &body) { return run("START {\n" + body + "\n}\
 
 void aNameMustBeDeclared() {
   CHECK(inStart("print.stdout['nope' \\n];").code(0) == "E0501");
-  CHECK(inStart("var.i64 'n' = [*1*];\n    print.stdout['n' \\n];").ok());
+  CHECK(inStart("var.int64 'n' = [*1*];\n    print.stdout['n' \\n];").ok());
 }
 
 void aNameIsDeclaredOnce() {
-  CHECK(inStart("var.i64 'n' = [*1*];\n    var.i64 'n' = [*2*];").code(0) == "E0502");
+  CHECK(inStart("var.int64 'n' = [*1*];\n    var.int64 'n' = [*2*];").code(0) == "E0502");
 }
 
 void aTypeMustExist() {
@@ -61,27 +61,60 @@ void aWrittenValueSaysWhatItIs() {
 }
 
 void aWrittenValueFitsItsType() {
-  CHECK(inStart("var.i64 'n' = [*abc*];").code(0) == "E0509");
+  CHECK(inStart("var.int64 'n' = [*abc*];").code(0) == "E0509");
   CHECK(inStart("var.bool 'b' = [*maybe*];").code(0) == "E0509");
-  CHECK(inStart("var.i64 'n' = [*-12*];").ok());
+  CHECK(inStart("var.int64 'n' = [*-12*];").ok());
   CHECK(inStart("var.bool 'b' = [*true*];").ok());
 }
 
+void aSizeIsAlwaysWritten() {
+  // There is no `int` on its own, because there is no size to assume.
+  CHECK(inStart("var.int 'n' = [*1*];").code(0) == "E0503");
+  CHECK(inStart("var.uint 'n' = [*1*];").code(0) == "E0503");
+  for (const char *type : {"int8", "int16", "int32", "int64", "int128", "uint8",
+                           "uint16", "uint32", "uint64", "uint128"})
+    CHECK(inStart(std::string("var.") + type + " 'n' = [*1*];").ok());
+}
+
+void aWrittenNumberHasToFit() {
+  CHECK(inStart("var.int8 'n' = [*127*];").ok());
+  CHECK(inStart("var.int8 'n' = [*128*];").code(0) == "E0509");
+  CHECK(inStart("var.int8 'n' = [*-128*];").ok());
+  CHECK(inStart("var.int8 'n' = [*-129*];").code(0) == "E0509");
+  CHECK(inStart("var.uint8 'n' = [*255*];").ok());
+  CHECK(inStart("var.uint8 'n' = [*256*];").code(0) == "E0509");
+  // Unsigned holds nothing below zero, whatever its width.
+  CHECK(inStart("var.uint64 'n' = [*-1*];").code(0) == "E0509");
+  CHECK(inStart("var.uint128 'n' = [*340282366920938463463374607431768211455*];").ok());
+}
+
+void sizesDoNotMixOnTheirOwn() {
+  CHECK(inStart("var.int32 'a' = [*1*];\n    var.int64 'b' = ['a' + *1*];").code(0) ==
+        "E0506");
+  CHECK(inStart("var.int64 'a' = [*1*];\n    var.uint64 'b' = ['a' + *1*];").code(0) ==
+        "E0506");
+  CHECK(inStart("var.int32 'a' = [*1*];\n    var.int32 'b' = ['a' + *1*];").ok());
+  // A comparison takes its type from its left side, so the right side fits it.
+  CHECK(inStart("var.uint8 'a' = [*200*];\n    var.bool 'b' = ['a' > *100*];").ok());
+  CHECK(inStart("var.uint8 'a' = [*200*];\n    var.bool 'b' = ['a' > *300*];").code(0) ==
+        "E0509");
+}
+
 void nothingConvertsOnItsOwn() {
-  CHECK(inStart("var.str 's' = [*a*];\n    var.i64 'n' = ['s'];").code(0) == "E0506");
-  CHECK(inStart("var.i64 'n' = [*1* + *2*];").ok());
-  CHECK(inStart("var.str 's' = [*a*];\n    var.i64 'n' = ['s' + *1*];").code(0) == "E0506");
+  CHECK(inStart("var.str 's' = [*a*];\n    var.int64 'n' = ['s'];").code(0) == "E0506");
+  CHECK(inStart("var.int64 'n' = [*1* + *2*];").ok());
+  CHECK(inStart("var.str 's' = [*a*];\n    var.int64 'n' = ['s' + *1*];").code(0) == "E0506");
 }
 
 void piecesSideBySideJoin() {
   CHECK(inStart("var.str 'n' = [*Hello, * *world*];").ok());
-  // Joining builds text, so an i64 cannot be one of the pieces.
-  CHECK(inStart("var.i64 'n' = [*1*];\n    var.str 's' = [*x* 'n'];").code(0) == "E0506");
+  // Joining builds text, so an int64 cannot be one of the pieces.
+  CHECK(inStart("var.int64 'n' = [*1*];\n    var.str 's' = [*x* 'n'];").code(0) == "E0506");
 }
 
 void anImmutableNameDoesNotChange() {
-  CHECK(inStart("var.i64 'n' = [*1*];\n    set 'n' = [*2*];").code(0) == "E0508");
-  CHECK(inStart("var.mut.i64 'n' = [*1*];\n    set 'n' = [*2*];").ok());
+  CHECK(inStart("var.int64 'n' = [*1*];\n    set 'n' = [*2*];").code(0) == "E0508");
+  CHECK(inStart("var.mut.int64 'n' = [*1*];\n    set 'n' = [*2*];").ok());
 }
 
 void aBorrowSaysWhetherItWrites() {
@@ -94,23 +127,23 @@ void aBorrowSaysWhetherItWrites() {
 }
 
 void callsAreChecked() {
-  CHECK(run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\n"
-            "START { var.i64 'a' = [twice[*2*]]; }\n").ok());
-  CHECK(run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\n"
-            "START { var.i64 'a' = [twice[*2*, *3*]]; }\n").code(0) == "E0505");
-  CHECK(run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\n"
-            "START { var.str 's' = [*x*]; var.i64 'a' = [twice['s']]; }\n").code(0) == "E0506");
+  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { var.int64 'a' = [twice[*2*]]; }\n").ok());
+  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { var.int64 'a' = [twice[*2*, *3*]]; }\n").code(0) == "E0505");
+  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { var.str 's' = [*x*]; var.int64 'a' = [twice['s']]; }\n").code(0) == "E0506");
   CHECK(inStart("nosuch[*1*];").code(0) == "E0504");
 }
 
 void signaturesAreReadBeforeBodies() {
   // Two functions may call each other, and a constant may be used above itself.
-  CHECK(run("fn.i64 odd [i64 'n'] { give [even['n']]; }\n"
-            "fn.i64 even [i64 'n'] { give ['n']; }\n"
-            "START { var.i64 'a' = [odd[*3*]]; }\n").ok());
-  CHECK(run("fn.i64 limit [] { give ['LIMIT']; }\n"
-            "const.i64 'LIMIT' = [*10*];\n"
-            "START { var.i64 'a' = [limit[]]; }\n").ok());
+  CHECK(run("fn.int64 odd [int64 'n'] { give [even['n']]; }\n"
+            "fn.int64 even [int64 'n'] { give ['n']; }\n"
+            "START { var.int64 'a' = [odd[*3*]]; }\n").ok());
+  CHECK(run("fn.int64 limit [] { give ['LIMIT']; }\n"
+            "const.int64 'LIMIT' = [*10*];\n"
+            "START { var.int64 'a' = [limit[]]; }\n").ok());
 }
 
 void giveAnswersItsFunction() {
@@ -122,17 +155,17 @@ void giveAnswersItsFunction() {
 
 void breakNeedsALoop() {
   CHECK(inStart("break;").code(0) == "E0510");
-  CHECK(inStart("loop.range.i64 'i' = [*1*, *3*] { break; }").ok());
+  CHECK(inStart("loop.range.int64 'i' = [*1*, *3*] { break; }").ok());
 }
 
 void conditionsAskABool() {
-  CHECK(inStart("var.i64 'n' = [*1*];\n    if 'n' { }").code(0) == "E0506");
-  CHECK(inStart("var.i64 'n' = [*1*];\n    if 'n' > *0* { }").ok());
+  CHECK(inStart("var.int64 'n' = [*1*];\n    if 'n' { }").code(0) == "E0506");
+  CHECK(inStart("var.int64 'n' = [*1*];\n    if 'n' > *0* { }").ok());
 }
 
 void theCounterIsInScopeOnlyInTheLoop() {
-  CHECK(inStart("loop.range.i64 'i' = [*1*, *3*] { print.stdout['i' \\n]; }").ok());
-  CHECK(inStart("loop.range.i64 'i' = [*1*, *3*] { }\n    print.stdout['i' \\n];")
+  CHECK(inStart("loop.range.int64 'i' = [*1*, *3*] { print.stdout['i' \\n]; }").ok());
+  CHECK(inStart("loop.range.int64 'i' = [*1*, *3*] { }\n    print.stdout['i' \\n];")
             .code(0) == "E0501");
 }
 
@@ -144,6 +177,9 @@ int main() {
   aTypeMustExist();
   aWrittenValueSaysWhatItIs();
   aWrittenValueFitsItsType();
+  aSizeIsAlwaysWritten();
+  aWrittenNumberHasToFit();
+  sizesDoNotMixOnTheirOwn();
   nothingConvertsOnItsOwn();
   piecesSideBySideJoin();
   anImmutableNameDoesNotChange();

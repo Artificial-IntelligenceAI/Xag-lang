@@ -1,7 +1,8 @@
 # Xag coding language
 
 A programming language built around high performance, helpful error messages,
-and Rust-style memory management. Programs are compiled ahead of time,
+and Rust-style memory management. A size is always written: there is no `int`
+on its own, because there is no size to assume. Programs are compiled ahead of time,
 either to native code or to a form run by an AOT interpreter.
 
 Early work in progress — nothing here is stable yet.
