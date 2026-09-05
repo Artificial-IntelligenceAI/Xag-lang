@@ -69,14 +69,42 @@ out-of-range = "stops"
 # produce the same number, which is what the oracle checks. `none`, `speed`.
 optimise = "speed"
 
+# Also changes what gets delivered, never what a program answers. Which decimal
+# a program uses.
+#
+# `software` is IEEE 754 decimal written out in C++, in the BID encoding — the
+# coefficient stored as an ordinary binary integer, because the wide arithmetic
+# underneath already speaks that language. It runs on any machine.
+#
+# `hardware` is IBM's decimal floating-point unit. Two architectures have one:
+# z/Architecture from z9, and POWER from POWER6. Both encode in DPD rather than
+# BID, so the bits are not the same ones — but no program can see them, and IEEE
+# 754 decimal is specified closely enough that both must answer every operation
+# identically. Where they do not, one of them is wrong. That is why this is a
+# setting worth having rather than a preference: it is a second opinion on the
+# arithmetic, from silicon.
+#
+# What the unit does is add, subtract, multiply, divide and compare, at
+# decimal64 and decimal128. So a `deci32` is worked out at decimal64 and rounded
+# back whichever is chosen, and a remainder or a power is built out of those
+# five either way — there is no instruction for either on any machine.
+#
+# Asking for `hardware` from a build that has none is refused rather than
+# quietly answered by the other one. Which a build has is decided when the
+# runtime is compiled: `cmake -DXAG_DECIMAL=hardware`, on a machine that has a
+# unit. There is no falling back, because falling back is how a program comes to
+# use the thing it said it did not want.
+decimal = "software"
+
 [run]
 # Changes only how a program runs, never what it says.
 # `test-interpreter` does the least and is the one to believe.
 # `fast-interpreter` runs bytecode. `native` is compiled ahead of time.
 engine = "test-interpreter"
 
-# `out-of-range` is read; the rest are decided but not yet asked about, because
-# nothing branches on them yet. The file is looked for beside the source and
-# then upward, so a project decides for every file under it. A single run may
-# say otherwise with `xagc --out-of-range=wraps`, which is how the oracle asks
-# both languages the same questions.
+# `out-of-range` and `decimal` are read; the rest are decided but not yet asked
+# about, because nothing branches on them yet. The file is looked for beside the
+# source and then upward, so a project decides for every file under it. A single
+# run may say otherwise — `xagc --out-of-range=wraps`, `xagc --decimal=hardware`
+# — which is how the oracle asks two languages the same questions, and how a
+# build that has both decimals is asked for each in turn.

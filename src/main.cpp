@@ -9,6 +9,8 @@
 #include "xag/Regions.h"
 #include "xag/Source.h"
 
+#include "xag_runtime.h"
+
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -37,18 +39,23 @@ void usage() {
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
                "    xagc --help         this\n\n"
                "    --out-of-range=stops|wraps   for this run only, over what\n"
-               "                                 Xag-Config.toml decided\n\n"
+               "    --decimal=software|hardware  Xag-Config.toml decided\n\n"
                "Nothing else is built yet.\n";
 }
 
-// What this project decided, once. Only the settings that change what a program
-// answers are read here, because those are the ones an engine has to be told
-// about; the rest change what is delivered and belong to whoever delivers it.
+// What this project decided, once, in both of the kinds it decides in: what a
+// program *answers*, which every engine has to be told about, and what gets
+// *delivered*, which only whoever delivers it needs to know.
 //
 // The file is read where the source is, and then upward, so a project decides
 // for every file under it without any of them saying so.
-xag::Settings settingsFor(const std::string &sourcePath) {
-  xag::Settings settings;
+struct Chosen {
+  xag::Settings answers;               // [defaults]
+  bool wantsHardwareDecimal = false;   // [build]
+};
+
+Chosen settingsFor(const std::string &sourcePath) {
+  Chosen settings;
   std::string directory = sourcePath;
   const std::size_t slash = directory.find_last_of('/');
   directory = slash == std::string::npos ? std::string(".") : directory.substr(0, slash);
@@ -77,7 +84,9 @@ xag::Settings settingsFor(const std::string &sourcePath) {
         trim(key);
         trim(said);
         if (key == "out-of-range")
-          settings.wrapsOutOfRange = said == "wraps";
+          settings.answers.wrapsOutOfRange = said == "wraps";
+        else if (key == "decimal")
+          settings.wantsHardwareDecimal = said == "hardware";
       }
       return settings;
     }
@@ -92,10 +101,31 @@ xag::Settings settingsFor(const std::string &sourcePath) {
 }
 
 // A setting said on the command line is said about this run only, and wins.
-xag::Settings *asked = nullptr;
+Chosen *asked = nullptr;
 
-xag::Settings settingsUsed(const std::string &path) {
+Chosen chosenFor(const std::string &path) {
   return asked ? *asked : settingsFor(path);
+}
+
+xag::Settings settingsUsed(const std::string &path) { return chosenFor(path).answers; }
+
+// A program asking for a decimal this build has none of. There is nothing to
+// fall back to quietly: the two encode differently, and answering with the one
+// that was not asked for is the kind of silence this compiler is built against.
+bool decimalIsThere(const std::string &path) {
+  if (!chosenFor(path).wantsHardwareDecimal || xag_decimal_is_hardware())
+    return true;
+  std::cerr << "xagc: this asks for `decimal = \"hardware\"`, and this build has "
+               "software decimal.\n"
+               "      IBM's decimal floating-point unit is on z/Architecture "
+               "(s390x) from z9\n"
+               "      and on POWER (ppc64, ppc64le) from POWER6. Nothing else has "
+               "one.\n"
+               "      Build the runtime with -DXAG_DECIMAL=hardware on a machine "
+               "that does,\n"
+               "      or ask for `decimal = \"software\"`, which answers "
+               "identically everywhere.\n";
+  return false;
 }
 
 bool readSource(const std::string &path, std::string &text) {
@@ -168,6 +198,8 @@ int checkFile(const std::string &path) {
 }
 
 int runFile(const std::string &path) {
+  if (!decimalIsThere(path))
+    return 1;
   std::string text;
   if (!readSource(path, text))
     return 1;
@@ -200,6 +232,8 @@ int runFile(const std::string &path) {
 }
 
 int fastFile(const std::string &path) {
+  if (!decimalIsThere(path))
+    return 1;
   std::string text;
   xag::MirResult built;
   int status = 0;
@@ -259,6 +293,8 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
 }
 
 int irFile(const std::string &path, bool optimise) {
+  if (!decimalIsThere(path))
+    return 1;
   std::string text;
   xag::MirResult built;
   int status = 0;
@@ -274,6 +310,8 @@ int irFile(const std::string &path, bool optimise) {
 }
 
 int buildFile(const std::string &path) {
+  if (!decimalIsThere(path))
+    return 1;
   std::string text;
   xag::MirResult built;
   int status = 0;
@@ -352,12 +390,18 @@ int main(int argc, char **argv) {
   // A setting given here is about this run and nothing else, which is what the
   // oracle needs: both values of a knob are separate languages, and it has to
   // be able to ask for either without editing the project's mind.
-  xag::Settings overridden;
+  Chosen overridden;
   std::vector<char *> args(argv, argv + argc);
   for (unsigned i = 1; i < args.size();) {
     const std::string one = args[i];
     if (one.rfind("--out-of-range=", 0) == 0) {
-      overridden.wrapsOutOfRange = one.substr(15) == "wraps";
+      overridden.answers.wrapsOutOfRange = one.substr(15) == "wraps";
+      asked = &overridden;
+      args.erase(args.begin() + i);
+      continue;
+    }
+    if (one.rfind("--decimal=", 0) == 0) {
+      overridden.wantsHardwareDecimal = one.substr(10) == "hardware";
       asked = &overridden;
       args.erase(args.begin() + i);
       continue;

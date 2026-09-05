@@ -236,6 +236,16 @@ void align(const Shape &shape, Taken &a, Taken &b) {
 
 extern "C" {
 
+// Which of the two implementations this is. Built, not detected: a library
+// compiled without a decimal unit cannot grow one at run time.
+int xag_decimal_is_hardware(void) {
+#ifdef XAG_DECIMAL_HARDWARE
+  return 1;
+#else
+  return 0;
+#endif
+}
+
 XagDeci xag_deci_add(uint32_t width, XagDeci a, XagDeci b) {
   const Shape shape = shapeOf(width);
   Taken x = take(width, a), y = take(width, b);

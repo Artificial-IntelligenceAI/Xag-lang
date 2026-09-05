@@ -58,6 +58,14 @@ once for every file in it — including the settings that change what a program
 *answers*, each value of which is a separate language all three engines have to
 agree under. A single run may say otherwise: `xagc --out-of-range=wraps run …`.
 
+It also holds `decimal`, which picks between IEEE 754 decimal written out in
+software and IBM's decimal floating-point unit — z/Architecture has one from z9,
+POWER from POWER6. Both must answer every operation identically, because IEEE 754
+decimal is specified that closely, so the second one is a second opinion on the
+arithmetic rather than a preference. Which a build has is settled when the
+runtime is compiled (`cmake -DXAG_DECIMAL=hardware`), and asking for one it has
+not got is refused rather than quietly answered by the other.
+
 ## The oracle
 
 `generator/` writes Xag programs and asks every engine what they say — and when

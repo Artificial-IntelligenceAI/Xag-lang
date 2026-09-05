@@ -141,13 +141,37 @@ double xag_bin128_to_double(XagBin128 value);
 int32_t xag_bin128_reads(const char *text, uint64_t length, XagBin128 *out);
 void xag_print_bin128(XagBin128 value);
 
-// IEEE 754 decimal32, decimal64 and decimal128, in the BID encoding — the
-// coefficient stored as an ordinary binary integer. `width` says which of the
-// three, and the bits travel as a 128-bit integer whichever it is.
+// IEEE 754 decimal32, decimal64 and decimal128. `width` says which of the three,
+// and the bits travel as a 128-bit integer whichever it is.
 //
 // A decimal keeps the cohort it arrived at: `1.10` and `1.1` are equal and are
 // not the same, and telling them apart is the point of the type.
+//
+// There are two implementations behind these names and the choice is made once,
+// when this library is built, so that calling one costs nothing over the other:
+//
+//   software  IEEE 754 decimal written out here, in the BID encoding — the
+//             coefficient stored as an ordinary binary integer, because the wide
+//             arithmetic underneath already speaks that language. Runs anywhere.
+//
+//   hardware  IBM's decimal floating-point unit, which z/Architecture has from
+//             z9 and POWER from POWER6. Both encode in DPD rather than BID, so
+//             the bits under `XagDeci` are not the same ones — but no program
+//             can see them, and IEEE 754 decimal is specified closely enough
+//             that both must answer every operation identically. Where they do
+//             not, one of them is wrong, which is what makes this worth a knob
+//             rather than a preference.
+//
+// What the unit does is add, subtract, multiply, divide and compare, at
+// decimal64 and decimal128. A `deci32` is worked out at decimal64 and rounded
+// back either way, and `xag_deci_mod` and `xag_deci_pow` are built out of those
+// five either way — no machine has an instruction for either.
 typedef unsigned __int128 XagDeci;
+
+// Whether this library was built against a decimal unit. There is no guessing
+// at it from outside: a program asking for hardware decimal is refused unless
+// this says yes.
+int xag_decimal_is_hardware(void);
 
 XagDeci xag_deci_add(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_sub(uint32_t width, XagDeci a, XagDeci b);
