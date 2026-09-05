@@ -7,7 +7,9 @@ and Rust-style memory management. A size is always written: there is no `int`
 on its own, because there is no size to assume. Programs are compiled ahead of time,
 either to native code or to a form run by an AOT interpreter.
 
-Early work in progress — nothing here is stable yet.
+**Early work in progress — nothing here is stable yet.**
+
+The code written is mostly or 100% AI-made. Why? Because, I'm more of a designer, not a C++ stroke-inducing syntax reader 🤣. No offense.
 
 "Why would anyone ever use Xag?" Honestly, I don't know. 😂
 
