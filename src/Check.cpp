@@ -178,13 +178,13 @@ private:
   // A type that is named but has nothing behind it yet is said so plainly,
   // rather than being let through to fail somewhere further down.
   bool built(Type type, Span where) {
-    if (type != Type::Bin128 && !isDecimal(type))
+    if (!isDecimal(type))
       return true;
     complain(where, "E0512",
              "`" + std::string(name(type)) + "` is a type this compiler cannot build yet.",
              {"a type is written when there is something behind it"},
-             {"binary128 has no representation on this machine's compiler, so it "
-              "waits on the software arithmetic that `deci` needs anyway."});
+             {"a decimal format is arithmetic written in software, and that is "
+              "being written."});
     return false;
   }
 
@@ -276,7 +276,13 @@ private:
                   "leaves the value to say it."});
         return Type::Unknown;
       }
-      if (isBinary(expected)) {
+      if (expected == Type::Bin128) {
+        XagBin128 read = 0;
+        if (!xag_bin128_reads(e.text.data(), e.text.size(), &read))
+          complain(e.span, "E0509",
+                   "`*" + e.text + "*` is not a number a `bin128` holds.",
+                   {"a written value has to be one of the things its type holds"});
+      } else if (isBinary(expected)) {
         double read = 0;
         if (!xag_bin_reads(e.text.data(), e.text.size(), widthOf(expected), &read))
           complain(e.span, "E0509",

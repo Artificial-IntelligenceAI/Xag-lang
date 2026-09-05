@@ -169,10 +169,16 @@ A number is printed as the shortest spelling that reads back as the same value,
 and those spellings — `infinity`, `-infinity`, `not-a-number` — may be written
 as well as printed.
 
-> **`bin128` and `deci` are named and not built.** This machine's compiler has
-> no binary128 type at all — no `__float128`, no `mode(TF)`, and `long double`
-> is a `double` — so binary128 needs arithmetic written in software, which is
-> the same machinery `deci` needs. Naming one of them is `E0512` and says so.
+`bin128` is written out in software, because this machine's compiler has no
+binary128 type at all — no `__float128`, no `mode(TF)`, and `long double` is a
+`double`. It is where the extra precision stops being theoretical:
+
+```
+var.bin64 'a' = [*1e30*];   ('a' + bin64:*1* - bin64:*1e30*)     # 0
+var.bin128 'b' = [*1e30*];  ('b' + bin128:*1* - bin128:*1e30*)   # 1
+```
+
+> **`deci` is named and not built.** Naming one is `E0512` and says so.
 
 ## The operators
 

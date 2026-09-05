@@ -43,6 +43,10 @@ void xag_print_bool(int truth);
 // program says cannot depend on which of them said it.
 void xag_set_output(void *file);
 
+// Where printing goes, as a `FILE *`. Shared so that every part of the runtime
+// writes to the same place, whoever redirected it.
+void *xag_output_file(void);
+
 // Every whole number travels in one carrier, however wide it was written, with
 // its width and its signedness alongside. Adding and multiplying are not here:
 // under `overflow = "wrap"` a machine's own instructions are already exactly
@@ -75,6 +79,24 @@ void xag_print_bin(double value, uint32_t width);
 
 // Whether a written value is one the width can hold without becoming infinite.
 int32_t xag_bin_reads(const char *text, uint64_t length, uint32_t width, double *out);
+
+// IEEE 754 binary128, written out in software because this machine's compiler
+// has no type for it. The bits travel as a plain 128-bit integer: a struct
+// would have a platform ABI to match, and this has none.
+typedef unsigned __int128 XagBin128;
+
+XagBin128 xag_bin128_add(XagBin128 a, XagBin128 b);
+XagBin128 xag_bin128_sub(XagBin128 a, XagBin128 b);
+XagBin128 xag_bin128_mul(XagBin128 a, XagBin128 b);
+XagBin128 xag_bin128_div(XagBin128 a, XagBin128 b);
+
+// -1, 0 or 1, and -3 when the two cannot be ordered at all.
+int32_t xag_bin128_compare(XagBin128 a, XagBin128 b);
+
+XagBin128 xag_bin128_from_double(double value);
+double xag_bin128_to_double(XagBin128 value);
+int32_t xag_bin128_reads(const char *text, uint64_t length, XagBin128 *out);
+void xag_print_bin128(XagBin128 value);
 
 // What is still held. A program that ends with anything outstanding has a drop
 // that did not happen, and one that goes negative has a drop that happened

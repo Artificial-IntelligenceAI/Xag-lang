@@ -45,7 +45,7 @@ list(REMOVE_DUPLICATES LLVM_LIBS)
 
 # The one place a value is made, joined, counted, printed and freed. Every engine
 # calls it, so none of them can disagree about what those mean.
-add_library(xagrt STATIC runtime/xag_runtime.cpp)
+add_library(xagrt STATIC runtime/xag_runtime.cpp runtime/xag_bin128.cpp)
 target_include_directories(xagrt PUBLIC runtime)
 target_compile_options(xagrt PRIVATE -fno-exceptions -Wall -Wextra)
 

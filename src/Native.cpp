@@ -92,9 +92,10 @@ private:
     if (isWhole(named))
       return builder_.getIntNTy(widthOf(named));
     if (isBinary(named))
-      return widthOf(named) == 16   ? builder_.getHalfTy()
-             : widthOf(named) == 32 ? builder_.getFloatTy()
-                                    : builder_.getDoubleTy();
+      return widthOf(named) == 16    ? builder_.getHalfTy()
+             : widthOf(named) == 32  ? builder_.getFloatTy()
+             : widthOf(named) == 64  ? builder_.getDoubleTy()
+                                     : builder_.getInt128Ty(); // bin128, as its bits
     return builder_.getInt8Ty(); // `nothing`, and anything unknown
   }
 
@@ -134,6 +135,11 @@ private:
     add("xag_print_bin", voidTy, {f64, i32});
     add("xag_bin_mod", f64, {f64, f64, i32});
     add("xag_bin_pow", f64, {f64, f64, i32});
+    add("xag_print_bin128", voidTy, {i128});
+    add("xag_bin128_compare", i32, {i128, i128});
+    for (const char *op : {"xag_bin128_add", "xag_bin128_sub", "xag_bin128_mul",
+                           "xag_bin128_div"})
+      add(op, i128, {i128, i128});
     for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
       add(op, i128, {i128, i128, i32, i32});
     (void)i64;
@@ -225,6 +231,13 @@ private:
         // it fits, which is what makes reading it here safe at any width.
         const llvm::APInt bits(widthOf(named), operand.written, 10);
         return llvm::ConstantInt::get(builder_.getIntNTy(widthOf(named)), bits);
+      }
+      if (named == Type::Bin128) {
+        XagBin128 read = 0;
+        xag_bin128_reads(operand.written.data(), operand.written.size(), &read);
+        llvm::APInt bits(128, {static_cast<uint64_t>(read),
+                               static_cast<uint64_t>(read >> 64)});
+        return llvm::ConstantInt::get(builder_.getInt128Ty(), bits);
       }
       if (isBinary(named)) {
         double read = 0;
@@ -365,6 +378,30 @@ private:
     if (op == "or") return builder_.CreateOr(left, right);
 
     const Type given = typeNamed(leftType);
+    if (given == Type::Bin128) {
+      if (op == "+" || op == "-" || op == "x" || op == "/") {
+        const char *called = op == "+"   ? "xag_bin128_add"
+                             : op == "-" ? "xag_bin128_sub"
+                             : op == "x" ? "xag_bin128_mul"
+                                         : "xag_bin128_div";
+        return builder_.CreateCall(runtime_[called], {left, right});
+      }
+      auto *order = builder_.CreateCall(runtime_["xag_bin128_compare"], {left, right});
+      auto *unordered = builder_.CreateICmpEQ(order, builder_.getInt32(-3));
+      auto *zero = builder_.getInt32(0);
+      llvm::Value *asked = nullptr;
+      if (op == "==") asked = builder_.CreateICmpEQ(order, zero);
+      else if (op == "!==") asked = builder_.CreateICmpNE(order, zero);
+      else if (op == "<") asked = builder_.CreateICmpSLT(order, zero);
+      else if (op == ">") asked = builder_.CreateICmpSGT(order, zero);
+      else if (op == "<==") asked = builder_.CreateICmpSLE(order, zero);
+      else if (op == ">==") asked = builder_.CreateICmpSGE(order, zero);
+      if (!asked)
+        return nullptr;
+      // Nothing but `!==` is true of two that cannot be ordered.
+      return op == "!==" ? builder_.CreateOr(asked, unordered)
+                         : builder_.CreateAnd(asked, builder_.CreateNot(unordered));
+    }
     if (isBinary(given)) {
       if (op == "+") return builder_.CreateFAdd(left, right);
       if (op == "-") return builder_.CreateFSub(left, right);
@@ -430,7 +467,9 @@ private:
       for (const Operand &operand : value.operands) {
         const std::string &type = nameOf(operand.type);
         const Type named = typeNamed(type);
-        if (isBinary(named))
+        if (named == Type::Bin128)
+          builder_.CreateCall(runtime_["xag_print_bin128"], {read(operand)});
+        else if (isBinary(named))
           builder_.CreateCall(
               runtime_["xag_print_bin"],
               {builder_.CreateFPExt(read(operand), builder_.getDoubleTy()),

@@ -107,8 +107,11 @@ void binaryHoldsWhatIEEESaysItHolds() {
 }
 
 void aTypeWithNothingBehindItSaysSo() {
-  CHECK(inStart("var.bin128 'n' = [*1*];").code(0) == "E0512");
+  CHECK(inStart("var.bin128 'n' = [*1*];").ok()); // written out in software now
+  CHECK(inStart("var.bin128 'n' = [*1e4000*];").ok());
+  CHECK(inStart("var.bin128 'n' = [*abc*];").code(0) == "E0509");
   CHECK(inStart("var.deci64 'n' = [*1*];").code(0) == "E0512");
+  CHECK(inStart("var.deci32 'n' = [*1*];").code(0) == "E0512");
 }
 
 void sizesDoNotMixOnTheirOwn() {

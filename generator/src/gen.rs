@@ -37,7 +37,7 @@ fn literal_range(which: u8) -> (i64, i64) {
 
 /// IEEE 754 binary, at the widths this machine's compiler can represent.
 /// `bin128` is missing on purpose: there is no type behind it yet.
-const BINARY: [&str; 3] = ["bin16", "bin32", "bin64"];
+const BINARY: [&str; 4] = ["bin16", "bin32", "bin64", "bin128"];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Ty {
@@ -674,6 +674,7 @@ impl<'a> Writer<'a> {
                 // fraction often enough to be worth having.
                 let whole = self.rng.between(if which == 0 { -60 } else { -400 },
                                              if which == 0 { 60 } else { 400 });
+                let _ = which;
                 self.out.push('*');
                 push_number(self.out, whole);
                 if self.rng.chance(60) {

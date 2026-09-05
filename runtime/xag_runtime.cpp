@@ -196,6 +196,8 @@ void xag_print_bool(int truth) { std::fputs(truth ? "true" : "false", output());
 
 void xag_set_output(void *file) { out = static_cast<std::FILE *>(file); }
 
+void *xag_output_file(void) { return output(); }
+
 // Wrapping is done in unsigned arithmetic, where it is defined rather than
 // merely usual, and then cut to the width the type was written with.
 XagInt xag_int_fit(XagInt value, uint32_t width, int32_t is_signed) {

@@ -18,9 +18,10 @@ namespace {
 // the same distinction the IR draws between `move` and `copy`, kept honest at
 // run time rather than assumed.
 struct Value {
-  enum class Kind { Nothing, Number, Real, Text, Loan } kind = Kind::Nothing;
+  enum class Kind { Nothing, Number, Real, Wide, Text, Loan } kind = Kind::Nothing;
   XagInt number = 0;
-  double real = 0; // a `bin`, carried at binary64 and cut to its width
+  double real = 0;     // a `bin` up to 64 bits, cut to its width
+  XagBin128 wide = 0;  // a `bin128`, as its bits
   XagStr text{nullptr, 0, 0};
   bool owns = false;
   unsigned frame = 0; // Loan: which frame the lent slot lives in
@@ -140,6 +141,11 @@ private:
       if (isWhole(named)) {
         value.kind = Value::Kind::Number;
         value.number = readWhole(operand.written, named);
+      } else if (named == Type::Bin128) {
+        value.kind = Value::Kind::Wide;
+        XagBin128 read = 0;
+        xag_bin128_reads(operand.written.data(), operand.written.size(), &read);
+        value.wide = read;
       } else if (isBinary(named)) {
         value.kind = Value::Kind::Real;
         double read = 0;
@@ -270,7 +276,27 @@ private:
     answer.kind = Value::Kind::Number;
     const std::string &op = value.op;
 
-    if (a && b && a->kind == Value::Kind::Real) {
+    if (a && b && a->kind == Value::Kind::Wide) {
+      const XagBin128 x = a->wide, y = b->wide;
+      if (op == "+" || op == "-" || op == "x" || op == "/") {
+        answer.kind = Value::Kind::Wide;
+        answer.wide = op == "+"   ? xag_bin128_add(x, y)
+                      : op == "-" ? xag_bin128_sub(x, y)
+                      : op == "x" ? xag_bin128_mul(x, y)
+                                  : xag_bin128_div(x, y);
+      } else {
+        // -3 says the two cannot be ordered, which only `!==` answers true to.
+        const int32_t order = xag_bin128_compare(x, y);
+        const bool ordered = order != -3;
+        if (op == "==") answer.number = ordered && order == 0;
+        else if (op == "!==") answer.number = !ordered || order != 0;
+        else if (op == "<") answer.number = ordered && order < 0;
+        else if (op == ">") answer.number = ordered && order > 0;
+        else if (op == "<==") answer.number = ordered && order <= 0;
+        else if (op == ">==") answer.number = ordered && order >= 0;
+        else trouble_ = "`" + op + "` was asked of a `bin128`";
+      }
+    } else if (a && b && a->kind == Value::Kind::Real) {
       // IEEE all the way down: dividing by zero is infinity, and a
       // not-a-number compares equal to nothing at all, itself included.
       const Type made = typeNamed(typeOf(value.type));
@@ -346,6 +372,8 @@ private:
         Value *at = behind(piece);
         if (at && at->kind == Value::Kind::Text)
           xag_print(&at->text);
+        else if (at && at->kind == Value::Kind::Wide)
+          xag_print_bin128(at->wide);
         else if (at && at->kind == Value::Kind::Real)
           xag_print_bin(at->real, widthOf(typeNamed(typeOf(operand.type))));
         else if (at && at->kind == Value::Kind::Number) {

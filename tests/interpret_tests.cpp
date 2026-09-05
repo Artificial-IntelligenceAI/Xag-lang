@@ -167,6 +167,20 @@ void itDoesIEEEBinary() {
        "0.30000000000000004\n");
 }
 
+void itHoldsWhatABin64Cannot() {
+  SAYS("START { var.bin128 'a' = [*1e30*];"
+       " print.stdout[('a' + bin128:*1*) \\n]; }\n",
+       "1.000000000000000000000000000001e+30\n");
+  // The same sum in a bin64 loses the one, and says so.
+  SAYS("START { var.bin64 'a' = [*1e30*];"
+       " print.stdout[('a' + bin64:*1* - bin64:*1e30*) \\n]; }\n", "0\n");
+  SAYS("START { var.bin128 'a' = [*1e30*];"
+       " print.stdout[('a' + bin128:*1* - bin128:*1e30*) \\n]; }\n", "1\n");
+  SAYS("START { print.stdout[(bin128:*1* / bin128:*3*) \\n]; }\n",
+       "0.3333333333333333333333333333333333\n");
+  SAYS("START { print.stdout[(bin128:*1* / bin128:*0*) \\n]; }\n", "infinity\n");
+}
+
 void itDecides() {
   SAYS("START { var.int64 'n' = [*5*];\n"
        "  if 'n' > *3* { print.stdout[str:*big* \\n]; } else { print.stdout[str:*small* \\n]; } }\n",
@@ -268,6 +282,7 @@ int main() {
   itComparesAsTheTypeSaysToCompare();
   itCountsPastSixtyFourBits();
   itDoesIEEEBinary();
+  itHoldsWhatABin64Cannot();
   itDecides();
   itLoops();
   itCalls();

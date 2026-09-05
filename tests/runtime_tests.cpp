@@ -4,6 +4,7 @@
 
 #include "xag_runtime.h"
 
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -136,6 +137,71 @@ void everySizeIsTheSizeItSays() {
   CHECK(xag_int_fit(-5, 128, 1) == -5);
 }
 
+std::string spelled(XagBin128 value) {
+  std::FILE *sink = std::tmpfile();
+  xag_set_output(sink);
+  xag_print_bin128(value);
+  xag_set_output(nullptr);
+  std::fflush(sink);
+  std::rewind(sink);
+  char buffer[256];
+  const size_t got = std::fread(buffer, 1, sizeof(buffer), sink);
+  std::fclose(sink);
+  return std::string(buffer, got);
+}
+
+XagBin128 read128(const char *text) {
+  XagBin128 out = 0;
+  if (!xag_bin128_reads(text, std::strlen(text), &out)) {
+    std::cerr << "FAIL could not read " << text << '\n';
+    ++failures;
+  }
+  return out;
+}
+
+void binary128IsWrittenOutInSoftware() {
+  // The whole reason the type exists: 113 bits of significand hold what 53
+  // cannot, and the difference is visible rather than theoretical.
+  const XagBin128 big = read128("1e30");
+  const XagBin128 more = xag_bin128_add(big, read128("1"));
+  CHECK(spelled(more) == "1.000000000000000000000000000001e+30");
+  CHECK(spelled(xag_bin128_sub(more, big)) == "1");
+  CHECK(1e30 + 1.0 == 1e30); // which a double cannot do
+
+  CHECK(spelled(xag_bin128_add(read128("1.5"), read128("2.25"))) == "3.75");
+  CHECK(spelled(xag_bin128_mul(xag_bin128_div(read128("2"), read128("3")),
+                               read128("3"))) == "2");
+  CHECK(spelled(read128("0.1")) == "0.1");
+
+  // Nothing stops, here as in every other `bin`.
+  CHECK(spelled(xag_bin128_div(read128("1"), read128("0"))) == "infinity");
+  CHECK(spelled(xag_bin128_div(read128("-1"), read128("0"))) == "-infinity");
+  CHECK(spelled(xag_bin128_div(read128("0"), read128("0"))) == "not-a-number");
+  CHECK(spelled(xag_bin128_mul(read128("1e4000"), read128("1e1000"))) == "infinity");
+
+  // A not-a-number is ordered against nothing at all.
+  CHECK(xag_bin128_compare(read128("not-a-number"), read128("1")) == -3);
+  CHECK(xag_bin128_compare(read128("1"), read128("3")) == -1);
+  CHECK(xag_bin128_compare(read128("3"), read128("1")) == 1);
+  CHECK(xag_bin128_compare(read128("-0"), read128("0")) == 0);
+
+  // Every double survives the trip out and back exactly.
+  const double tries[] = {0.0, 1.0, -1.0, 0.1, 1e300, 1e-300, 3.141592653589793,
+                          2.2250738585072014e-308, 5e-324, 1.7976931348623157e308};
+  for (double one : tries)
+    CHECK(xag_bin128_to_double(xag_bin128_from_double(one)) == one);
+
+  // And what is printed can be read back, which is what shortest means here.
+  for (const char *text : {"0.1", "1", "-2.5", "1e300", "1e-300", "12345.678",
+                           "1.000000000000000000000000000001e+30"}) {
+    const XagBin128 value = read128(text);
+    const std::string said = spelled(value);
+    XagBin128 back = 0;
+    CHECK(xag_bin128_reads(said.data(), said.size(), &back) == 1);
+    CHECK(back == value);
+  }
+}
+
 void nothingIsLeftHolding() {
   CHECK(xag_balance_is_clear() == 1);
 }
@@ -147,6 +213,7 @@ int main() {
   joiningBuildsSomethingNew();
   textGrowsWhereItStands();
   countingCountsWhatAPersonWouldCount();
+  binary128IsWrittenOutInSoftware();
   arithmeticIsWrittenOnce();
   everySizeIsTheSizeItSays();
   nothingIsLeftHolding();
