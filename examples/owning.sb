@@ -1,0 +1,27 @@
+# What a name owns, what it lends, and what it gives away.
+
+fn.i64 ['size'] [ref.str 'text'] {
+    give [call count['text']];
+}
+
+fn.nothing ['excite'] [refmut.str 'text'] {
+    set ['text'] = ['text' *!*];
+}
+
+# No ownership word, so this one takes it.
+fn.nothing ['keep'] [str 'text'] {
+    print.stdout['text' \n];
+}
+
+START {
+    var.mut.str ['greeting'] = [*Hello, * *world*];
+
+    print.stdout[str:*size = * call 'size'[ref 'greeting'] \n];
+
+    call 'excite'[refmut 'greeting'];
+    print.stdout['greeting' \n];
+
+    call 'keep'[move 'greeting'];
+
+    # 'greeting' holds nothing from here on, and asking for it is an error.
+}
