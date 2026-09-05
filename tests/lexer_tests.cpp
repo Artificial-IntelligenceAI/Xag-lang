@@ -89,11 +89,11 @@ void aHyphenJoinsAWordButDoesNotSubtract() {
 }
 
 void aWordIsPlainerThanAName() {
-  // An underscore and an emoji are both fine in a name and neither is a word.
   const sb::LexResult underscore = lexText("sum_to");
-  CHECK(!underscore.ok());
-  CHECK(underscore.diagnostics[0].code == "E0007");
+  CHECK(underscore.ok());
+  CHECK(underscore.tokens[0].text == "sum_to");
 
+  // An emoji is fine in a name and is not a word.
   const sb::LexResult emoji = lexText("sum\xF0\x9F\x98\x80to");
   CHECK(!emoji.ok());
   CHECK(emoji.diagnostics[0].code == "E0008");

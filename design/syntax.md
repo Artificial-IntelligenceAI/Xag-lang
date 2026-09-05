@@ -50,8 +50,8 @@ itself — the one character that could not otherwise appear there.
 A **name** wears marks, so it may hold anything at all — spaces, punctuation,
 emoji — because the marks say where it stops.
 
-A **word** wears none, so it has to be plainer: letters and digits, joined by
-`-`. Words are function names, chain segments and types.
+A **word** wears none, so it has to be plainer: letters, digits and `_`, joined
+by `-`. Words are function names, chain segments and types.
 
 ```
 fn.i64 sum-to [i64 'n'] { ... }
@@ -67,8 +67,8 @@ That is one more thing a reader never has to work out from context: marks say
 keeps it apart from subtraction — subtraction's operands are marked or
 bracketed, so `sum-to` is one word and `count - *1*` is three tokens.
 
-An underscore is not a word character. Neither is anything outside ASCII. Both
-are perfectly good inside a name.
+Nothing outside ASCII is a word character — though it is perfectly good inside a
+name.
 
 ## Declarations are chains
 

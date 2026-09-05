@@ -38,10 +38,10 @@ const char *describe(TokenKind kind) {
 namespace {
 
 // A word is a function name, a chain segment, or a type. It is written in
-// letters and digits, joined by `-`. A variable never comes through here:
+// letters, digits and `_`, joined by `-`. A variable never comes through here:
 // variables are names, and names wear marks, so they may hold anything.
-bool startsWord(char c) { return std::isalpha(static_cast<unsigned char>(c)); }
-bool continuesWord(char c) { return std::isalnum(static_cast<unsigned char>(c)); }
+bool startsWord(char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; }
+bool continuesWord(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
 
 class Lexer {
 public:
@@ -223,15 +223,6 @@ private:
       return;
     }
 
-    if (c == '_') {
-      while (at_ < text_.size() && (text_[at_] == '_' || continuesWord(text_[at_])))
-        ++at_;
-      complain(Span{begin, at_}, "E0007", "an underscore is not written in a word.",
-               {"a word is written in letters and digits, joined by `-`"},
-               {"a word is a function, a chain segment or a type; a variable is a name, "
-                "and a name wears marks, so it may hold anything at all."});
-      return;
-    }
 
     if (std::isdigit(static_cast<unsigned char>(c))) {
       while (at_ < text_.size() && std::isdigit(static_cast<unsigned char>(text_[at_])))
@@ -251,7 +242,7 @@ private:
       while (at_ < text_.size() && static_cast<unsigned char>(text_[at_]) >= 0x80)
         ++at_;
       complain(Span{begin, at_}, "E0008", "this is not written in a word.",
-               {"a word is written in letters and digits, joined by `-`"},
+               {"a word is written in letters, digits and `_`, joined by `-`"},
                {"a name may hold any character, including this one, because its marks "
                 "say where it stops; a word has no marks and so has to be plainer."});
       return;
