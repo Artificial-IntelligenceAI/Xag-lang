@@ -23,9 +23,10 @@ CMake finds Homebrew's keg-only LLVM on its own. Build with Apple's `clang++`
 (the default) rather than Homebrew's — Homebrew's driver ships its own libc++
 and collides with the macOS SDK headers once LLVM's include directory is added.
 
-`sbc` is currently a toolchain smoke test: it builds a tiny module in memory,
-runs LLVM's verifier over it, and prints the IR. The language itself is not
-implemented yet.
+`sbc lex <file>` reads a source file and prints its tokens; `sbc llvm-smoke`
+proves the LLVM backend is reachable. Run the tests with `ctest --test-dir build`.
+Only the lexer exists so far — there is no parser, no checker, and no code
+generation yet.
 
 ## License
 

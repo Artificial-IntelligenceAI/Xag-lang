@@ -1,9 +1,5 @@
-// Toolchain smoke test.
-//
-// This is not the compiler. It exists to prove one thing before any language
-// work begins: that we can link against LLVM, build a module in memory, and
-// have LLVM's own verifier accept it. When the real front end starts emitting
-// IR, this file goes away.
+#include "safetybolt/Lexer.h"
+#include "safetybolt/Source.h"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -11,28 +7,77 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
 
-int main() {
+#include <fstream>
+#include <iostream>
+#include <sstream>
+
+namespace {
+
+void usage() {
+  std::cout << "sbc — the SafetyBolt compiler\n\n"
+               "    sbc lex <file>     read it and print the tokens\n"
+               "    sbc llvm-smoke     prove the LLVM backend is reachable\n"
+               "    sbc --help         this\n\n"
+               "Nothing else is built yet.\n";
+}
+
+int lexFile(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    std::cerr << "sbc: cannot read " << path << '\n';
+    return 1;
+  }
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+
+  const sb::Source source(path, buffer.str());
+  const sb::LexResult result = sb::lex(source);
+
+  for (const sb::Token &token : result.tokens) {
+    const sb::Source::Position at = source.positionOf(token.span.begin);
+    std::cout << at.line << ':' << at.column << '\t' << sb::describe(token.kind);
+    if (!token.text.empty())
+      std::cout << '\t' << token.text;
+    std::cout << '\n';
+  }
+
+  for (const sb::Diagnostic &diagnostic : result.diagnostics) {
+    std::cerr << '\n';
+    sb::render(source, diagnostic, std::cerr);
+  }
+  return result.ok() ? 0 : 1;
+}
+
+int llvmSmoke() {
   llvm::LLVMContext context;
   llvm::Module module("safetybolt.smoke", context);
   llvm::IRBuilder<> builder(context);
 
-  llvm::Type *i32 = builder.getInt32Ty();
-
-  // fn answer() -> i32 { 42 }
-  llvm::FunctionType *signature = llvm::FunctionType::get(i32, /*isVarArg=*/false);
+  llvm::FunctionType *signature =
+      llvm::FunctionType::get(builder.getInt32Ty(), /*isVarArg=*/false);
   llvm::Function *answer = llvm::Function::Create(
       signature, llvm::Function::ExternalLinkage, "sb_answer", module);
-
   builder.SetInsertPoint(llvm::BasicBlock::Create(context, "entry", answer));
   builder.CreateRet(builder.getInt32(42));
 
-  // verifyModule returns true when the module is broken.
-  if (llvm::verifyModule(module, &llvm::errs())) {
-    llvm::errs() << "smoke test: module failed verification\n";
+  if (llvm::verifyModule(module, &llvm::errs()))
     return 1;
-  }
 
   module.print(llvm::outs(), nullptr);
-  llvm::outs() << "smoke test: LLVM " << LLVM_VERSION_STRING << " linked and verified\n";
+  llvm::outs() << "LLVM " << LLVM_VERSION_STRING << " linked and verified\n";
   return 0;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+  const std::string command = argc > 1 ? argv[1] : "--help";
+
+  if (command == "lex" && argc > 2)
+    return lexFile(argv[2]);
+  if (command == "llvm-smoke")
+    return llvmSmoke();
+
+  usage();
+  return command == "--help" ? 0 : 1;
 }

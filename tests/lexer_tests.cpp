@@ -1,0 +1,148 @@
+#include "safetybolt/Lexer.h"
+
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+int failures = 0;
+
+#define CHECK(cond)                                                                      \
+  do {                                                                                   \
+    if (!(cond)) {                                                                       \
+      std::cerr << "FAIL " << __FILE__ << ':' << __LINE__ << ": " #cond "\n";            \
+      ++failures;                                                                        \
+    }                                                                                    \
+  } while (false)
+
+sb::LexResult lexText(const std::string &text) {
+  static std::vector<sb::Source> kept;
+  kept.emplace_back("test.sb", text);
+  return sb::lex(kept.back());
+}
+
+std::vector<sb::TokenKind> kinds(const sb::LexResult &result) {
+  std::vector<sb::TokenKind> out;
+  for (const sb::Token &token : result.tokens)
+    out.push_back(token.kind);
+  return out;
+}
+
+void marksCarryTheirContents() {
+  const sb::LexResult r = lexText("'greeting' *Hello, world*");
+  CHECK(r.ok());
+  CHECK(kinds(r) == (std::vector<sb::TokenKind>{sb::TokenKind::Name, sb::TokenKind::Written,
+                                                sb::TokenKind::End}));
+  CHECK(r.tokens[0].text == "greeting");
+  CHECK(r.tokens[1].text == "Hello, world");
+}
+
+void aMarkIsWrittenWithABackslash() {
+  const sb::LexResult r = lexText("*a\\*b* 'it\\'s'");
+  CHECK(r.ok());
+  CHECK(r.tokens[0].text == "a*b");
+  CHECK(r.tokens[1].text == "it's");
+}
+
+void escapesStandOutside() {
+  // Inside a mark a backslash is just a backslash; only the closing mark escapes.
+  const sb::LexResult inside = lexText("*a\\nb*");
+  CHECK(inside.ok());
+  CHECK(inside.tokens[0].text == "a\\nb");
+
+  const sb::LexResult beside = lexText("*line one* \\n *line two*");
+  CHECK(beside.ok());
+  CHECK(kinds(beside) == (std::vector<sb::TokenKind>{sb::TokenKind::Written,
+                                                     sb::TokenKind::Escape,
+                                                     sb::TokenKind::Written,
+                                                     sb::TokenKind::End}));
+  CHECK(beside.tokens[1].text == "n");
+}
+
+void chainsAreWordsAndDots() {
+  const sb::LexResult r = lexText("var.mut.i64 ['total'] = [*0*];");
+  CHECK(r.ok());
+  CHECK(r.tokens[0].kind == sb::TokenKind::Word && r.tokens[0].text == "var");
+  CHECK(r.tokens[1].kind == sb::TokenKind::Dot);
+  CHECK(r.tokens[2].text == "mut");
+  CHECK(r.tokens[4].text == "i64");
+  CHECK(r.tokens.back().kind == sb::TokenKind::End);
+}
+
+void commentsRunToEndOfLine() {
+  const sb::LexResult r = lexText("# 'not' *a* token\n'yes'");
+  CHECK(r.ok());
+  CHECK(kinds(r) == (std::vector<sb::TokenKind>{sb::TokenKind::Name, sb::TokenKind::End}));
+  CHECK(r.tokens[0].text == "yes");
+}
+
+void comparisonsGlue() {
+  const sb::LexResult r = lexText("< <= > >= == != =");
+  CHECK(r.ok());
+  CHECK(kinds(r) == (std::vector<sb::TokenKind>{
+                        sb::TokenKind::Less, sb::TokenKind::LessEqual, sb::TokenKind::Greater,
+                        sb::TokenKind::GreaterEqual, sb::TokenKind::EqualEqual,
+                        sb::TokenKind::BangEqual, sb::TokenKind::Equals, sb::TokenKind::End}));
+}
+
+void aQuoteOffersBothMarks() {
+  const sb::LexResult r = lexText("\"hello\"");
+  CHECK(!r.ok());
+  CHECK(r.diagnostics.size() == 1);
+  CHECK(r.diagnostics[0].tips.size() == 2);
+}
+
+void aBareNumberIsToldToWearMarks() {
+  const sb::LexResult r = lexText("1000");
+  CHECK(!r.ok());
+  CHECK(r.diagnostics.size() == 1);
+  CHECK(r.diagnostics[0].tips.at(0) == "write `*1000*`");
+}
+
+void anUnclosedMarkIsReported() {
+  const sb::LexResult r = lexText("*hello\n'world'");
+  CHECK(!r.ok());
+  CHECK(r.diagnostics.size() == 1);
+  // Recovery continues on the next line rather than swallowing the file.
+  CHECK(r.tokens.size() == 2);
+  CHECK(r.tokens[0].kind == sb::TokenKind::Name && r.tokens[0].text == "world");
+}
+
+void everyMistakeIsReported() {
+  const sb::LexResult r = lexText("1 \"x\" 2");
+  CHECK(r.diagnostics.size() == 3);
+}
+
+void diagnosticsPointAtTheRightPlace() {
+  const sb::Source source("test.sb", "var.str ['s'] = [1000];");
+  const sb::LexResult r = sb::lex(source);
+  CHECK(!r.ok());
+  std::ostringstream rendered;
+  sb::render(source, r.diagnostics[0], rendered);
+  const std::string text = rendered.str();
+  CHECK(text.find("test.sb:1:18") != std::string::npos);
+  CHECK(text.find("^^^^") != std::string::npos);
+  CHECK(text.find("write `*1000*`") != std::string::npos);
+}
+
+} // namespace
+
+int main() {
+  marksCarryTheirContents();
+  aMarkIsWrittenWithABackslash();
+  escapesStandOutside();
+  chainsAreWordsAndDots();
+  commentsRunToEndOfLine();
+  comparisonsGlue();
+  aQuoteOffersBothMarks();
+  aBareNumberIsToldToWearMarks();
+  anUnclosedMarkIsReported();
+  everyMistakeIsReported();
+  diagnosticsPointAtTheRightPlace();
+
+  if (failures == 0)
+    std::cout << "all lexer tests passed\n";
+  return failures == 0 ? 0 : 1;
+}

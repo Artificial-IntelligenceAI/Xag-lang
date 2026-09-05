@@ -41,7 +41,16 @@ separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 # warn about a duplicate archive.
 llvm_map_components_to_libnames(LLVM_LIBS core)
 
+# The front end knows nothing about LLVM, so it builds and tests without it.
+add_library(sbfront STATIC
+  src/Source.cpp
+  src/Diagnostic.cpp
+  src/Lexer.cpp)
+target_include_directories(sbfront PUBLIC include)
+target_compile_options(sbfront PRIVATE -fno-exceptions -Wall -Wextra)
+
 add_executable(sbc src/main.cpp)
+target_link_libraries(sbc PRIVATE sbfront)
 
 # SYSTEM so LLVM's own headers never emit warnings into our build output.
 target_include_directories(sbc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
@@ -50,3 +59,10 @@ target_link_libraries(sbc PRIVATE ${LLVM_LIBS})
 
 # LLVM is built without exceptions; match it so our objects agree with its headers.
 target_compile_options(sbc PRIVATE -fno-exceptions -Wall -Wextra)
+
+enable_testing()
+
+add_executable(lexer_tests tests/lexer_tests.cpp)
+target_link_libraries(lexer_tests PRIVATE sbfront)
+target_compile_options(lexer_tests PRIVATE -fno-exceptions -Wall -Wextra)
+add_test(NAME lexer COMMAND lexer_tests)
