@@ -23,10 +23,12 @@ CMake finds Homebrew's keg-only LLVM on its own. Build with Apple's `clang++`
 (the default) rather than Homebrew's — Homebrew's driver ships its own libc++
 and collides with the macOS SDK headers once LLVM's include directory is added.
 
-Source files are `.xag`. `xagc lex <file>` reads one and prints its tokens; `xagc llvm-smoke`
-proves the LLVM backend is reachable. Run the tests with `ctest --test-dir build`.
-Only the lexer exists so far — there is no parser, no checker, and no code
-generation yet.
+Source files are `.xag`. `xagc lex <file>` prints its tokens, `xagc parse <file>`
+prints its tree, and `xagc llvm-smoke` proves the LLVM backend is reachable. Run
+the tests with `ctest --test-dir build`.
+
+The lexer and parser exist. There is no checker, no ownership analysis, and no
+code generation yet.
 
 ## License
 

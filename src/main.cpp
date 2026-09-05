@@ -1,4 +1,5 @@
 #include "xag/Lexer.h"
+#include "xag/Parser.h"
 #include "xag/Source.h"
 
 #include <llvm/IR/IRBuilder.h>
@@ -10,27 +11,47 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 namespace {
 
 void usage() {
   std::cout << "xagc — the Xag compiler\n\n"
                "    xagc lex <file>     read it and print the tokens\n"
+               "    xagc parse <file>   read it and print the tree\n"
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
                "    xagc --help         this\n\n"
                "Nothing else is built yet.\n";
 }
 
-int lexFile(const std::string &path) {
+bool readSource(const std::string &path, std::string &text) {
   std::ifstream in(path, std::ios::binary);
   if (!in) {
     std::cerr << "xagc: cannot read " << path << '\n';
-    return 1;
+    return false;
   }
   std::ostringstream buffer;
   buffer << in.rdbuf();
+  text = buffer.str();
+  return true;
+}
 
-  const xag::Source source(path, buffer.str());
+int report(const xag::Source &source, const std::vector<xag::Diagnostic> &diagnostics) {
+  if (diagnostics.empty())
+    return 0;
+  xag::renderOpening(std::cerr);
+  for (const xag::Diagnostic &diagnostic : diagnostics)
+    xag::render(source, diagnostic, std::cerr);
+  xag::renderTally(diagnostics.size(), std::cerr);
+  return 1;
+}
+
+int lexFile(const std::string &path) {
+  std::string text;
+  if (!readSource(path, text))
+    return 1;
+
+  const xag::Source source(path, text);
   const xag::LexResult result = xag::lex(source);
 
   // Tokens after a failed lex describe a file the reader has not written yet.
@@ -42,13 +63,23 @@ int lexFile(const std::string &path) {
     std::cout << '\n';
   }
 
-  if (!result.ok()) {
-    xag::renderOpening(std::cerr);
-    for (const xag::Diagnostic &diagnostic : result.diagnostics)
-      xag::render(source, diagnostic, std::cerr);
-    xag::renderTally(result.diagnostics.size(), std::cerr);
-  }
-  return result.ok() ? 0 : 1;
+  return report(source, result.diagnostics);
+}
+
+int parseFile(const std::string &path) {
+  std::string text;
+  if (!readSource(path, text))
+    return 1;
+
+  const xag::Source source(path, text);
+  const xag::LexResult lexed = xag::lex(source);
+  if (!lexed.ok())
+    return report(source, lexed.diagnostics);
+
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  if (parsed.ok())
+    xag::print(parsed.program, std::cout);
+  return report(source, parsed.diagnostics);
 }
 
 int llvmSmoke() {
@@ -78,6 +109,8 @@ int main(int argc, char **argv) {
 
   if (command == "lex" && argc > 2)
     return lexFile(argv[2]);
+  if (command == "parse" && argc > 2)
+    return parseFile(argv[2]);
   if (command == "llvm-smoke")
     return llvmSmoke();
 

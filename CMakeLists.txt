@@ -45,7 +45,9 @@ llvm_map_components_to_libnames(LLVM_LIBS core)
 add_library(xagfront STATIC
   src/Source.cpp
   src/Diagnostic.cpp
-  src/Lexer.cpp)
+  src/Lexer.cpp
+  src/Parser.cpp
+  src/AstPrinter.cpp)
 target_include_directories(xagfront PUBLIC include)
 target_compile_options(xagfront PRIVATE -fno-exceptions -Wall -Wextra)
 
@@ -62,7 +64,9 @@ target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
-add_executable(lexer_tests tests/lexer_tests.cpp)
-target_link_libraries(lexer_tests PRIVATE xagfront)
-target_compile_options(lexer_tests PRIVATE -fno-exceptions -Wall -Wextra)
-add_test(NAME lexer COMMAND lexer_tests)
+foreach(suite lexer parser)
+  add_executable(${suite}_tests tests/${suite}_tests.cpp)
+  target_link_libraries(${suite}_tests PRIVATE xagfront)
+  target_compile_options(${suite}_tests PRIVATE -fno-exceptions -Wall -Wextra)
+  add_test(NAME ${suite} COMMAND ${suite}_tests)
+endforeach()
