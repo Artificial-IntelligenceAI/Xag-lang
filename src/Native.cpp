@@ -144,8 +144,11 @@ private:
       add(op, i128, {i128, i128});
     add("xag_print_deci", voidTy, {i32, i128});
     add("xag_deci_compare", i32, {i32, i128, i128});
-    for (const char *op : {"xag_deci_add", "xag_deci_sub", "xag_deci_mul", "xag_deci_div"})
+    for (const char *op : {"xag_deci_add", "xag_deci_sub", "xag_deci_mul",
+                           "xag_deci_div", "xag_deci_mod", "xag_deci_pow"})
       add(op, i128, {i32, i128, i128});
+    for (const char *op : {"xag_bin128_mod", "xag_bin128_pow"})
+      add(op, i128, {i128, i128});
     for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
       add(op, i128, {i128, i128, i32, i32});
     (void)i64;
@@ -398,11 +401,14 @@ private:
       auto *say = builder_.getInt32(static_cast<int>(widthOf(given)));
       auto *x = builder_.CreateZExt(left, carrier);
       auto *y = builder_.CreateZExt(right, carrier);
-      if (op == "+" || op == "-" || op == "x" || op == "/") {
-        const char *called = op == "+"   ? "xag_deci_add"
-                             : op == "-" ? "xag_deci_sub"
-                             : op == "x" ? "xag_deci_mul"
-                                         : "xag_deci_div";
+      if (op == "+" || op == "-" || op == "x" || op == "/" || op == "mod" ||
+          op == "^") {
+        const char *called = op == "+"     ? "xag_deci_add"
+                             : op == "-"   ? "xag_deci_sub"
+                             : op == "x"   ? "xag_deci_mul"
+                             : op == "/"   ? "xag_deci_div"
+                             : op == "mod" ? "xag_deci_mod"
+                                           : "xag_deci_pow";
         return builder_.CreateTrunc(builder_.CreateCall(runtime_[called], {say, x, y}),
                                     typeFor(nameOf(value.type)));
       }
@@ -422,11 +428,14 @@ private:
                          : builder_.CreateAnd(asked, builder_.CreateNot(unordered));
     }
     if (given == Type::Bin128) {
-      if (op == "+" || op == "-" || op == "x" || op == "/") {
-        const char *called = op == "+"   ? "xag_bin128_add"
-                             : op == "-" ? "xag_bin128_sub"
-                             : op == "x" ? "xag_bin128_mul"
-                                         : "xag_bin128_div";
+      if (op == "+" || op == "-" || op == "x" || op == "/" || op == "mod" ||
+          op == "^") {
+        const char *called = op == "+"     ? "xag_bin128_add"
+                             : op == "-"   ? "xag_bin128_sub"
+                             : op == "x"   ? "xag_bin128_mul"
+                             : op == "/"   ? "xag_bin128_div"
+                             : op == "mod" ? "xag_bin128_mod"
+                                           : "xag_bin128_pow";
         return builder_.CreateCall(runtime_[called], {left, right});
       }
       auto *order = builder_.CreateCall(runtime_["xag_bin128_compare"], {left, right});

@@ -39,10 +39,14 @@ fn literal_range(which: u8) -> (i64, i64) {
 /// `bin128` is missing on purpose: there is no type behind it yet.
 const BINARY: [&str; 4] = ["bin16", "bin32", "bin64", "bin128"];
 
+/// IEEE 754 decimal, which counts in tens and keeps the places it was given.
+const DECIMAL: [&str; 3] = ["deci32", "deci64", "deci128"];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Ty {
     Whole(u8),
     Real(u8),
+    Deci(u8),
     Bool,
     Str,
 }
@@ -52,6 +56,7 @@ impl Ty {
         match self {
             Ty::Whole(which) => WHOLE[which as usize],
             Ty::Real(which) => BINARY[which as usize],
+            Ty::Deci(which) => DECIMAL[which as usize],
             Ty::Bool => "bool",
             Ty::Str => "str",
         }
@@ -148,15 +153,16 @@ impl<'a> Writer<'a> {
     }
 
     fn pick_whole(&mut self) -> Ty {
-        // A `bin` shows up a third of the time, so the oracle sees both.
-        if self.rng.chance(30) {
-            return Ty::Real(self.rng.below(BINARY.len() as u32) as u8);
+        // Every family gets a turn, so the oracle sees all four.
+        match self.rng.below(10) {
+            0..=1 => Ty::Real(self.rng.below(BINARY.len() as u32) as u8),
+            2..=3 => Ty::Deci(self.rng.below(DECIMAL.len() as u32) as u8),
+            _ => Ty::Whole(self.rng.below(WHOLE.len() as u32) as u8),
         }
-        Ty::Whole(self.rng.below(WHOLE.len() as u32) as u8)
     }
 
     fn numeric(ty: Ty) -> bool {
-        matches!(ty, Ty::Whole(_) | Ty::Real(_))
+        matches!(ty, Ty::Whole(_) | Ty::Real(_) | Ty::Deci(_))
     }
 
     /// A whole type some visible name already has, so an expression can be
@@ -567,7 +573,7 @@ impl<'a> Writer<'a> {
                     self.literal(Ty::Str);
                 }
             }
-            Ty::Whole(_) | Ty::Real(_) => self.number(ty, depth),
+            Ty::Whole(_) | Ty::Real(_) | Ty::Deci(_) => self.number(ty, depth),
         }
     }
 
@@ -667,6 +673,20 @@ impl<'a> Writer<'a> {
                 let value = self.rng.between(low, high);
                 self.out.push('*');
                 push_number(self.out, value);
+                self.out.push('*');
+            }
+            Ty::Deci(which) => {
+                // Small enough for a `deci32`'s seven digits, and written with
+                // places often enough that keeping them is worth testing.
+                let whole = self.rng.between(if which == 0 { -900 } else { -9000 },
+                                             if which == 0 { 900 } else { 9000 });
+                self.out.push('*');
+                push_number(self.out, whole);
+                if self.rng.chance(60) {
+                    self.out.push('.');
+                    let places = self.rng.between(1, 99);
+                    push_number(self.out, places);
+                }
                 self.out.push('*');
             }
             Ty::Real(which) => {

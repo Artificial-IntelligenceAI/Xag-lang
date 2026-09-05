@@ -237,11 +237,10 @@ void byPowerOfTen(U256 &significand, int32_t &exponent, bool &sticky, int32_t po
       significand = xag::shiftLeft(significand, lift);
       exponent -= static_cast<int32_t>(lift);
     }
-    U256 quotient, left;
-    xag::divide(significand, xag::wide(10), quotient, left);
-    if (!xag::isZero(left))
+    uint64_t left = 0;
+    significand = xag::divideSmall(significand, 10, left);
+    if (left != 0)
       sticky = true;
-    significand = quotient;
     ++power;
   }
 }
@@ -299,6 +298,88 @@ XagBin128 xag_bin128_div(XagBin128 a, XagBin128 b) {
               quotient, left);
   return put(sign, quotient, x.exponent - y.exponent - static_cast<int32_t>(kLift),
              !xag::isZero(left));
+}
+
+// What is left over after taking away as many whole multiples as will go.
+XagBin128 xag_bin128_mod(XagBin128 a, XagBin128 b) {
+  const Taken x = take(a), y = take(b);
+  if (x.kind == Kind::NotANumber || y.kind == Kind::NotANumber ||
+      x.kind == Kind::Infinity || y.kind == Kind::Zero)
+    return notANumber();
+  if (y.kind == Kind::Infinity || x.kind == Kind::Zero)
+    return a;
+
+  XagBin128 left = a;
+  const XagBin128 size = b & ~(static_cast<XagBin128>(1) << 127); // its magnitude
+  const int sign = x.sign;
+  // Take away the largest doubling that still fits, over and over.
+  while (true) {
+    const Taken here = take(left);
+    if (here.kind != Kind::Finite || here.significand == 0)
+      break;
+    XagBin128 step = size;
+    if (xag_bin128_compare(step, left & ~(static_cast<XagBin128>(1) << 127)) > 0)
+      break;
+    while (true) {
+      const XagBin128 twice = xag_bin128_add(step, step);
+      if (xag_bin128_compare(twice, left & ~(static_cast<XagBin128>(1) << 127)) > 0)
+        break;
+      step = twice;
+    }
+    left = sign ? xag_bin128_add(left, step) : xag_bin128_sub(left, step);
+  }
+  return left;
+}
+
+// Whether a number is whole, and what whole number it is.
+bool wholeValue(const Taken &x, long long &out) {
+  if (x.kind != Kind::Finite)
+    return false;
+  if (x.significand == 0) {
+    out = 0;
+    return true;
+  }
+  __uint128_t significand = x.significand;
+  int32_t exponent = x.exponent;
+  while (exponent < 0) {
+    if (significand & 1)
+      return false; // a fraction, and no power of ours takes one
+    significand >>= 1;
+    ++exponent;
+  }
+  while (exponent > 0) {
+    if (significand > (static_cast<__uint128_t>(1) << 62))
+      return false; // far larger than any exponent worth raising to
+    significand <<= 1;
+    --exponent;
+  }
+  if (significand > static_cast<__uint128_t>(1) << 62)
+    return false;
+  out = static_cast<long long>(significand);
+  if (x.sign)
+    out = -out;
+  return true;
+}
+
+XagBin128 xag_bin128_pow(XagBin128 base, XagBin128 exponent) {
+  const Taken e = take(exponent);
+  long long times = 0;
+  if (!wholeValue(e, times))
+    return notANumber();
+
+  XagBin128 one = 0;
+  xag_bin128_reads("1", 1, &one);
+  XagBin128 answer = one;
+  XagBin128 running = base;
+  unsigned long long left =
+      times < 0 ? static_cast<unsigned long long>(-times) : static_cast<unsigned long long>(times);
+  while (left > 0) {
+    if (left & 1)
+      answer = xag_bin128_mul(answer, running);
+    running = xag_bin128_mul(running, running);
+    left >>= 1;
+  }
+  return times < 0 ? xag_bin128_div(one, answer) : answer;
 }
 
 // -2, -1, 0 or 1, and -3 when the two cannot be ordered at all.
@@ -509,10 +590,9 @@ void xag_print_bin128(XagBin128 value) {
     at = 0;
     U256 left = significand;
     while (!xag::isZero(left) && at < static_cast<int32_t>(sizeof(digits))) {
-      U256 quotient, remainder;
-      xag::divide(left, xag::wide(10), quotient, remainder);
-      digits[at++] = static_cast<char>('0' + static_cast<unsigned>(xag::narrow(remainder)));
-      left = quotient;
+      uint64_t remainder = 0;
+      left = xag::divideSmall(left, 10, remainder);
+      digits[at++] = static_cast<char>('0' + static_cast<unsigned>(remainder));
     }
     if (at == kMost)
       break;

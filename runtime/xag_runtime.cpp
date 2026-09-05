@@ -267,7 +267,12 @@ double xag_bin_mod(double a, double b, uint32_t width) {
   return xag_bin_fit(std::fmod(a, b), width);
 }
 
+// A power takes a whole-number exponent, in every format alike. Xag has no
+// transcendental functions, so raising to a fraction has no answer to give —
+// and a `bin64` answering where a `bin128` cannot would be worse than neither.
 double xag_bin_pow(double base, double exponent, uint32_t width) {
+  if (!std::isfinite(exponent) || exponent != std::trunc(exponent))
+    return std::nan("");
   return xag_bin_fit(std::pow(base, exponent), width);
 }
 

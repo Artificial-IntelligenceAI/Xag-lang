@@ -594,6 +594,27 @@ private:
                {"nothing converts on its own"});
   }
 
+  // Whether every way out of here hands back an answer. A loop does not count:
+  // it may run no times at all, and then it has answered nothing.
+  static bool alwaysGives(const Block &block) {
+    for (const StmtPtr &s : block.stmts) {
+      if (s->kind == StmtKind::Give)
+        return true;
+      if (s->kind != StmtKind::If)
+        continue;
+      bool otherwise = false, everyArm = true;
+      for (const Branch &branch : s->branches) {
+        if (!branch.hasCondition)
+          otherwise = true;
+        if (!alwaysGives(branch.body))
+          everyArm = false;
+      }
+      if (otherwise && everyArm)
+        return true;
+    }
+    return false;
+  }
+
   // ---- items
 
   void body(const Item &item) {
@@ -618,6 +639,15 @@ private:
                                    param.nameSpan});
       for (const StmtPtr &s : item.body.stmts)
         statement(*s);
+      if (giving_ != Type::Nothing && giving_ != Type::Unknown &&
+          !alwaysGives(item.body))
+        complain(item.nameSpan, "E0513",
+                 "`" + item.name + "` answers a `" + std::string(name(giving_)) +
+                     "`, and can end without saying what.",
+                 {"a function that answers something answers it every way out"},
+                 {"`nothing` is a real answer, and a function that means to give "
+                  "none says so in its chain."},
+                 "this answers something");
       scopes_.pop_back();
       inFunction_ = false;
       break;

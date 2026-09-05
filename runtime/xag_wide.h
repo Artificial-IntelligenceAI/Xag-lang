@@ -129,6 +129,20 @@ inline bool bitAt(const U256 &value, unsigned at) {
   return at < 256 && ((value.w[at / 64] >> (at % 64)) & 1);
 }
 
+// Dividing by something that fits in one limb, which is most of what decimal
+// asks for. Limb by limb with a 128-bit remainder, rather than bit by bit.
+inline U256 divideSmall(const U256 &top, uint64_t bottom, uint64_t &left) {
+  U256 out;
+  unsigned __int128 carry = 0;
+  for (int i = 3; i >= 0; --i) {
+    const unsigned __int128 here = (carry << 64) | top.w[i];
+    out.w[i] = static_cast<uint64_t>(here / bottom);
+    carry = here % bottom;
+  }
+  left = static_cast<uint64_t>(carry);
+  return out;
+}
+
 // Shift and subtract, which is slow and short and hard to be wrong about.
 inline void divide(const U256 &top, const U256 &bottom, U256 &quotient, U256 &left) {
   quotient = U256{};

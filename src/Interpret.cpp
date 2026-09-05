@@ -286,12 +286,15 @@ private:
       const Type given = typeNamed(typeOf(value.operands[0].type));
       const uint32_t width = widthOf(given);
       const XagDeci x = a->wide, y = b->wide;
-      if (op == "+" || op == "-" || op == "x" || op == "/") {
+      if (op == "+" || op == "-" || op == "x" || op == "/" || op == "mod" ||
+          op == "^") {
         answer.kind = Value::Kind::Deci;
-        answer.wide = op == "+"   ? xag_deci_add(width, x, y)
-                      : op == "-" ? xag_deci_sub(width, x, y)
-                      : op == "x" ? xag_deci_mul(width, x, y)
-                                  : xag_deci_div(width, x, y);
+        answer.wide = op == "+"     ? xag_deci_add(width, x, y)
+                      : op == "-"   ? xag_deci_sub(width, x, y)
+                      : op == "x"   ? xag_deci_mul(width, x, y)
+                      : op == "/"   ? xag_deci_div(width, x, y)
+                      : op == "mod" ? xag_deci_mod(width, x, y)
+                                    : xag_deci_pow(width, x, y);
       } else {
         const int32_t order = xag_deci_compare(width, x, y);
         const bool ordered = order != -3;
@@ -305,12 +308,15 @@ private:
       }
     } else if (a && b && a->kind == Value::Kind::Wide) {
       const XagBin128 x = a->wide, y = b->wide;
-      if (op == "+" || op == "-" || op == "x" || op == "/") {
+      if (op == "+" || op == "-" || op == "x" || op == "/" || op == "mod" ||
+          op == "^") {
         answer.kind = Value::Kind::Wide;
-        answer.wide = op == "+"   ? xag_bin128_add(x, y)
-                      : op == "-" ? xag_bin128_sub(x, y)
-                      : op == "x" ? xag_bin128_mul(x, y)
-                                  : xag_bin128_div(x, y);
+        answer.wide = op == "+"     ? xag_bin128_add(x, y)
+                      : op == "-"   ? xag_bin128_sub(x, y)
+                      : op == "x"   ? xag_bin128_mul(x, y)
+                      : op == "/"   ? xag_bin128_div(x, y)
+                      : op == "mod" ? xag_bin128_mod(x, y)
+                                    : xag_bin128_pow(x, y);
       } else {
         // -3 says the two cannot be ordered, which only `!==` answers true to.
         const int32_t order = xag_bin128_compare(x, y);

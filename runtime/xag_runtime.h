@@ -89,6 +89,11 @@ XagBin128 xag_bin128_add(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_sub(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_mul(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_div(XagBin128 a, XagBin128 b);
+XagBin128 xag_bin128_mod(XagBin128 a, XagBin128 b);
+
+// A power takes a whole-number exponent. Xag has no transcendental functions,
+// so raising to a fraction has no answer to give and says so.
+XagBin128 xag_bin128_pow(XagBin128 base, XagBin128 exponent);
 
 // -1, 0 or 1, and -3 when the two cannot be ordered at all.
 int32_t xag_bin128_compare(XagBin128 a, XagBin128 b);
@@ -110,6 +115,8 @@ XagDeci xag_deci_add(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_sub(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_mul(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_div(uint32_t width, XagDeci a, XagDeci b);
+XagDeci xag_deci_mod(uint32_t width, XagDeci a, XagDeci b);
+XagDeci xag_deci_pow(uint32_t width, XagDeci base, XagDeci exponent);
 XagDeci xag_deci_negate(uint32_t width, XagDeci value);
 int32_t xag_deci_compare(uint32_t width, XagDeci a, XagDeci b);
 int32_t xag_deci_reads(uint32_t width, const char *text, uint64_t length, XagDeci *out);

@@ -53,30 +53,41 @@ struct Taken {
   int32_t exponent = 0; // value = coefficient * 10^exponent
 };
 
-U256 tenTo(unsigned power) {
-  U256 out = xag::wide(1);
-  const U256 ten = xag::wide(10);
-  for (unsigned i = 0; i < power; ++i) {
-    U256 quotient, left;
-    (void)quotient;
-    (void)left;
-    out = xag::multiply(xag::narrow(out), xag::narrow(ten));
+// Every power of ten a coefficient could want, worked out once. Building these
+// by repeated multiplication on every call made each decimal operation cost
+// more than the arithmetic it was doing.
+constexpr unsigned kPowers = 78; // 10^77 is the last that fits in 256 bits
+
+const U256 *powersOfTen() {
+  static U256 table[kPowers];
+  static bool ready = false;
+  if (!ready) {
+    table[0] = xag::wide(1);
+    for (unsigned i = 1; i < kPowers; ++i)
+      table[i] = xag::multiply(xag::narrow(table[i - 1]), 10);
+    ready = true;
   }
-  return out;
+  return table;
 }
 
+U256 tenTo(unsigned power) {
+  return power < kPowers ? powersOfTen()[power] : U256{};
+}
+
+// How many digits, by looking rather than by dividing thirty-four times.
 unsigned digitsIn(const U256 &value) {
   if (xag::isZero(value))
     return 1;
-  unsigned count = 0;
-  U256 left = value;
-  while (!xag::isZero(left)) {
-    U256 quotient, remainder;
-    xag::divide(left, xag::wide(10), quotient, remainder);
-    left = quotient;
-    ++count;
+  const U256 *powers = powersOfTen();
+  unsigned low = 1, high = kPowers - 1;
+  while (low < high) {
+    const unsigned middle = (low + high) / 2;
+    if (xag::compare(value, powers[middle]) < 0)
+      high = middle;
+    else
+      low = middle + 1;
   }
-  return count;
+  return low;
 }
 
 XagDeci packSpecial(uint32_t width, int sign, bool notANumber) {
@@ -120,12 +131,12 @@ XagDeci put(uint32_t width, int sign, U256 coefficient, int32_t exponent) {
       exponent = least;
       break;
     }
-    U256 quotient, remainder;
-    xag::divide(coefficient, xag::wide(10), quotient, remainder);
-    const int side = xag::compare(remainder, xag::wide(5));
-    if (side > 0 || (side == 0 && (xag::narrow(quotient) & 1)))
-      quotient = xag::add(quotient, xag::wide(1));
-    coefficient = quotient;
+    uint64_t left = 0;
+    const U256 quotient = xag::divideSmall(coefficient, 10, left);
+    const int side = left > 5 ? 1 : (left < 5 ? -1 : 0);
+    coefficient = (side > 0 || (side == 0 && (xag::narrow(quotient) & 1)))
+                      ? xag::add(quotient, xag::wide(1))
+                      : quotient;
     ++exponent;
   }
 
@@ -310,9 +321,9 @@ XagDeci xag_deci_div(uint32_t width, XagDeci a, XagDeci b) {
     // near to it as the digits allow: 1/8 is 0.125, not 0.1250000000000000.
     const int32_t preferred = x.exponent - y.exponent;
     while (exponent < preferred) {
-      U256 fewer, remainder;
-      xag::divide(quotient, xag::wide(10), fewer, remainder);
-      if (!xag::isZero(remainder))
+      uint64_t remainder = 0;
+      const U256 fewer = xag::divideSmall(quotient, 10, remainder);
+      if (remainder != 0)
         break;
       quotient = fewer;
       ++exponent;
@@ -325,6 +336,69 @@ XagDeci xag_deci_div(uint32_t width, XagDeci a, XagDeci b) {
     quotient = halved;
   }
   return put(width, sign, quotient, exponent);
+}
+
+XagDeci xag_deci_mod(uint32_t width, XagDeci a, XagDeci b) {
+  const Taken x = take(width, a), y = take(width, b);
+  if (x.kind != Kind::Finite || y.kind == Kind::NotANumber || y.coefficient == 0)
+    return packSpecial(width, 0, true);
+  if (y.kind == Kind::Infinity)
+    return a;
+
+  // What is left after taking away whole multiples, which is the truncated
+  // remainder the whole-number types already answer with.
+  XagDeci left = a;
+  const XagDeci size = xag_deci_negate(width, b) & ~(static_cast<XagDeci>(0));
+  const XagDeci magnitude = take(width, b).sign ? xag_deci_negate(width, b) : b;
+  (void)size;
+  const int sign = x.sign;
+  while (xag_deci_compare(width, sign ? xag_deci_negate(width, left) : left, magnitude) >= 0) {
+    XagDeci step = magnitude;
+    while (true) {
+      const XagDeci twice = xag_deci_add(width, step, step);
+      if (xag_deci_compare(width, twice,
+                           sign ? xag_deci_negate(width, left) : left) > 0)
+        break;
+      step = twice;
+    }
+    left = sign ? xag_deci_add(width, left, step) : xag_deci_sub(width, left, step);
+  }
+  return left;
+}
+
+XagDeci xag_deci_pow(uint32_t width, XagDeci base, XagDeci exponent) {
+  const Taken e = take(width, exponent);
+  if (e.kind != Kind::Finite)
+    return packSpecial(width, 0, true);
+
+  // Only a whole number is an exponent here.
+  __uint128_t coefficient = e.coefficient;
+  int32_t scale = e.exponent;
+  while (scale < 0) {
+    if (coefficient % 10)
+      return packSpecial(width, 0, true);
+    coefficient /= 10;
+    ++scale;
+  }
+  while (scale > 0 && coefficient < (static_cast<__uint128_t>(1) << 60)) {
+    coefficient *= 10;
+    --scale;
+  }
+  if (scale != 0 || coefficient > 4096)
+    return packSpecial(width, 0, true); // far past anything worth raising to
+
+  XagDeci one = 0;
+  xag_deci_reads(width, "1", 1, &one);
+  XagDeci answer = one;
+  XagDeci running = base;
+  unsigned long long left = static_cast<unsigned long long>(coefficient);
+  while (left > 0) {
+    if (left & 1)
+      answer = xag_deci_mul(width, answer, running);
+    running = xag_deci_mul(width, running, running);
+    left >>= 1;
+  }
+  return e.sign ? xag_deci_div(width, one, answer) : answer;
 }
 
 int32_t xag_deci_compare(uint32_t width, XagDeci a, XagDeci b) {
@@ -449,10 +523,9 @@ void xag_print_deci(uint32_t width, XagDeci value) {
     digits[count++] = '0';
   } else {
     while (!xag::isZero(left)) {
-      U256 quotient, remainder;
-      xag::divide(left, xag::wide(10), quotient, remainder);
-      digits[count++] = static_cast<char>('0' + static_cast<unsigned>(xag::narrow(remainder)));
-      left = quotient;
+      uint64_t remainder = 0;
+      left = xag::divideSmall(left, 10, remainder);
+      digits[count++] = static_cast<char>('0' + static_cast<unsigned>(remainder));
     }
     for (int32_t i = 0; i < count / 2; ++i) {
       const char keep = digits[i];

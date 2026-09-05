@@ -181,6 +181,26 @@ void giveAnswersItsFunction() {
   CHECK(run("fn.str greet [] { give [*1*]; }\nSTART { }\n").ok()); // *1* is text under str
 }
 
+void aFunctionAnswersEveryWayOut() {
+  CHECK(run("fn.int64 f [] { }\nSTART { }\n").code(0) == "E0513");
+  CHECK(run("fn.int64 f [int64 'n'] { print.stdout[str:*hi* \\n]; }\nSTART { }\n")
+            .code(0) == "E0513");
+  CHECK(run("fn.int64 f [] { give [*1*]; }\nSTART { }\n").ok());
+
+  // Every arm and an `else`, so there is no way out that says nothing.
+  CHECK(run("fn.int64 f [int64 'n'] {\n"
+            "  if 'n' > *0* { give [*1*]; } else { give [*0*]; } }\nSTART { }\n").ok());
+  // No `else`, so one way out is left silent.
+  CHECK(run("fn.int64 f [int64 'n'] {\n"
+            "  if 'n' > *0* { give [*1*]; } }\nSTART { }\n").code(0) == "E0513");
+  // A loop may run no times at all, and then it has answered nothing.
+  CHECK(run("fn.int64 f [] {\n"
+            "  loop.range.int64 'i' = [*1*, *3*] { give [*1*]; } }\nSTART { }\n")
+            .code(0) == "E0513");
+  // `nothing` is a real answer, and needs none given.
+  CHECK(run("fn.nothing f [] { print.stdout[str:*hi* \\n]; }\nSTART { }\n").ok());
+}
+
 void breakNeedsALoop() {
   CHECK(inStart("break;").code(0) == "E0510");
   CHECK(inStart("loop.range.int64 'i' = [*1*, *3*] { break; }").ok());
@@ -217,6 +237,7 @@ int main() {
   callsAreChecked();
   signaturesAreReadBeforeBodies();
   giveAnswersItsFunction();
+  aFunctionAnswersEveryWayOut();
   breakNeedsALoop();
   conditionsAskABool();
   theCounterIsInScopeOnlyInTheLoop();
