@@ -7,6 +7,9 @@
 namespace {
 
 int64_t live = 0;
+std::FILE *out = nullptr;
+
+std::FILE *output() { return out ? out : stdout; }
 
 char *take(uint64_t bytes) {
   if (bytes == 0)
@@ -168,8 +171,14 @@ void xag_str_drop(XagStr *text) {
 
 void xag_print(const XagStr *text) {
   if (text && text->length)
-    std::fwrite(text->bytes, 1, text->length, stdout);
+    std::fwrite(text->bytes, 1, text->length, output());
 }
+
+void xag_print_i64(int64_t number) { std::fprintf(output(), "%lld", (long long)number); }
+
+void xag_print_bool(int truth) { std::fputs(truth ? "true" : "false", output()); }
+
+void xag_set_output(void *file) { out = static_cast<std::FILE *>(file); }
 
 // Wrapping is done in unsigned arithmetic, where it is defined rather than
 // merely usual.
@@ -217,7 +226,7 @@ int64_t xag_live_allocations(void) { return live; }
 int xag_balance_is_clear(void) { return live == 0 ? 1 : 0; }
 
 void xag_stop(const char *why) {
-  std::fflush(stdout);
+  std::fflush(output());
   std::fprintf(stderr, "\nthe program stopped: %s\n", why ? why : "no reason was given");
   std::exit(1);
 }

@@ -26,9 +26,33 @@ public:
       : program_(program), checked_(checked) {}
 
   MirResult run() {
-    for (const Item &item : program_.items) {
+    // A constant is a body that answers with its value. Naming one is a call,
+    // which needs no concept the IR did not already have — and lets a constant
+    // be written as an expression rather than only as a literal.
+    for (const Item &item : program_.items)
       if (item.kind == ItemKind::Const)
+        consts_[item.name] = chainType(item.chain);
+
+    for (const Item &item : program_.items) {
+      if (item.kind == ItemKind::Const) {
+        body_ = Body{};
+        scopes_.clear();
+        loops_.clear();
+        names_.clear();
+        names_.emplace_back();
+        body_.name = constBody(item.name);
+        const std::string spelled = chainType(item.chain);
+        body_.result = typeRef(spelled);
+        addLocal("", body_.result, copiesNamed(spelled));
+        current_ = addBlock();
+        assignInto(0, item.value, item.span);
+        finish(Terminator{TerminatorKind::Return, item.span, {}, {}, {}, true,
+                          Operand{copiesNamed(spelled) ? OperandKind::Copy
+                                                       : OperandKind::Move,
+                                  0, {}, body_.result}});
+        result_.mir.bodies.push_back(std::move(body_));
         continue;
+      }
       body_ = Body{};
       body_.name = item.kind == ItemKind::Start ? "START" : item.name;
       scopes_.clear();
@@ -73,6 +97,19 @@ private:
   // Locals declared in each open scope, innermost last, dropped in reverse.
   std::vector<std::vector<unsigned>> scopes_;
   std::vector<std::unordered_map<std::string, unsigned>> names_;
+  std::unordered_map<std::string, std::string> consts_;
+
+  static std::string constBody(const std::string &name) { return "const '" + name + "'"; }
+
+  // A name nothing declared may still be a constant, which is a call.
+  unsigned callConst(const Expr &e, const std::string &spelled) {
+    const unsigned into = temporary(typeRef(spelled), copiesNamed(spelled));
+    emit(Statement{StatementKind::Assign, e.span, into,
+                   RValue{RValueKind::Call, {}, constBody(e.text), 0, {},
+                          typeRef(spelled)}});
+    return into;
+  }
+
   struct Loop {
     unsigned again = 0; // where a pass restarts
     unsigned after = 0; // where `break` goes
@@ -159,8 +196,15 @@ private:
       // Naming something reads it. Taking it is spelled `move`, and arrives as
       // its own node — so joining and printing leave what they read alone.
       const unsigned *local = findName(e.text);
-      if (!local)
-        return Operand{OperandKind::Written, 0, e.text, typeRef("?")};
+      if (!local) {
+        auto constant = consts_.find(e.text);
+        if (constant == consts_.end())
+          return Operand{OperandKind::Written, 0, e.text, typeRef("?")};
+        const unsigned into = callConst(e, constant->second);
+        const Local &answered = body_.locals[into];
+        return Operand{answered.copies ? OperandKind::Copy : OperandKind::Move, into, {},
+                       answered.type};
+      }
       const Local &slot = body_.locals[*local];
       return Operand{OperandKind::Copy, *local, {}, slot.type};
     }
@@ -180,10 +224,14 @@ private:
   unsigned lower(const Expr &e) {
     const Type type = checked_.of(&e);
     switch (e.kind) {
-    case ExprKind::Name:
+    case ExprKind::Name: {
       if (const unsigned *local = findName(e.text))
         return *local;
+      auto constant = consts_.find(e.text);
+      if (constant != consts_.end())
+        return callConst(e, constant->second);
       [[fallthrough]];
+    }
     case ExprKind::Written:
     case ExprKind::Escape: {
       const unsigned into = temporary(typeRef(spell(type)), copies(type));

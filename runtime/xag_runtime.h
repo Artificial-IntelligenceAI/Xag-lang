@@ -30,6 +30,12 @@ int64_t xag_str_count(const XagStr *text);
 void xag_str_push(XagStr *text, const XagStr *tail); // grows in place when it can
 void xag_str_drop(XagStr *text);
 void xag_print(const XagStr *text);
+void xag_print_i64(int64_t number);
+void xag_print_bool(int truth);
+
+// Where printing goes. One implementation for every engine, so that what a
+// program says cannot depend on which of them said it.
+void xag_set_output(void *file);
 
 // Arithmetic that has an answer worth agreeing on. Division and remainder are
 // truncated, a sum that does not fit wraps, and a whole number raised to a

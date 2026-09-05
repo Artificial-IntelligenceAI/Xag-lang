@@ -1,5 +1,6 @@
 #include "xag/Lexer.h"
 #include "xag/Check.h"
+#include "xag/Interpret.h"
 #include "xag/Mir.h"
 #include "xag/Own.h"
 #include "xag/Parser.h"
@@ -24,6 +25,7 @@ void usage() {
                "    xagc parse <file>   read it and print the tree\n"
                "    xagc check <file>   read it, check it, and stop\n"
                "    xagc mir <file>     check it and print the mid-level IR\n"
+               "    xagc run <file>     check it and run it\n"
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
                "    xagc --help         this\n\n"
                "Nothing else is built yet.\n";
@@ -109,6 +111,38 @@ int checkFile(const std::string &path) {
   return report(source, owned.diagnostics);
 }
 
+int runFile(const std::string &path) {
+  std::string text;
+  if (!readSource(path, text))
+    return 1;
+
+  const xag::Source source(path, text);
+  const xag::LexResult lexed = xag::lex(source);
+  if (!lexed.ok())
+    return report(source, lexed.diagnostics);
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  if (!parsed.ok())
+    return report(source, parsed.diagnostics);
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  if (!checked.ok())
+    return report(source, checked.diagnostics);
+  const xag::OwnResult owned = xag::own(source, parsed.program);
+  if (!owned.ok())
+    return report(source, owned.diagnostics);
+
+  xag::MirResult built = xag::build(source, parsed.program, checked);
+  if (!built.ok())
+    return report(source, built.diagnostics);
+  xag::elaborate(built.mir);
+
+  const xag::InterpretResult ran = xag::interpret(built.mir);
+  if (!ran.ran) {
+    std::cerr << "\nthe program stopped: " << ran.trouble << '\n';
+    return 1;
+  }
+  return 0;
+}
+
 int mirFile(const std::string &path) {
   std::string text;
   if (!readSource(path, text))
@@ -168,6 +202,8 @@ int main(int argc, char **argv) {
     return checkFile(argv[2]);
   if (command == "mir" && argc > 2)
     return mirFile(argv[2]);
+  if (command == "run" && argc > 2)
+    return runFile(argv[2]);
   if (command == "llvm-smoke")
     return llvmSmoke();
 

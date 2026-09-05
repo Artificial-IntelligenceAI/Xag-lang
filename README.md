@@ -28,13 +28,17 @@ prints its tree, `xagc check <file>` checks it, `xagc mir <file>` prints the
 mid-level IR, and `xagc llvm-smoke` proves the LLVM backend is reachable. Run the
 tests with `ctest --test-dir build`.
 
-The lexer, the parser, the name and type checker, the ownership pass, lowering to
-a mid-level IR, drop elaboration, and the runtime exist. Nothing runs a program
-yet: there is no interpreter and no code generation.
+`xagc run <file>` runs a program on the test interpreter — the engine built to be
+obviously correct rather than fast, which walks the IR as written and does nothing
+clever anywhere. It is the one to believe when the engines disagree.
 
-Three ways of running a program are planned, and all three call one runtime, so
-none of them can disagree about what joining or counting means. `Xag-Config.toml`
-holds what this project has decided once for every file in it.
+The lexer, the parser, the name and type checker, the ownership pass, lowering to
+a mid-level IR, drop elaboration, the runtime, and the test interpreter exist. The
+fast interpreter and native code generation do not.
+
+All three engines call one runtime, so none of them can disagree about what
+joining or counting means. `Xag-Config.toml` holds what this project has decided
+once for every file in it.
 
 ## Reporting a problem
 

@@ -58,8 +58,10 @@ add_library(xagfront STATIC
   src/Own.cpp
   src/MirBuild.cpp
   src/MirPrinter.cpp
-  src/MirElaborate.cpp)
+  src/MirElaborate.cpp
+  src/Interpret.cpp)
 target_include_directories(xagfront PUBLIC include)
+target_link_libraries(xagfront PUBLIC xagrt)
 target_compile_options(xagfront PRIVATE -fno-exceptions -Wall -Wextra)
 
 add_executable(xagc src/main.cpp)
@@ -75,7 +77,7 @@ target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
-foreach(suite lexer parser check own mir runtime)
+foreach(suite lexer parser check own mir runtime interpret)
   add_executable(${suite}_tests tests/${suite}_tests.cpp)
   target_link_libraries(${suite}_tests PRIVATE xagfront xagrt)
   target_compile_options(${suite}_tests PRIVATE -fno-exceptions -Wall -Wextra)
