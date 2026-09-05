@@ -91,14 +91,14 @@ void aQuoteOffersBothMarks() {
   const sb::LexResult r = lexText("\"hello\"");
   CHECK(!r.ok());
   CHECK(r.diagnostics.size() == 1);
-  CHECK(r.diagnostics[0].tips.size() == 2);
+  CHECK(r.diagnostics[0].code == "E0003");
 }
 
 void aBareNumberIsToldToWearMarks() {
   const sb::LexResult r = lexText("1000");
   CHECK(!r.ok());
   CHECK(r.diagnostics.size() == 1);
-  CHECK(r.diagnostics[0].tips.at(0) == "write `*1000*`");
+  CHECK(r.diagnostics[0].code == "E0005");
 }
 
 void anUnclosedMarkIsReported() {
@@ -123,8 +123,11 @@ void diagnosticsPointAtTheRightPlace() {
   sb::render(source, r.diagnostics[0], rendered);
   const std::string text = rendered.str();
   CHECK(text.find("test.sb:1:18") != std::string::npos);
-  CHECK(text.find("^^^^") != std::string::npos);
-  CHECK(text.find("write `*1000*`") != std::string::npos);
+  CHECK(text.find("^^^^ here") != std::string::npos);
+  CHECK(text.find("Error code: E0005") != std::string::npos);
+  CHECK(text.find("Rule(s) broken:") != std::string::npos);
+  // A diagnostic never says what to type instead.
+  CHECK(text.find("Suggested fix") == std::string::npos);
 }
 
 } // namespace

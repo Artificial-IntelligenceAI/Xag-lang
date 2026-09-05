@@ -81,9 +81,17 @@ var.immut.str ['s'] = [*hi*];
 ```
 ```text
 `immut` is what a name is when nothing says otherwise.
+
+  1 | var.immut.str ['s'] = [*hi*];
+    |     ^^^^^ here
+
+Error code: E0201
 Rule(s) broken: a chain says what is unusual, and says nothing else
-Tip(s): write `var.str ['s']`.
 ```
+
+A diagnostic says what happened, points at it, names the rule, and explains why
+the rule exists. It does not say what to type instead — the reader knows their
+intent and the compiler does not.
 
 ## Ownership
 

@@ -68,10 +68,10 @@ private:
     result_.tokens.push_back(Token{kind, Span{begin, at_}, std::move(body)});
   }
 
-  void complain(Span span, std::string message, std::vector<std::string> rules,
-                std::vector<std::string> tips) {
-    result_.diagnostics.push_back(
-        Diagnostic{span, std::move(message), std::move(rules), std::move(tips)});
+  void complain(Span span, std::string code, std::string message,
+                std::vector<std::string> rules, std::vector<std::string> tips) {
+    result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
+                                             "here", std::move(rules), std::move(tips)});
   }
 
   void skipTrivia() {
@@ -114,10 +114,10 @@ private:
     }
 
     const std::string markText(1, mark);
-    complain(Span{begin, at_}, std::string("this ") + what + " is never closed.",
-             {std::string("a mark opens and closes on the same line")},
-             {"close it with `" + markText + "`, or write `\\" + markText +
-              "` for the mark itself"});
+    complain(Span{begin, at_}, "E0002", std::string("this ") + what + " is never closed.",
+             {"a mark opens and closes on the same line"},
+             {"the closing mark is the one character that cannot appear between the "
+              "marks, which is why `\\" + markText + "` exists."});
   }
 
   void one() {
@@ -137,10 +137,11 @@ private:
         return;
       }
       // Do not step over the offending character: it may well be a real token.
-      complain(Span{begin, at_}, "this is not one of the escapes.",
+      complain(Span{begin, at_}, "E0004", "this is not one of the escapes.",
                {"the escapes are `\\n`, `\\t`, `\\r` and `\\\\`"},
-               {"escapes stand beside a written value, not inside one — "
-                "`[*line one* \\n *line two*]`"});
+               {"escapes stand beside a written value rather than inside one, so "
+                "reading a piece of text never means working out which of its "
+                "characters were instructions."});
       return;
     }
 
@@ -152,9 +153,11 @@ private:
         ++at_;
       if (at_ < text_.size() && text_[at_] == '"')
         ++at_;
-      complain(Span{begin, at_}, "`\"` is not a mark in SafetyBolt.",
-               {"`'…'` writes a name, and `*…*` writes a value"},
-               {"a name goes in `'…'`", "a value goes in `*…*`"});
+      complain(Span{begin, at_}, "E0003",
+               "SafetyBolt does not write anything between double quotes.",
+               {"a name is quoted with `'`, and a written value goes between `*` marks"},
+               {"the two are kept apart on purpose, so a quoted thing is always a name "
+                "and never has to be read as a value depending on where it sits."});
       return;
     }
 
@@ -191,8 +194,8 @@ private:
         return;
       }
       ++at_;
-      complain(Span{begin, at_}, "`!` on its own means nothing here.", {},
-               {"`!=` asks whether two values differ"});
+      complain(Span{begin, at_}, "E0006", "`!` on its own means nothing here.",
+               {"`!=` is the only place `!` appears"}, {});
       return;
 
     default: break;
@@ -208,15 +211,17 @@ private:
     if (std::isdigit(static_cast<unsigned char>(c))) {
       while (at_ < text_.size() && std::isdigit(static_cast<unsigned char>(text_[at_])))
         ++at_;
-      const std::string digits(text_.substr(begin, at_ - begin));
-      complain(Span{begin, at_}, "a number is a written value, and written values wear marks.",
+      complain(Span{begin, at_}, "E0005",
+               "a number is a written value, and written values wear marks.",
                {"`*…*` writes a value, and its type says what it means"},
-               {"write `*" + digits + "*`"});
+               {"there is no separate mark for text and numbers, because the type "
+                "already answers that: `*1000*` is a number under `i64` and four "
+                "characters under `str`."});
       return;
     }
 
     ++at_;
-    complain(Span{begin, at_}, "this character means nothing in SafetyBolt.", {}, {});
+    complain(Span{begin, at_}, "E0001", "this character means nothing in SafetyBolt.", {}, {});
   }
 };
 

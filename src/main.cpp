@@ -33,7 +33,8 @@ int lexFile(const std::string &path) {
   const sb::Source source(path, buffer.str());
   const sb::LexResult result = sb::lex(source);
 
-  for (const sb::Token &token : result.tokens) {
+  // Tokens after a failed lex describe a file the reader has not written yet.
+  for (const sb::Token &token : result.ok() ? result.tokens : std::vector<sb::Token>{}) {
     const sb::Source::Position at = source.positionOf(token.span.begin);
     std::cout << at.line << ':' << at.column << '\t' << sb::describe(token.kind);
     if (!token.text.empty())
@@ -41,9 +42,11 @@ int lexFile(const std::string &path) {
     std::cout << '\n';
   }
 
-  for (const sb::Diagnostic &diagnostic : result.diagnostics) {
-    std::cerr << '\n';
-    sb::render(source, diagnostic, std::cerr);
+  if (!result.ok()) {
+    sb::renderOpening(std::cerr);
+    for (const sb::Diagnostic &diagnostic : result.diagnostics)
+      sb::render(source, diagnostic, std::cerr);
+    sb::renderTally(result.diagnostics.size(), std::cerr);
   }
   return result.ok() ? 0 : 1;
 }
