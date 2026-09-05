@@ -1,4 +1,5 @@
 #include "xag_runtime.h"
+#include "xag_unicode.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -55,21 +56,6 @@ Scalar scalarAt(const char *bytes, uint64_t length, uint64_t at) {
   return Scalar{byte, 1}; // a byte that is not the start of anything is its own
 }
 
-// A working subset of UAX #29: enough for combining marks, variation selectors,
-// skin tones, zero-width joiner sequences and flags. The full tables are not
-// here, and the cases they would add are noted where `characters` is decided.
-bool extends(uint32_t c) {
-  return (c >= 0x0300 && c <= 0x036F) || (c >= 0x0483 && c <= 0x0489) ||
-         (c >= 0x0591 && c <= 0x05BD) || (c >= 0x0610 && c <= 0x061A) ||
-         (c >= 0x064B && c <= 0x065F) || c == 0x0670 ||
-         (c >= 0x06D6 && c <= 0x06DC) || (c >= 0x0E31 && c <= 0x0E3A) ||
-         (c >= 0x0E47 && c <= 0x0E4E) || (c >= 0x1AB0 && c <= 0x1AFF) ||
-         (c >= 0x1DC0 && c <= 0x1DFF) || (c >= 0x20D0 && c <= 0x20F0) ||
-         (c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xFE20 && c <= 0xFE2F) ||
-         (c >= 0x1F3FB && c <= 0x1F3FF) || (c >= 0xE0100 && c <= 0xE01EF);
-}
-
-bool isRegional(uint32_t c) { return c >= 0x1F1E6 && c <= 0x1F1FF; }
 
 } // namespace
 
@@ -125,40 +111,103 @@ void xag_str_push(XagStr *text, const XagStr *tail) {
   text->length = wanted;
 }
 
+// UAX #29, rules GB1 through GB13, against the table the standard publishes.
+//
+// Written out rather than approximated because the approximation was wrong
+// about Hangul, about every Indic vowel sign and about Arabic prepends — which
+// is to say, right about Latin and emoji and wrong about most of the world.
 int64_t xag_str_count(const XagStr *text) {
   if (!text || text->length == 0)
     return 0;
 
   int64_t clusters = 0;
   uint64_t at = 0;
-  bool open = false;      // a cluster is already being counted
-  bool afterZwj = false;  // the last scalar was a zero-width joiner
-  unsigned regionals = 0; // how many flag halves have run together
+
+  uint16_t before = 0;      // what the last code point was
+  bool started = false;     // whether anything has been seen yet
+  unsigned regionals = 0;   // how many flag halves run together up to here
+  bool pictographic = false;// an Extended_Pictographic, then only Extends
+  bool joined = false;      // ...and then a zero-width joiner
+  bool consonant = false;   // an InCB Consonant, then Extends and Linkers
+  bool linked = false;      // ...including at least one Linker
 
   while (at < text->length) {
     const Scalar scalar = scalarAt(text->bytes, text->length, at);
-    const uint32_t c = scalar.value;
+    const uint16_t what = xag::clusterOf(scalar.value);
+    const uint8_t here = static_cast<uint8_t>(what & 0xF);
+    const uint8_t last = static_cast<uint8_t>(before & 0xF);
+    const unsigned incb = (what >> xag::kIncbShift) & 0x3;
 
-    bool joins = false;
-    if (!open) {
-      joins = false;
-    } else if (c == 0x000A && at > 0 && text->bytes[at - 1] == '\r') {
-      joins = true; // a carriage return and a line feed are one break
-    } else if (extends(c) || c == 0x200D) {
-      joins = true;
-    } else if (afterZwj) {
-      joins = true; // whatever a joiner joined belongs to what came before
-    } else if (isRegional(c) && regionals % 2 == 1) {
-      joins = true; // flags come in pairs
+    bool breaks;
+    if (!started) {
+      breaks = true; // GB1: something begins here
+    } else if (last == xag::ClusterCR && here == xag::ClusterLF) {
+      breaks = false; // GB3
+    } else if (last == xag::ClusterControl || last == xag::ClusterCR ||
+               last == xag::ClusterLF) {
+      breaks = true; // GB4
+    } else if (here == xag::ClusterControl || here == xag::ClusterCR ||
+               here == xag::ClusterLF) {
+      breaks = true; // GB5
+    } else if (last == xag::ClusterL &&
+               (here == xag::ClusterL || here == xag::ClusterV ||
+                here == xag::ClusterLV || here == xag::ClusterLVT)) {
+      breaks = false; // GB6
+    } else if ((last == xag::ClusterLV || last == xag::ClusterV) &&
+               (here == xag::ClusterV || here == xag::ClusterT)) {
+      breaks = false; // GB7
+    } else if ((last == xag::ClusterLVT || last == xag::ClusterT) &&
+               here == xag::ClusterT) {
+      breaks = false; // GB8
+    } else if (here == xag::ClusterExtend || here == xag::ClusterZWJ) {
+      breaks = false; // GB9
+    } else if (here == xag::ClusterSpacingMark) {
+      breaks = false; // GB9a
+    } else if (last == xag::ClusterPrepend) {
+      breaks = false; // GB9b
+    } else if (consonant && linked && incb == xag::kIncbConsonant) {
+      breaks = false; // GB9c, an Indic conjunct
+    } else if (joined && (what & xag::kPictographic)) {
+      breaks = false; // GB11, a picture joined to a picture
+    } else if (here == xag::ClusterRegionalIndicator &&
+               last == xag::ClusterRegionalIndicator && (regionals % 2) == 1) {
+      breaks = false; // GB12 and GB13, flags in pairs
+    } else {
+      breaks = true; // GB999
     }
 
-    if (!joins) {
+    if (breaks)
       ++clusters;
-      regionals = 0;
+
+    // What this code point leaves behind for the next one.
+    regionals = here == xag::ClusterRegionalIndicator
+                    ? (breaks ? 1 : regionals + 1)
+                    : 0;
+    if (what & xag::kPictographic) {
+      pictographic = true;
+      joined = false;
+    } else if (here == xag::ClusterExtend) {
+      // a picture is still in view through its extends
+    } else if (here == xag::ClusterZWJ) {
+      joined = pictographic;
+    } else {
+      pictographic = false;
+      joined = false;
     }
-    regionals = isRegional(c) ? regionals + 1 : 0;
-    afterZwj = c == 0x200D;
-    open = true;
+    if (incb == xag::kIncbConsonant) {
+      consonant = true;
+      linked = false;
+    } else if (consonant && incb == xag::kIncbLinker) {
+      linked = true;
+    } else if (consonant && incb == xag::kIncbExtend) {
+      // still within reach of the consonant
+    } else {
+      consonant = false;
+      linked = false;
+    }
+
+    before = what;
+    started = true;
     at += scalar.width;
   }
   return clusters;

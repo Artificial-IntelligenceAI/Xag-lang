@@ -30,9 +30,15 @@ logic = "stops-early"
 # under `letters`, because that emoji is seven scalars welded together with
 # zero-width joiners and one thing on the page.
 #
-# `clusters` is what a person counting characters means. What it costs is that
-# the answer is tied to a Unicode version. `letters` is one Unicode scalar,
-# which needs no table and never changes.
+# `clusters` is what a person counting characters means, and it is UAX #29 as
+# published rather than an approximation of it: the tables come from the Unicode
+# Character Database and all 766 of Unicode's own conformance cases are checked
+# on every build.
+#
+# What it costs is that the answer is tied to a Unicode version, which is
+# **17.0.0** here. Clusters are defined by tables Unicode revises, so a program
+# can count differently after a bump nothing else would notice. `letters` is one
+# Unicode scalar, which needs no table and never changes.
 characters = "clusters"
 
 # Also changes what a program answers, and only started to when `bin` arrived.

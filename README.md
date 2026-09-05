@@ -71,6 +71,17 @@ amortise it. Past about 400 statements the reference interpreter, which is slow
 on purpose, stops finishing inside the timeout and cases start being skipped
 rather than tested.
 
+## Unicode
+
+`count` counts grapheme clusters, which is what a person counting characters
+means. The rules are UAX #29 in full — Hangul syllables, Indic vowel signs and
+conjuncts, prepends, zero-width-joiner sequences and flags — against tables
+generated from the Unicode Character Database, version 17.0.0.
+
+All 766 of Unicode's own conformance cases run as part of the test suite, so the
+claim is checkable rather than asserted. Regenerate `runtime/xag_unicode.h` and
+`tests/unicode_cases.h` from the UCD when moving to a new Unicode version.
+
 ## Reporting a problem
 
 Wrong diagnostics, confusing ones, and anything Xag accepts that it should not:

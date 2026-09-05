@@ -4,6 +4,8 @@
 
 #include "xag_runtime.h"
 
+#include "unicode_cases.h"
+
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -70,6 +72,31 @@ void textGrowsWhereItStands() {
   xag_str_drop(&text);
   xag_str_drop(&bang);
   CHECK(xag_live_allocations() == before);
+}
+
+// Unicode publishes the cases as well as the rules, so the claim is checkable.
+void countingAgreesWithUnicodeItself() {
+  unsigned wrong = 0;
+  for (unsigned i = 0; i < kClusterCaseCount; ++i) {
+    const ClusterCase &one = kClusterCases[i];
+    XagStr text{nullptr, 0, 0};
+    xag_str_from(&text, one.bytes, one.length);
+    const int64_t got = xag_str_count(&text);
+    if (got != one.clusters) {
+      if (wrong < 5)
+        std::cerr << "FAIL cluster case " << one.points << ": got " << got << ", Unicode says "
+                  << one.clusters << '\n';
+      ++wrong;
+    }
+    xag_str_drop(&text);
+  }
+  if (wrong) {
+    std::cerr << "FAIL " << wrong << " of " << kClusterCaseCount
+              << " Unicode conformance cases\n";
+    ++failures;
+  } else {
+    std::cout << "all " << kClusterCaseCount << " Unicode cluster cases agree\n";
+  }
 }
 
 void countingCountsWhatAPersonWouldCount() {
@@ -283,6 +310,7 @@ int main() {
   textIsCopiedAndFreed();
   joiningBuildsSomethingNew();
   textGrowsWhereItStands();
+  countingAgreesWithUnicodeItself();
   countingCountsWhatAPersonWouldCount();
   binary128IsWrittenOutInSoftware();
   decimalCountsInTens();
