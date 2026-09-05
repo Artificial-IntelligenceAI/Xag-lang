@@ -74,10 +74,13 @@ struct Block {
 };
 
 // One arm of an `if`. The final `else` has no condition.
+//
+// A condition is a single expression, not a value: `if` bounds it on the left
+// and `{` on the right, so nothing has to bracket it.
 struct Branch {
   Span span;
   bool hasCondition = true;
-  ValueList condition;
+  ExprPtr condition;
   Block body;
 };
 
@@ -100,7 +103,8 @@ struct Stmt {
   Span nameSpan;               // Declare, Set, LoopRange
   std::string name;            //  "
   std::vector<ExprPtr> index;  // Set, when written `set 'xs'[*2*] = …`
-  ValueList value;             // Declare, Set, LoopRange, LoopWhile, Give
+  ValueList value;             // Declare, Set, LoopRange, Give
+  ExprPtr condition;           // LoopWhile
   std::vector<Branch> branches;// If
   Block body;                  // loops
   ExprPtr call;                // Call

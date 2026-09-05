@@ -140,8 +140,8 @@ acceptance:
 ```text
 `<=` is not how a comparison is written.
 
-  1 | if ['a' <= 'b'] {
-    |         ^^ here
+  1 | if 'a' <= 'b' {
+    |        ^^ here
 
 Error code: E0009
 Rule(s) broken: one `=` assigns, and equality is written `==`
@@ -167,15 +167,20 @@ A bare word followed by `[` is a call — `sum-to['LIMIT']`, `count['text']`,
 a `[` is a function being declared, and the `fn` chain opening that line has
 already said so.
 
-A declared name is not a list, and it is already bounded by its own marks. So it
-takes no brackets:
+A condition is not a list either — `if` bounds it on the left and `{` on the
+right — and neither is a declared name, which its own marks already bound. So
+neither takes brackets:
 
 ```
 var.mut.i64 'total' = [*0*];
 set 'total' = ['total' + *1*];
 set 'xs'[*2*] = [*99*];
 loop.range.i64 'i' = [*1*, 'n'] { ... }
+if 'a' >== 'b' { ... }
+loop.while 'left' > *0* { ... }
 ```
+
+The range keeps its brackets because it is two values with a comma between them.
 
 One name is declared at a time. Nothing about the notation forbids several, but
 declaring several at once has to say what each of them ends up owning, and that

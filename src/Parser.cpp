@@ -455,7 +455,7 @@ private:
         advance(); // if / else-if / else
         branch.hasCondition = !isElse;
         if (!isElse)
-          branch.condition = valueList();
+          branch.condition = item();
         branch.body = block();
         branch.span.end = previous().span.end;
         s->branches.push_back(std::move(branch));
@@ -492,7 +492,7 @@ private:
                            s->chain.segments[1].text == "while";
       if (isWhile) {
         s->kind = StmtKind::LoopWhile;
-        s->value = valueList();
+        s->condition = item();
       } else {
         s->kind = StmtKind::LoopRange;
         if (check(TokenKind::Name)) {

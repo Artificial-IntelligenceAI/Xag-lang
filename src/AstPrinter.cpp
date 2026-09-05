@@ -85,8 +85,8 @@ struct Printer {
       for (const Branch &branch : s.branches) {
         indent(depth + 1);
         out << (branch.hasCondition ? "arm\n" : "otherwise\n");
-        if (branch.hasCondition)
-          values(branch.condition, depth + 2);
+        if (branch.condition)
+          expr(*branch.condition, depth + 2);
         block(branch.body, depth + 2);
       }
       break;
@@ -99,7 +99,8 @@ struct Printer {
       break;
     case StmtKind::LoopWhile:
       out << "loop while\n";
-      values(s.value, depth + 1);
+      if (s.condition)
+        expr(*s.condition, depth + 1);
       block(s.body, depth + 1);
       break;
     case StmtKind::Break: out << "break\n"; break;

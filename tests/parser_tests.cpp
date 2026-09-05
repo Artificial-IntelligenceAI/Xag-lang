@@ -135,7 +135,7 @@ void transfersAreSpelled() {
 
 void armsOfAnIf() {
   const Parsed p = inStart(
-      "if ['a' >== 'b'] {\n        give ['a'];\n    } else-if ['a' == 'b'] {\n"
+      "if 'a' >== 'b' {\n        give ['a'];\n    } else-if 'a' == 'b' {\n"
       "        give ['b'];\n    } else {\n        give ['c'];\n    }");
   CHECK(p.ok());
   CHECK(p.has("if\n"));
@@ -146,6 +146,18 @@ void armsOfAnIf() {
     ++from;
   }
   CHECK(arms == 2);
+}
+
+void conditionsWearNoBrackets() {
+  const Parsed w = inStart("var.mut.i64 'left' = [*3*];\n"
+                           "    loop.while 'left' > *0* {\n"
+                           "        set 'left' = ['left' - *1*];\n    }");
+  CHECK(w.ok());
+  CHECK(w.has("loop while\n"));
+  CHECK(w.has("binary >\n"));
+
+  // Bracketing one is now a mistake, since `[` opens a value list.
+  CHECK(!inStart("if ['a' >== 'b'] { }").parsed.ok());
 }
 
 void aVarCannotStandAtTheTopLevel() {
@@ -172,6 +184,7 @@ int main() {
   writingADefaultIsAnError();
   transfersAreSpelled();
   armsOfAnIf();
+  conditionsWearNoBrackets();
   aVarCannotStandAtTheTopLevel();
   readingContinuesAfterAMistake();
 
