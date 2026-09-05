@@ -5,6 +5,7 @@
 #include "xag/Mir.h"
 #include "xag/Own.h"
 #include "xag/Parser.h"
+#include "xag/Regions.h"
 #include "xag/Source.h"
 
 #include <llvm/IR/IRBuilder.h>
@@ -58,6 +59,9 @@ int report(const xag::Source &source, const std::vector<xag::Diagnostic> &diagno
   return 1;
 }
 
+bool ready(const std::string &path, std::string &text, xag::MirResult &built,
+           int &status);
+
 int lexFile(const std::string &path) {
   std::string text;
   if (!readSource(path, text))
@@ -96,24 +100,10 @@ int parseFile(const std::string &path) {
 
 int checkFile(const std::string &path) {
   std::string text;
-  if (!readSource(path, text))
-    return 1;
-
-  const xag::Source source(path, text);
-  const xag::LexResult lexed = xag::lex(source);
-  if (!lexed.ok())
-    return report(source, lexed.diagnostics);
-
-  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
-  if (!parsed.ok())
-    return report(source, parsed.diagnostics);
-
-  const xag::CheckResult checked = xag::check(source, parsed.program);
-  if (!checked.ok())
-    return report(source, checked.diagnostics);
-
-  const xag::OwnResult owned = xag::own(source, parsed.program);
-  return report(source, owned.diagnostics);
+  xag::MirResult built;
+  int status = 0;
+  ready(path, text, built, status);
+  return status;
 }
 
 int runFile(const std::string &path) {
@@ -180,6 +170,14 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
     return false;
   }
   xag::elaborate(built.mir);
+
+  // How long a loan lasts is a question the graph answers, so it is asked here
+  // rather than of the tree.
+  const xag::RegionResult held = xag::regions(source, built.mir);
+  if (!held.ok()) {
+    status = report(source, held.diagnostics);
+    return false;
+  }
   status = 0;
   return true;
 }

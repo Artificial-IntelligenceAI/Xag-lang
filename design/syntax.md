@@ -454,6 +454,31 @@ Tip(s): the value belongs to this function, so the only thing that can leave her
         with it is the value itself.
 ```
 
+### A loan lasts until nobody is holding it
+
+How long a loan lasts is a question the control-flow graph answers, so it is
+asked of the graph rather than of the text. A loan lives from where it is taken
+until the last place anything holding it is looked at, and in between, what it
+borrows from may not be handed over, changed behind its back, ended, or lent
+again for writing.
+
+```text
+`'greeting'` is handed over while it is still lent.
+
+  15 |     keep[move 'greeting'];
+     |     ^^^^^^^^^^^^^^^^^^^^^ handed over here
+  13 |     var.ref.str 'winner' = [longer[ref 'greeting', ref 'reply']];
+     |                                    ^^^^^^^^^^^^^^ and lent here, still in use after this
+
+Error code: E0408
+Rule(s) broken: what is lent stays where it is until the loan is done with
+```
+
+The same reading catches `E0409` (changed while lent), `E0410` (one loan for
+writing, or any number for reading, and never both) and `E0411` (ended while
+lent). A loan nobody is holding any more costs nothing, so lending, looking, and
+then handing the value over is perfectly ordinary.
+
 ### A lifetime is a name
 
 When one parameter is borrowed, there is only one thing the answer could be
