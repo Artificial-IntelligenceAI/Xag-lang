@@ -181,6 +181,19 @@ void itHoldsWhatABin64Cannot() {
   SAYS("START { print.stdout[(bin128:*1* / bin128:*0*) \\n]; }\n", "infinity\n");
 }
 
+void itCountsInTensWhenAsked() {
+  SAYS("START { var.deci64 'a' = [*0.1*]; var.deci64 'b' = [*0.2*];"
+       " print.stdout[('a' + 'b') \\n]; }\n", "0.3\n");
+  SAYS("START { var.bin64 'a' = [*0.1*]; var.bin64 'b' = [*0.2*];"
+       " print.stdout[('a' + 'b') \\n]; }\n", "0.30000000000000004\n");
+  // A price keeps its places through a sum.
+  SAYS("START { var.deci64 'p' = [*1.10*];"
+       " print.stdout[('p' + deci64:*2.00*) \\n]; }\n", "3.10\n");
+  SAYS("START { print.stdout[(deci64:*1* / deci64:*8*) \\n]; }\n", "0.125\n");
+  SAYS("START { print.stdout[deci128:*1234567890123456789012345678901234* \\n]; }\n",
+       "1234567890123456789012345678901234\n");
+}
+
 void itDecides() {
   SAYS("START { var.int64 'n' = [*5*];\n"
        "  if 'n' > *3* { print.stdout[str:*big* \\n]; } else { print.stdout[str:*small* \\n]; } }\n",
@@ -283,6 +296,7 @@ int main() {
   itCountsPastSixtyFourBits();
   itDoesIEEEBinary();
   itHoldsWhatABin64Cannot();
+  itCountsInTensWhenAsked();
   itDecides();
   itLoops();
   itCalls();

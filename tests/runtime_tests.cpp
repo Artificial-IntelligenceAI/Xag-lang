@@ -202,6 +202,77 @@ void binary128IsWrittenOutInSoftware() {
   }
 }
 
+std::string spelledDeci(uint32_t width, XagDeci value) {
+  std::FILE *sink = std::tmpfile();
+  xag_set_output(sink);
+  xag_print_deci(width, value);
+  xag_set_output(nullptr);
+  std::fflush(sink);
+  std::rewind(sink);
+  char buffer[256];
+  const size_t got = std::fread(buffer, 1, sizeof(buffer), sink);
+  std::fclose(sink);
+  return std::string(buffer, got);
+}
+
+XagDeci readDeci(uint32_t width, const char *text) {
+  XagDeci out = 0;
+  if (!xag_deci_reads(width, text, std::strlen(text), &out)) {
+    std::cerr << "FAIL could not read " << text << '\n';
+    ++failures;
+  }
+  return out;
+}
+
+void decimalCountsInTens() {
+  // The reason the type exists, in one line.
+  CHECK(spelledDeci(64, xag_deci_add(64, readDeci(64, "0.1"), readDeci(64, "0.2"))) ==
+        "0.3");
+  CHECK(0.1 + 0.2 != 0.3); // which binary cannot say
+
+  // A cohort is kept: `1.10` and `1.1` are equal and are not the same.
+  CHECK(spelledDeci(64, readDeci(64, "1.10")) == "1.10");
+  CHECK(spelledDeci(64, readDeci(64, "1.1")) == "1.1");
+  CHECK(xag_deci_compare(64, readDeci(64, "1.10"), readDeci(64, "1.1")) == 0);
+
+  // Addition keeps the smaller exponent of the two, so places survive a sum.
+  CHECK(spelledDeci(64, xag_deci_add(64, readDeci(64, "1.10"), readDeci(64, "2.00"))) ==
+        "3.10");
+  CHECK(spelledDeci(64, xag_deci_add(64, readDeci(64, "1.1"), readDeci(64, "2.0"))) ==
+        "3.1");
+  // Multiplication takes the sum of them.
+  CHECK(spelledDeci(64, xag_deci_mul(64, readDeci(64, "2.5"), readDeci(64, "4"))) ==
+        "10.0");
+  // An exact quotient is written where the standard prefers it.
+  CHECK(spelledDeci(64, xag_deci_div(64, readDeci(64, "1"), readDeci(64, "8"))) == "0.125");
+  CHECK(spelledDeci(64, xag_deci_div(64, readDeci(64, "10"), readDeci(64, "2"))) == "5");
+  CHECK(spelledDeci(64, xag_deci_div(64, readDeci(64, "1"), readDeci(64, "3"))) ==
+        "0.3333333333333333");
+
+  // Each width holds the digits it says it holds.
+  CHECK(spelledDeci(32, readDeci(32, "1234567")) == "1234567");
+  CHECK(spelledDeci(32, readDeci(32, "12345678")) == "1.234568e+7");
+  CHECK(spelledDeci(128, readDeci(128, "1234567890123456789012345678901234")) ==
+        "1234567890123456789012345678901234");
+
+  // Nothing stops, as in every other format that has infinities.
+  CHECK(spelledDeci(64, xag_deci_div(64, readDeci(64, "1"), readDeci(64, "0"))) ==
+        "infinity");
+  CHECK(spelledDeci(64, xag_deci_div(64, readDeci(64, "0"), readDeci(64, "0"))) ==
+        "not-a-number");
+  CHECK(xag_deci_compare(64, readDeci(64, "not-a-number"), readDeci(64, "1")) == -3);
+
+  // And what is printed reads back as the very same thing, places included.
+  for (uint32_t width : {32u, 64u, 128u})
+    for (const char *text : {"0", "1", "-2.5", "1.10", "0.001", "1.5e+30", "1.5e-30"}) {
+      const XagDeci value = readDeci(width, text);
+      const std::string said = spelledDeci(width, value);
+      XagDeci back = 0;
+      CHECK(xag_deci_reads(width, said.data(), said.size(), &back) == 1);
+      CHECK(back == value);
+    }
+}
+
 void nothingIsLeftHolding() {
   CHECK(xag_balance_is_clear() == 1);
 }
@@ -214,6 +285,7 @@ int main() {
   textGrowsWhereItStands();
   countingCountsWhatAPersonWouldCount();
   binary128IsWrittenOutInSoftware();
+  decimalCountsInTens();
   arithmeticIsWrittenOnce();
   everySizeIsTheSizeItSays();
   nothingIsLeftHolding();

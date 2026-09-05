@@ -96,6 +96,8 @@ private:
              : widthOf(named) == 32  ? builder_.getFloatTy()
              : widthOf(named) == 64  ? builder_.getDoubleTy()
                                      : builder_.getInt128Ty(); // bin128, as its bits
+    if (isDecimal(named))
+      return builder_.getIntNTy(widthOf(named)); // a `deci`, as its bits
     return builder_.getInt8Ty(); // `nothing`, and anything unknown
   }
 
@@ -140,6 +142,10 @@ private:
     for (const char *op : {"xag_bin128_add", "xag_bin128_sub", "xag_bin128_mul",
                            "xag_bin128_div"})
       add(op, i128, {i128, i128});
+    add("xag_print_deci", voidTy, {i32, i128});
+    add("xag_deci_compare", i32, {i32, i128, i128});
+    for (const char *op : {"xag_deci_add", "xag_deci_sub", "xag_deci_mul", "xag_deci_div"})
+      add(op, i128, {i32, i128, i128});
     for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
       add(op, i128, {i128, i128, i32, i32});
     (void)i64;
@@ -231,6 +237,15 @@ private:
         // it fits, which is what makes reading it here safe at any width.
         const llvm::APInt bits(widthOf(named), operand.written, 10);
         return llvm::ConstantInt::get(builder_.getIntNTy(widthOf(named)), bits);
+      }
+      if (isDecimal(named)) {
+        XagDeci read = 0;
+        xag_deci_reads(widthOf(named), operand.written.data(), operand.written.size(),
+                       &read);
+        llvm::APInt bits(128, {static_cast<uint64_t>(read),
+                               static_cast<uint64_t>(read >> 64)});
+        return llvm::ConstantInt::get(builder_.getIntNTy(widthOf(named)),
+                                      bits.trunc(widthOf(named)));
       }
       if (named == Type::Bin128) {
         XagBin128 read = 0;
@@ -378,6 +393,34 @@ private:
     if (op == "or") return builder_.CreateOr(left, right);
 
     const Type given = typeNamed(leftType);
+    if (isDecimal(given)) {
+      auto *carrier = builder_.getInt128Ty();
+      auto *say = builder_.getInt32(static_cast<int>(widthOf(given)));
+      auto *x = builder_.CreateZExt(left, carrier);
+      auto *y = builder_.CreateZExt(right, carrier);
+      if (op == "+" || op == "-" || op == "x" || op == "/") {
+        const char *called = op == "+"   ? "xag_deci_add"
+                             : op == "-" ? "xag_deci_sub"
+                             : op == "x" ? "xag_deci_mul"
+                                         : "xag_deci_div";
+        return builder_.CreateTrunc(builder_.CreateCall(runtime_[called], {say, x, y}),
+                                    typeFor(nameOf(value.type)));
+      }
+      auto *order = builder_.CreateCall(runtime_["xag_deci_compare"], {say, x, y});
+      auto *unordered = builder_.CreateICmpEQ(order, builder_.getInt32(-3));
+      auto *zero = builder_.getInt32(0);
+      llvm::Value *asked = nullptr;
+      if (op == "==") asked = builder_.CreateICmpEQ(order, zero);
+      else if (op == "!==") asked = builder_.CreateICmpNE(order, zero);
+      else if (op == "<") asked = builder_.CreateICmpSLT(order, zero);
+      else if (op == ">") asked = builder_.CreateICmpSGT(order, zero);
+      else if (op == "<==") asked = builder_.CreateICmpSLE(order, zero);
+      else if (op == ">==") asked = builder_.CreateICmpSGE(order, zero);
+      if (!asked)
+        return nullptr;
+      return op == "!==" ? builder_.CreateOr(asked, unordered)
+                         : builder_.CreateAnd(asked, builder_.CreateNot(unordered));
+    }
     if (given == Type::Bin128) {
       if (op == "+" || op == "-" || op == "x" || op == "/") {
         const char *called = op == "+"   ? "xag_bin128_add"
@@ -467,7 +510,12 @@ private:
       for (const Operand &operand : value.operands) {
         const std::string &type = nameOf(operand.type);
         const Type named = typeNamed(type);
-        if (named == Type::Bin128)
+        if (isDecimal(named))
+          builder_.CreateCall(
+              runtime_["xag_print_deci"],
+              {builder_.getInt32(static_cast<int>(widthOf(named))),
+               builder_.CreateZExt(read(operand), builder_.getInt128Ty())});
+        else if (named == Type::Bin128)
           builder_.CreateCall(runtime_["xag_print_bin128"], {read(operand)});
         else if (isBinary(named))
           builder_.CreateCall(

@@ -177,17 +177,6 @@ private:
 
   // A type that is named but has nothing behind it yet is said so plainly,
   // rather than being let through to fail somewhere further down.
-  bool built(Type type, Span where) {
-    if (!isDecimal(type))
-      return true;
-    complain(where, "E0512",
-             "`" + std::string(name(type)) + "` is a type this compiler cannot build yet.",
-             {"a type is written when there is something behind it"},
-             {"a decimal format is arithmetic written in software, and that is "
-              "being written."});
-    return false;
-  }
-
   Type typeOfChain(const Chain &chain) {
     if (chain.segments.empty())
       return Type::Unknown;
@@ -201,8 +190,6 @@ private:
     if (type == Type::Unknown)
       complain(last.span, "E0503", "`" + last.text + "` is not a type.",
                {"a size is always written, and only sizes the standard defines"});
-    else
-      built(type, last.span);
     return type;
   }
 
@@ -276,7 +263,14 @@ private:
                   "leaves the value to say it."});
         return Type::Unknown;
       }
-      if (expected == Type::Bin128) {
+      if (isDecimal(expected)) {
+        XagDeci read = 0;
+        if (!xag_deci_reads(widthOf(expected), e.text.data(), e.text.size(), &read))
+          complain(e.span, "E0509",
+                   "`*" + e.text + "*` is not a number a `" + std::string(name(expected)) +
+                       "` holds.",
+                   {"a written value has to be one of the things its type holds"});
+      } else if (expected == Type::Bin128) {
         XagBin128 read = 0;
         if (!xag_bin128_reads(e.text.data(), e.text.size(), &read))
           complain(e.span, "E0509",
@@ -318,7 +312,6 @@ private:
                  {"a size is always written, and only sizes the standard defines"});
         return Type::Unknown;
       }
-      built(stated, e.span);
       if (!e.children.empty())
         expr(*e.children[0], stated);
       return stated;

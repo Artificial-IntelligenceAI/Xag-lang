@@ -18,10 +18,10 @@ namespace {
 // the same distinction the IR draws between `move` and `copy`, kept honest at
 // run time rather than assumed.
 struct Value {
-  enum class Kind { Nothing, Number, Real, Wide, Text, Loan } kind = Kind::Nothing;
+  enum class Kind { Nothing, Number, Real, Wide, Deci, Text, Loan } kind = Kind::Nothing;
   XagInt number = 0;
   double real = 0;     // a `bin` up to 64 bits, cut to its width
-  XagBin128 wide = 0;  // a `bin128`, as its bits
+  XagBin128 wide = 0;  // a `bin128` or a `deci`, as its bits
   XagStr text{nullptr, 0, 0};
   bool owns = false;
   unsigned frame = 0; // Loan: which frame the lent slot lives in
@@ -141,6 +141,12 @@ private:
       if (isWhole(named)) {
         value.kind = Value::Kind::Number;
         value.number = readWhole(operand.written, named);
+      } else if (isDecimal(named)) {
+        value.kind = Value::Kind::Deci;
+        XagDeci read = 0;
+        xag_deci_reads(widthOf(named), operand.written.data(), operand.written.size(),
+                       &read);
+        value.wide = read;
       } else if (named == Type::Bin128) {
         value.kind = Value::Kind::Wide;
         XagBin128 read = 0;
@@ -276,7 +282,28 @@ private:
     answer.kind = Value::Kind::Number;
     const std::string &op = value.op;
 
-    if (a && b && a->kind == Value::Kind::Wide) {
+    if (a && b && a->kind == Value::Kind::Deci) {
+      const Type given = typeNamed(typeOf(value.operands[0].type));
+      const uint32_t width = widthOf(given);
+      const XagDeci x = a->wide, y = b->wide;
+      if (op == "+" || op == "-" || op == "x" || op == "/") {
+        answer.kind = Value::Kind::Deci;
+        answer.wide = op == "+"   ? xag_deci_add(width, x, y)
+                      : op == "-" ? xag_deci_sub(width, x, y)
+                      : op == "x" ? xag_deci_mul(width, x, y)
+                                  : xag_deci_div(width, x, y);
+      } else {
+        const int32_t order = xag_deci_compare(width, x, y);
+        const bool ordered = order != -3;
+        if (op == "==") answer.number = ordered && order == 0;
+        else if (op == "!==") answer.number = !ordered || order != 0;
+        else if (op == "<") answer.number = ordered && order < 0;
+        else if (op == ">") answer.number = ordered && order > 0;
+        else if (op == "<==") answer.number = ordered && order <= 0;
+        else if (op == ">==") answer.number = ordered && order >= 0;
+        else trouble_ = "`" + op + "` was asked of a `deci`";
+      }
+    } else if (a && b && a->kind == Value::Kind::Wide) {
       const XagBin128 x = a->wide, y = b->wide;
       if (op == "+" || op == "-" || op == "x" || op == "/") {
         answer.kind = Value::Kind::Wide;
@@ -372,6 +399,8 @@ private:
         Value *at = behind(piece);
         if (at && at->kind == Value::Kind::Text)
           xag_print(&at->text);
+        else if (at && at->kind == Value::Kind::Deci)
+          xag_print_deci(widthOf(typeNamed(typeOf(operand.type))), at->wide);
         else if (at && at->kind == Value::Kind::Wide)
           xag_print_bin128(at->wide);
         else if (at && at->kind == Value::Kind::Real)

@@ -98,6 +98,23 @@ double xag_bin128_to_double(XagBin128 value);
 int32_t xag_bin128_reads(const char *text, uint64_t length, XagBin128 *out);
 void xag_print_bin128(XagBin128 value);
 
+// IEEE 754 decimal32, decimal64 and decimal128, in the BID encoding — the
+// coefficient stored as an ordinary binary integer. `width` says which of the
+// three, and the bits travel as a 128-bit integer whichever it is.
+//
+// A decimal keeps the cohort it arrived at: `1.10` and `1.1` are equal and are
+// not the same, and telling them apart is the point of the type.
+typedef unsigned __int128 XagDeci;
+
+XagDeci xag_deci_add(uint32_t width, XagDeci a, XagDeci b);
+XagDeci xag_deci_sub(uint32_t width, XagDeci a, XagDeci b);
+XagDeci xag_deci_mul(uint32_t width, XagDeci a, XagDeci b);
+XagDeci xag_deci_div(uint32_t width, XagDeci a, XagDeci b);
+XagDeci xag_deci_negate(uint32_t width, XagDeci value);
+int32_t xag_deci_compare(uint32_t width, XagDeci a, XagDeci b);
+int32_t xag_deci_reads(uint32_t width, const char *text, uint64_t length, XagDeci *out);
+void xag_print_deci(uint32_t width, XagDeci value);
+
 // What is still held. A program that ends with anything outstanding has a drop
 // that did not happen, and one that goes negative has a drop that happened
 // twice — neither of which three engines agreeing would ever notice.

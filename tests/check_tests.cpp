@@ -106,12 +106,14 @@ void binaryHoldsWhatIEEESaysItHolds() {
         "E0506");
 }
 
-void aTypeWithNothingBehindItSaysSo() {
-  CHECK(inStart("var.bin128 'n' = [*1*];").ok()); // written out in software now
-  CHECK(inStart("var.bin128 'n' = [*1e4000*];").ok());
+void everyTypeHasSomethingBehindItNow() {
+  for (const char *type : {"bin128", "deci32", "deci64", "deci128"})
+    CHECK(inStart(std::string("var.") + type + " 'n' = [*1.5*];").ok());
   CHECK(inStart("var.bin128 'n' = [*abc*];").code(0) == "E0509");
-  CHECK(inStart("var.deci64 'n' = [*1*];").code(0) == "E0512");
-  CHECK(inStart("var.deci32 'n' = [*1*];").code(0) == "E0512");
+  CHECK(inStart("var.deci64 'n' = [*abc*];").code(0) == "E0509");
+  // A decimal and a binary are no more alike than any other two types.
+  CHECK(inStart("var.deci64 'a' = [*1*];\n    var.bin64 'b' = ['a' + *1*];").code(0) ==
+        "E0506");
 }
 
 void sizesDoNotMixOnTheirOwn() {
@@ -206,7 +208,7 @@ int main() {
   aSizeIsAlwaysWritten();
   aWrittenNumberHasToFit();
   binaryHoldsWhatIEEESaysItHolds();
-  aTypeWithNothingBehindItSaysSo();
+  everyTypeHasSomethingBehindItNow();
   sizesDoNotMixOnTheirOwn();
   nothingConvertsOnItsOwn();
   piecesSideBySideJoin();

@@ -178,7 +178,28 @@ var.bin64 'a' = [*1e30*];   ('a' + bin64:*1* - bin64:*1e30*)     # 0
 var.bin128 'b' = [*1e30*];  ('b' + bin128:*1* - bin128:*1e30*)   # 1
 ```
 
-> **`deci` is named and not built.** Naming one is `E0512` and says so.
+### A `deci` counts in tens, and keeps the places it was given
+
+```
+var.deci64 'a' = [*0.1*];  var.deci64 'b' = [*0.2*];   ('a' + 'b')   # 0.3
+var.bin64  'x' = [*0.1*];  var.bin64  'y' = [*0.2*];   ('x' + 'y')   # 0.30000000000000004
+```
+
+A decimal number is a whole-number coefficient and a power of ten, so `1.10` is
+`110` scaled by `10^-2` and `1.1` is `11` scaled by `10^-1`. **They are equal
+and they are not the same**, and telling them apart is the point of the type:
+
+```
+var.deci64 'price' = [*1.10*];
+print.stdout[('price' + deci64:*2.00*) \n];      # 3.10, not 3.1
+```
+
+Each operation keeps the exponent the standard prefers — the smaller of the two
+for a sum, their total for a product, and for an exact quotient the one nearest
+`q1 - q2`, so `1 / 8` is `0.125` and `10 / 2` is `5`.
+
+The encoding is BID, the coefficient stored as an ordinary binary integer,
+because the wide arithmetic underneath already speaks that language.
 
 ## The operators
 
