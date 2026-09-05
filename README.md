@@ -32,9 +32,12 @@ tests with `ctest --test-dir build`.
 obviously correct rather than fast, which walks the IR as written and does nothing
 clever anywhere. It is the one to believe when the engines disagree.
 
-The lexer, the parser, the name and type checker, the ownership pass, lowering to
-a mid-level IR, drop elaboration, the runtime, and the test interpreter exist. The
-fast interpreter and native code generation do not.
+`xagc build <file>` compiles a program ahead of time through LLVM at `-O3` and
+writes an executable beside it. `xagc ir <file>` prints the LLVM IR, and
+`xagc ir <file> --raw` prints it before the optimiser sees it.
+
+Two of the three engines exist: the test interpreter and AOT native. The fast
+interpreter does not.
 
 All three engines call one runtime, so none of them can disagree about what
 joining or counting means. `Xag-Config.toml` holds what this project has decided

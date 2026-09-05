@@ -1,6 +1,7 @@
 #include "xag/Lexer.h"
 #include "xag/Check.h"
 #include "xag/Interpret.h"
+#include "xag/Native.h"
 #include "xag/Mir.h"
 #include "xag/Own.h"
 #include "xag/Parser.h"
@@ -15,6 +16,8 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 namespace {
@@ -26,6 +29,8 @@ void usage() {
                "    xagc check <file>   read it, check it, and stop\n"
                "    xagc mir <file>     check it and print the mid-level IR\n"
                "    xagc run <file>     check it and run it\n"
+               "    xagc ir <file>      check it and print the LLVM IR\n"
+               "    xagc build <file>   check it and write a program beside it\n"
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
                "    xagc --help         this\n\n"
                "Nothing else is built yet.\n";
@@ -143,6 +148,84 @@ int runFile(const std::string &path) {
   return 0;
 }
 
+// Everything a program has to survive before any engine sees it.
+bool ready(const std::string &path, std::string &text, xag::MirResult &built, int &status) {
+  status = 1;
+  if (!readSource(path, text))
+    return false;
+  const xag::Source source(path, text);
+  const xag::LexResult lexed = xag::lex(source);
+  if (!lexed.ok()) {
+    status = report(source, lexed.diagnostics);
+    return false;
+  }
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  if (!parsed.ok()) {
+    status = report(source, parsed.diagnostics);
+    return false;
+  }
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  if (!checked.ok()) {
+    status = report(source, checked.diagnostics);
+    return false;
+  }
+  const xag::OwnResult owned = xag::own(source, parsed.program);
+  if (!owned.ok()) {
+    status = report(source, owned.diagnostics);
+    return false;
+  }
+  built = xag::build(source, parsed.program, checked);
+  if (!built.ok()) {
+    status = report(source, built.diagnostics);
+    return false;
+  }
+  xag::elaborate(built.mir);
+  status = 0;
+  return true;
+}
+
+int irFile(const std::string &path, bool optimise) {
+  std::string text;
+  xag::MirResult built;
+  int status = 0;
+  if (!ready(path, text, built, status))
+    return status;
+  const xag::NativeResult emitted = xag::emitIr(built.mir, optimise);
+  if (!emitted.ok()) {
+    std::cerr << emitted.trouble << '\n';
+    return 1;
+  }
+  std::cout << emitted.ir;
+  return 0;
+}
+
+int buildFile(const std::string &path) {
+  std::string text;
+  xag::MirResult built;
+  int status = 0;
+  if (!ready(path, text, built, status))
+    return status;
+
+  const std::string stem = path.substr(0, path.rfind('.'));
+  const std::string object = stem + ".o";
+  const xag::NativeResult emitted = xag::emitObject(built.mir, true, object);
+  if (!emitted.ok()) {
+    std::cerr << emitted.trouble << '\n';
+    return 1;
+  }
+
+  // Every path here can hold a space, so every path here is quoted.
+  const std::string command = "cc \"" + object + "\" \"" XAG_RUNTIME_LIB "\" -o \"" +
+                              stem + "\"";
+  if (std::system(command.c_str()) != 0) {
+    std::cerr << "xagc: the linker would not put it together\n";
+    return 1;
+  }
+  std::remove(object.c_str());
+  std::cout << stem << '\n';
+  return 0;
+}
+
 int mirFile(const std::string &path) {
   std::string text;
   if (!readSource(path, text))
@@ -204,6 +287,10 @@ int main(int argc, char **argv) {
     return mirFile(argv[2]);
   if (command == "run" && argc > 2)
     return runFile(argv[2]);
+  if (command == "ir" && argc > 2)
+    return irFile(argv[2], argc > 3 && std::string(argv[3]) == "--raw" ? false : true);
+  if (command == "build" && argc > 2)
+    return buildFile(argv[2]);
   if (command == "llvm-smoke")
     return llvmSmoke();
 

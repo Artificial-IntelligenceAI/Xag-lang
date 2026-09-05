@@ -162,6 +162,20 @@ int64_t xag_str_count(const XagStr *text) {
   return clusters;
 }
 
+int64_t xag_str_compare(const XagStr *left, const XagStr *right) {
+  const uint64_t a = left ? left->length : 0;
+  const uint64_t b = right ? right->length : 0;
+  const uint64_t shared = a < b ? a : b;
+  if (shared) {
+    const int seen = std::memcmp(left->bytes, right->bytes, shared);
+    if (seen != 0)
+      return seen < 0 ? -1 : 1;
+  }
+  if (a == b)
+    return 0;
+  return a < b ? -1 : 1;
+}
+
 void xag_str_drop(XagStr *text) {
   if (!text)
     return;

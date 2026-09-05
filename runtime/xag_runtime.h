@@ -30,6 +30,10 @@ typedef struct {
 void xag_str_from(XagStr *out, const char *bytes, uint64_t length);
 void xag_str_join(XagStr *out, const XagStr *pieces, uint64_t count);
 int64_t xag_str_count(const XagStr *text);
+
+// Less than, equal to, or greater than — as one implementation, so that no
+// engine has its own idea of how text orders.
+int64_t xag_str_compare(const XagStr *left, const XagStr *right);
 void xag_str_push(XagStr *text, const XagStr *tail); // grows in place when it can
 void xag_str_drop(XagStr *text);
 void xag_print(const XagStr *text);

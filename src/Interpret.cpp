@@ -237,13 +237,14 @@ private:
     const std::string &op = value.op;
 
     if (a && b && a->kind == Value::Kind::Text) {
-      const std::string one = spelled(*a), two = spelled(*b);
-      if (op == "==") answer.number = one == two;
-      else if (op == "!==") answer.number = one != two;
-      else if (op == "<") answer.number = one < two;
-      else if (op == ">") answer.number = one > two;
-      else if (op == "<==") answer.number = one <= two;
-      else if (op == ">==") answer.number = one >= two;
+      // One implementation of how text orders, called by every engine.
+      const int64_t seen = xag_str_compare(&a->text, &b->text);
+      if (op == "==") answer.number = seen == 0;
+      else if (op == "!==") answer.number = seen != 0;
+      else if (op == "<") answer.number = seen < 0;
+      else if (op == ">") answer.number = seen > 0;
+      else if (op == "<==") answer.number = seen <= 0;
+      else if (op == ">==") answer.number = seen >= 0;
       else trouble_ = "`" + op + "` was asked of text";
     } else if (a && b) {
       const int64_t x = a->number, y = b->number;

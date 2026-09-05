@@ -24,6 +24,11 @@ bool copies(Type type) { return type == Type::I64 || type == Type::Bool; }
 // that copies, but it is not one that owns either.
 bool owns(Type type) { return type == Type::Str; }
 
+// A loan is not a thing to end: it goes back to whoever lent it.
+bool isLoanType(const std::string &spelled) {
+  return spelled.rfind("ref ", 0) == 0 || spelled.rfind("refmut ", 0) == 0;
+}
+
 class Builder {
 public:
   Builder(const Program &program, const CheckResult &checked)
@@ -33,9 +38,16 @@ public:
     // A constant is a body that answers with its value. Naming one is a call,
     // which needs no concept the IR did not already have — and lets a constant
     // be written as an expression rather than only as a literal.
-    for (const Item &item : program_.items)
+    for (const Item &item : program_.items) {
       if (item.kind == ItemKind::Const)
         consts_[item.name] = chainType(item.chain);
+      // The checker's answer for a call is `str` whether the function hands
+      // text over or only lends it, so the spelling has to come from the
+      // signature. Getting this wrong once made initialising a loan look like
+      // writing through one.
+      else if (item.kind == ItemKind::Function)
+        answers_[item.name] = chainType(item.chain);
+    }
 
     for (const Item &item : program_.items) {
       if (item.kind == ItemKind::Const) {
@@ -102,6 +114,7 @@ private:
   std::vector<std::vector<unsigned>> scopes_;
   std::vector<std::unordered_map<std::string, unsigned>> names_;
   std::unordered_map<std::string, std::string> consts_;
+  std::unordered_map<std::string, std::string> answers_;
 
   static std::string constBody(const std::string &name) { return "const '" + name + "'"; }
 
@@ -294,19 +307,30 @@ private:
       for (const std::string &part : e.path)
         callee += (callee.empty() ? "" : ".") + part;
       std::vector<Operand> arguments;
-      for (const Value &value : e.args.values)
-        arguments.push_back(valueOperand(value));
-      // A print reads what it is given and builds nothing, so what it is given
-      // stays where it was and is ended by whoever owns it.
-      if (callee == "print.stdout")
-        for (Operand &argument : arguments)
-          if (argument.kind == OperandKind::Move)
-            argument.kind = OperandKind::Copy;
-      const unsigned into = owns(type) ? owningTemporary(typeRef(spell(type)))
-                                       : temporary(typeRef(spell(type)), copies(type));
+      if (callee == "print.stdout") {
+        // Showing is not joining: a print writes one piece after another and
+        // builds nothing, so its pieces stay pieces and are never welded into
+        // a value first. And it reads them, so they stay where they were.
+        for (const Value &value : e.args.values)
+          for (const ExprPtr &item : value.items) {
+            Operand piece = operandOf(*item);
+            if (piece.kind == OperandKind::Move)
+              piece.kind = OperandKind::Copy;
+            arguments.push_back(std::move(piece));
+          }
+      } else {
+        for (const Value &value : e.args.values)
+          arguments.push_back(valueOperand(value));
+      }
+      auto answered = answers_.find(callee);
+      const std::string spelled =
+          answered == answers_.end() ? spell(type) : answered->second;
+      const unsigned into = (owns(type) && !isLoanType(spelled))
+                                ? owningTemporary(typeRef(spelled))
+                                : temporary(typeRef(spelled), copies(type));
       emit(Statement{StatementKind::Assign, e.span, into,
                      RValue{RValueKind::Call, {}, callee, 0, std::move(arguments),
-                            typeRef(spell(type))}});
+                            typeRef(spelled)}});
       return into;
     }
     }
