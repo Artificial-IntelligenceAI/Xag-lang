@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -249,6 +251,76 @@ XagInt xag_int_pow(XagInt base, XagInt exponent, uint32_t width, int32_t is_sign
     left >>= 1;
   }
   return answer;
+}
+
+double xag_bin_fit(double value, uint32_t width) {
+  if (width == 16)
+    return static_cast<double>(static_cast<_Float16>(value));
+  if (width == 32)
+    return static_cast<double>(static_cast<float>(value));
+  return value;
+}
+
+double xag_bin_mod(double a, double b, uint32_t width) {
+  return xag_bin_fit(std::fmod(a, b), width);
+}
+
+double xag_bin_pow(double base, double exponent, uint32_t width) {
+  return xag_bin_fit(std::pow(base, exponent), width);
+}
+
+// The shortest spelling that reads back as the same value. Both engines call
+// this, so what a number looks like cannot depend on which of them said it.
+void xag_print_bin(double value, uint32_t width) {
+  if (std::isnan(value)) {
+    std::fputs("not-a-number", output());
+    return;
+  }
+  if (std::isinf(value)) {
+    std::fputs(value < 0 ? "-infinity" : "infinity", output());
+    return;
+  }
+  const unsigned most = width == 16 ? 5u : width == 32 ? 9u : 17u;
+  char written[64];
+  for (unsigned digits = 1; digits <= most; ++digits) {
+    std::snprintf(written, sizeof(written), "%.*g", static_cast<int>(digits), value);
+    if (xag_bin_fit(std::strtod(written, nullptr), width) == value)
+      break;
+  }
+  std::fputs(written, output());
+}
+
+int32_t xag_bin_reads(const char *text, uint64_t length, uint32_t width, double *out) {
+  char buffer[512];
+  if (length + 1 > sizeof(buffer))
+    return 0;
+  std::memcpy(buffer, text, length);
+  buffer[length] = 0;
+
+  // The spellings a print produces are the spellings a program may write, so
+  // what comes out can go back in.
+  auto answer = [&](double value) {
+    if (out)
+      *out = value;
+    return 1;
+  };
+  if (std::strcmp(buffer, "infinity") == 0)
+    return answer(HUGE_VAL);
+  if (std::strcmp(buffer, "-infinity") == 0)
+    return answer(-HUGE_VAL);
+  if (std::strcmp(buffer, "not-a-number") == 0)
+    return answer(std::nan(""));
+
+  char *stopped = nullptr;
+  const double read = std::strtod(buffer, &stopped);
+  if (stopped == buffer || *stopped != 0)
+    return 0; // not a number at all
+  const double fitted = xag_bin_fit(read, width);
+  if (out)
+    *out = fitted;
+  // Anything else that arrives infinite was not what was written down: it was
+  // a number too large for the width to hold.
+  return std::isinf(fitted) ? 0 : 1;
 }
 
 void xag_print_int(XagInt value, uint32_t width, int32_t is_signed) {

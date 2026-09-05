@@ -1,5 +1,7 @@
 #include "xag/Native.h"
 
+#include "xag_runtime.h"
+
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -89,6 +91,10 @@ private:
     const Type named = typeNamed(spelled);
     if (isWhole(named))
       return builder_.getIntNTy(widthOf(named));
+    if (isBinary(named))
+      return widthOf(named) == 16   ? builder_.getHalfTy()
+             : widthOf(named) == 32 ? builder_.getFloatTy()
+                                    : builder_.getDoubleTy();
     return builder_.getInt8Ty(); // `nothing`, and anything unknown
   }
 
@@ -124,6 +130,10 @@ private:
     add("xag_print_bool", voidTy, {i32});
     auto *i128 = builder_.getInt128Ty();
     add("xag_print_int", voidTy, {i128, i32, i32});
+    auto *f64 = builder_.getDoubleTy();
+    add("xag_print_bin", voidTy, {f64, i32});
+    add("xag_bin_mod", f64, {f64, f64, i32});
+    add("xag_bin_pow", f64, {f64, f64, i32});
     for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
       add(op, i128, {i128, i128, i32, i32});
     (void)i64;
@@ -215,6 +225,12 @@ private:
         // it fits, which is what makes reading it here safe at any width.
         const llvm::APInt bits(widthOf(named), operand.written, 10);
         return llvm::ConstantInt::get(builder_.getIntNTy(widthOf(named)), bits);
+      }
+      if (isBinary(named)) {
+        double read = 0;
+        xag_bin_reads(operand.written.data(), operand.written.size(), widthOf(named),
+                      &read);
+        return llvm::ConstantFP::get(typeFor(type), read);
       }
       return textOf(unescape(operand.written));
     }
@@ -349,6 +365,26 @@ private:
     if (op == "or") return builder_.CreateOr(left, right);
 
     const Type given = typeNamed(leftType);
+    if (isBinary(given)) {
+      if (op == "+") return builder_.CreateFAdd(left, right);
+      if (op == "-") return builder_.CreateFSub(left, right);
+      if (op == "x") return builder_.CreateFMul(left, right);
+      if (op == "/") return builder_.CreateFDiv(left, right);
+      // An ordered comparison answers false when either side is not a number,
+      // which is what IEEE says and what the interpreter does.
+      if (op == "==") return builder_.CreateFCmpOEQ(left, right);
+      if (op == "!==") return builder_.CreateFCmpUNE(left, right);
+      if (op == "<") return builder_.CreateFCmpOLT(left, right);
+      if (op == ">") return builder_.CreateFCmpOGT(left, right);
+      if (op == "<==") return builder_.CreateFCmpOLE(left, right);
+      if (op == ">==") return builder_.CreateFCmpOGE(left, right);
+      auto *wide = builder_.getDoubleTy();
+      auto *answered = builder_.CreateCall(
+          runtime_[op == "mod" ? "xag_bin_mod" : "xag_bin_pow"],
+          {builder_.CreateFPExt(left, wide), builder_.CreateFPExt(right, wide),
+           builder_.getInt32(widthOf(given))});
+      return builder_.CreateFPTrunc(answered, typeFor(nameOf(value.type)));
+    }
     const Type made = typeNamed(nameOf(value.type));
     const Type working = isWhole(made) ? made : given;
     const bool unsignedly = isWhole(given) && !isSigned(given);
@@ -394,7 +430,12 @@ private:
       for (const Operand &operand : value.operands) {
         const std::string &type = nameOf(operand.type);
         const Type named = typeNamed(type);
-        if (isWhole(named))
+        if (isBinary(named))
+          builder_.CreateCall(
+              runtime_["xag_print_bin"],
+              {builder_.CreateFPExt(read(operand), builder_.getDoubleTy()),
+               builder_.getInt32(widthOf(named))});
+        else if (isWhole(named))
           builder_.CreateCall(runtime_["xag_print_int"],
                               {widened(read(operand), named),
                                builder_.getInt32(widthOf(named)),

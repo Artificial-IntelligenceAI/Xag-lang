@@ -35,6 +35,16 @@ logic = "stops-early"
 # which needs no table and never changes.
 characters = "clusters"
 
+# Also changes what a program answers, and only started to when `bin` arrived.
+# What a `bin` does when there is no number to give back. `carries-on` answers
+# `infinity` or `not-a-number` and continues, as a processor does; `stops` stops.
+#
+# Carrying on is the default for a different reason than `overflow = "wrap"`:
+# a `bin` *is* IEEE 754 binary, and `infinity` and `not-a-number` are values of
+# that type rather than accidents of it. Asking to stop is asking for something
+# narrower than the type you named.
+no-number = "carries-on"
+
 [build]
 # Changes what gets delivered, never what a program answers — every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`.

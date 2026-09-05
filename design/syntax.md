@@ -142,7 +142,37 @@ var.mut.uint8 'n' = [*255*];
 set 'n' = ['n' + *1*];          # 0
 ```
 
-> `bin` and `deci` are named here and not yet implemented. Whole numbers are.
+### What `bin` does when there is no number to give back
+
+A `bin` **is** IEEE 754 binary, so `infinity` and `not-a-number` are values of
+the type rather than accidents of it. Nothing stops:
+
+```
+var.bin64 'z' = [*0*];
+print.stdout[(bin64:*1* / 'z') \n];     # infinity
+print.stdout[('z' / 'z') \n];           # not-a-number
+```
+
+A not-a-number is equal to nothing at all, itself included. Asking to stop
+instead is `no-number = "stops"` — asking for something narrower than the type
+you named.
+
+A narrower `bin` is cut back to its width after **every** step, not only when it
+is stored, which is what makes a `bin32` sum a `bin32` sum:
+
+```
+var.bin32 'a' = [*0.1*];  print.stdout[('a' x bin32:*3*) \n];   # 0.3
+var.bin64 'b' = [*0.1*];  print.stdout[('b' x bin64:*3*) \n];   # 0.30000000000000004
+```
+
+A number is printed as the shortest spelling that reads back as the same value,
+and those spellings — `infinity`, `-infinity`, `not-a-number` — may be written
+as well as printed.
+
+> **`bin128` and `deci` are named and not built.** This machine's compiler has
+> no binary128 type at all — no `__float128`, no `mode(TF)`, and `long double`
+> is a `double` — so binary128 needs arithmetic written in software, which is
+> the same machinery `deci` needs. Naming one of them is `E0512` and says so.
 
 ## The operators
 

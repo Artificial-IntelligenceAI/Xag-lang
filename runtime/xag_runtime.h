@@ -62,6 +62,20 @@ XagInt xag_int_mod(XagInt a, XagInt b, uint32_t width, int32_t is_signed);
 XagInt xag_int_pow(XagInt base, XagInt exponent, uint32_t width, int32_t is_signed);
 void xag_print_int(XagInt value, uint32_t width, int32_t is_signed);
 
+// IEEE 754 binary, carried at binary64 and cut back to the width that was
+// written after every step — which is what makes a `bin32` sum a `bin32` sum
+// rather than a `bin64` one that was stored narrowly.
+//
+// Nothing here stops. Dividing by zero is infinity, not an error: `infinity`
+// and `not-a-number` are values of these types rather than accidents of them.
+double xag_bin_fit(double value, uint32_t width);
+double xag_bin_mod(double a, double b, uint32_t width);
+double xag_bin_pow(double base, double exponent, uint32_t width);
+void xag_print_bin(double value, uint32_t width);
+
+// Whether a written value is one the width can hold without becoming infinite.
+int32_t xag_bin_reads(const char *text, uint64_t length, uint32_t width, double *out);
+
 // What is still held. A program that ends with anything outstanding has a drop
 // that did not happen, and one that goes negative has a drop that happened
 // twice — neither of which three engines agreeing would ever notice.

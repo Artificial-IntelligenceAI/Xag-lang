@@ -88,6 +88,29 @@ void aWrittenNumberHasToFit() {
   CHECK(inStart("var.uint128 'n' = [*340282366920938463463374607431768211455*];").ok());
 }
 
+void binaryHoldsWhatIEEESaysItHolds() {
+  for (const char *type : {"bin16", "bin32", "bin64"})
+    CHECK(inStart(std::string("var.") + type + " 'n' = [*1.5*];").ok());
+  CHECK(inStart("var.bin64 'n' = [*-0.25*];").ok());
+  CHECK(inStart("var.bin64 'n' = [*1e300*];").ok());
+  CHECK(inStart("var.bin64 'n' = [*3*];").ok()); // a whole number is a fine `bin`
+  CHECK(inStart("var.bin64 'n' = [*abc*];").code(0) == "E0509");
+  // A value that would arrive as infinity was not the value written down.
+  CHECK(inStart("var.bin64 'n' = [*1e400*];").code(0) == "E0509");
+  CHECK(inStart("var.bin32 'n' = [*1e300*];").code(0) == "E0509");
+  // What a print writes, a program may write back.
+  CHECK(inStart("var.bin64 'n' = [*infinity*];").ok());
+  CHECK(inStart("var.bin64 'n' = [*not-a-number*];").ok());
+  // And a `bin` is not a whole number, here as anywhere.
+  CHECK(inStart("var.bin64 'a' = [*1.5*];\n    var.int64 'b' = ['a' + *1*];").code(0) ==
+        "E0506");
+}
+
+void aTypeWithNothingBehindItSaysSo() {
+  CHECK(inStart("var.bin128 'n' = [*1*];").code(0) == "E0512");
+  CHECK(inStart("var.deci64 'n' = [*1*];").code(0) == "E0512");
+}
+
 void sizesDoNotMixOnTheirOwn() {
   CHECK(inStart("var.int32 'a' = [*1*];\n    var.int64 'b' = ['a' + *1*];").code(0) ==
         "E0506");
@@ -179,6 +202,8 @@ int main() {
   aWrittenValueFitsItsType();
   aSizeIsAlwaysWritten();
   aWrittenNumberHasToFit();
+  binaryHoldsWhatIEEESaysItHolds();
+  aTypeWithNothingBehindItSaysSo();
   sizesDoNotMixOnTheirOwn();
   nothingConvertsOnItsOwn();
   piecesSideBySideJoin();

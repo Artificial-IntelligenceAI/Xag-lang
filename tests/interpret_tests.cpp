@@ -145,6 +145,28 @@ void itCountsPastSixtyFourBits() {
        "-170141183460469231731687303715884105728\n");
 }
 
+void itDoesIEEEBinary() {
+  SAYS("START { var.bin64 'a' = [*1.5*]; var.bin64 'b' = [*0.1*];"
+       " print.stdout[('a' + 'b') \\n]; }\n", "1.6\n");
+  // Nothing stops: infinity and not-a-number are values of the type.
+  SAYS("START { var.bin64 'z' = [*0*]; print.stdout[(bin64:*1* / 'z') \\n]; }\n",
+       "infinity\n");
+  SAYS("START { var.bin64 'z' = [*0*]; print.stdout[('z' / 'z') \\n]; }\n",
+       "not-a-number\n");
+  SAYS("START { var.bin64 'z' = [*0*]; print.stdout[(bin64:*-1* / 'z') \\n]; }\n",
+       "-infinity\n");
+  // A not-a-number is equal to nothing at all, itself included.
+  SAYS("START { var.bin64 'z' = [*0*]; var.bin64 'n' = ['z' / 'z'];\n"
+       "  if 'n' == 'n' { print.stdout[str:*equal* \\n]; }"
+       "  else { print.stdout[str:*not equal* \\n]; } }\n",
+       "not equal\n");
+  // A narrower `bin` is cut back after every step, not only when stored.
+  SAYS("START { var.bin32 'a' = [*0.1*]; print.stdout[('a' x bin32:*3*) \\n]; }\n",
+       "0.3\n");
+  SAYS("START { var.bin64 'a' = [*0.1*]; print.stdout[('a' x bin64:*3*) \\n]; }\n",
+       "0.30000000000000004\n");
+}
+
 void itDecides() {
   SAYS("START { var.int64 'n' = [*5*];\n"
        "  if 'n' > *3* { print.stdout[str:*big* \\n]; } else { print.stdout[str:*small* \\n]; } }\n",
@@ -245,6 +267,7 @@ int main() {
   itWrapsAtTheWidthItWasWritten();
   itComparesAsTheTypeSaysToCompare();
   itCountsPastSixtyFourBits();
+  itDoesIEEEBinary();
   itDecides();
   itLoops();
   itCalls();

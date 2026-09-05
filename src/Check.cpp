@@ -1,5 +1,7 @@
 #include "xag/Check.h"
 
+#include "xag_runtime.h"
+
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -173,6 +175,19 @@ private:
     return nullptr;
   }
 
+  // A type that is named but has nothing behind it yet is said so plainly,
+  // rather than being let through to fail somewhere further down.
+  bool built(Type type, Span where) {
+    if (type != Type::Bin128 && !isDecimal(type))
+      return true;
+    complain(where, "E0512",
+             "`" + std::string(name(type)) + "` is a type this compiler cannot build yet.",
+             {"a type is written when there is something behind it"},
+             {"binary128 has no representation on this machine's compiler, so it "
+              "waits on the software arithmetic that `deci` needs anyway."});
+    return false;
+  }
+
   Type typeOfChain(const Chain &chain) {
     if (chain.segments.empty())
       return Type::Unknown;
@@ -185,7 +200,9 @@ private:
     const Type type = typeNamed(last.text);
     if (type == Type::Unknown)
       complain(last.span, "E0503", "`" + last.text + "` is not a type.",
-               {"the types are `i64`, `str`, `bool` and `nothing`"});
+               {"a size is always written, and only sizes the standard defines"});
+    else
+      built(type, last.span);
     return type;
   }
 
@@ -259,6 +276,16 @@ private:
                   "leaves the value to say it."});
         return Type::Unknown;
       }
+      if (isBinary(expected)) {
+        double read = 0;
+        if (!xag_bin_reads(e.text.data(), e.text.size(), widthOf(expected), &read))
+          complain(e.span, "E0509",
+                   "`*" + e.text + "*` is not a number a `" + std::string(name(expected)) +
+                       "` holds.",
+                   {"a written value has to be one of the things its type holds"},
+                   {"a number too large for the width would arrive as infinity, which "
+                    "is not what was written down."});
+      }
       if (isWhole(expected)) {
         if (!looksLikeWholeNumber(e.text))
           complain(e.span, "E0509", "`*" + e.text + "*` is not a whole number.",
@@ -282,9 +309,10 @@ private:
       const Type stated = typeNamed(e.text);
       if (stated == Type::Unknown) {
         complain(e.span, "E0503", "`" + e.text + "` is not a type.",
-                 {"the types are `i64`, `str`, `bool` and `nothing`"});
+                 {"a size is always written, and only sizes the standard defines"});
         return Type::Unknown;
       }
+      built(stated, e.span);
       if (!e.children.empty())
         expr(*e.children[0], stated);
       return stated;

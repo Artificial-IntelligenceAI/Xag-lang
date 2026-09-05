@@ -18,8 +18,9 @@ namespace {
 // the same distinction the IR draws between `move` and `copy`, kept honest at
 // run time rather than assumed.
 struct Value {
-  enum class Kind { Nothing, Number, Text, Loan } kind = Kind::Nothing;
+  enum class Kind { Nothing, Number, Real, Text, Loan } kind = Kind::Nothing;
   XagInt number = 0;
+  double real = 0; // a `bin`, carried at binary64 and cut to its width
   XagStr text{nullptr, 0, 0};
   bool owns = false;
   unsigned frame = 0; // Loan: which frame the lent slot lives in
@@ -139,6 +140,12 @@ private:
       if (isWhole(named)) {
         value.kind = Value::Kind::Number;
         value.number = readWhole(operand.written, named);
+      } else if (isBinary(named)) {
+        value.kind = Value::Kind::Real;
+        double read = 0;
+        xag_bin_reads(operand.written.data(), operand.written.size(), widthOf(named),
+                      &read);
+        value.real = read;
       } else if (type == "bool") {
         value.kind = Value::Kind::Number;
         value.number = operand.written == "true" ? 1 : 0;
@@ -263,7 +270,29 @@ private:
     answer.kind = Value::Kind::Number;
     const std::string &op = value.op;
 
-    if (a && b && a->kind == Value::Kind::Text) {
+    if (a && b && a->kind == Value::Kind::Real) {
+      // IEEE all the way down: dividing by zero is infinity, and a
+      // not-a-number compares equal to nothing at all, itself included.
+      const Type made = typeNamed(typeOf(value.type));
+      const unsigned width = widthOf(isBinary(made) ? made
+                                                    : typeNamed(typeOf(value.operands[0].type)));
+      const double x = a->real, y = b->real;
+      if (op == "+" || op == "-" || op == "x" || op == "/" || op == "mod" || op == "^") {
+        answer.kind = Value::Kind::Real;
+        if (op == "+") answer.real = xag_bin_fit(x + y, width);
+        else if (op == "-") answer.real = xag_bin_fit(x - y, width);
+        else if (op == "x") answer.real = xag_bin_fit(x * y, width);
+        else if (op == "/") answer.real = xag_bin_fit(x / y, width);
+        else if (op == "mod") answer.real = xag_bin_mod(x, y, width);
+        else answer.real = xag_bin_pow(x, y, width);
+      } else if (op == "==") answer.number = x == y;
+      else if (op == "!==") answer.number = x != y;
+      else if (op == "<") answer.number = x < y;
+      else if (op == ">") answer.number = x > y;
+      else if (op == "<==") answer.number = x <= y;
+      else if (op == ">==") answer.number = x >= y;
+      else trouble_ = "`" + op + "` was asked of a `bin`";
+    } else if (a && b && a->kind == Value::Kind::Text) {
       // One implementation of how text orders, called by every engine.
       const int64_t seen = xag_str_compare(&a->text, &b->text);
       if (op == "==") answer.number = seen == 0;
@@ -317,6 +346,8 @@ private:
         Value *at = behind(piece);
         if (at && at->kind == Value::Kind::Text)
           xag_print(&at->text);
+        else if (at && at->kind == Value::Kind::Real)
+          xag_print_bin(at->real, widthOf(typeNamed(typeOf(operand.type))));
         else if (at && at->kind == Value::Kind::Number) {
           const Type named = typeNamed(typeOf(operand.type));
           if (isWhole(named))

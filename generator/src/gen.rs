@@ -35,9 +35,14 @@ fn literal_range(which: u8) -> (i64, i64) {
     (low, high)
 }
 
+/// IEEE 754 binary, at the widths this machine's compiler can represent.
+/// `bin128` is missing on purpose: there is no type behind it yet.
+const BINARY: [&str; 3] = ["bin16", "bin32", "bin64"];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Ty {
     Whole(u8),
+    Real(u8),
     Bool,
     Str,
 }
@@ -46,6 +51,7 @@ impl Ty {
     fn written(self) -> &'static str {
         match self {
             Ty::Whole(which) => WHOLE[which as usize],
+            Ty::Real(which) => BINARY[which as usize],
             Ty::Bool => "bool",
             Ty::Str => "str",
         }
@@ -142,7 +148,15 @@ impl<'a> Writer<'a> {
     }
 
     fn pick_whole(&mut self) -> Ty {
+        // A `bin` shows up a third of the time, so the oracle sees both.
+        if self.rng.chance(30) {
+            return Ty::Real(self.rng.below(BINARY.len() as u32) as u8);
+        }
         Ty::Whole(self.rng.below(WHOLE.len() as u32) as u8)
+    }
+
+    fn numeric(ty: Ty) -> bool {
+        matches!(ty, Ty::Whole(_) | Ty::Real(_))
     }
 
     /// A whole type some visible name already has, so an expression can be
@@ -151,13 +165,13 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<Ty> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if matches!(var.ty, Ty::Whole(_)) && !var.moved {
+                if Self::numeric(var.ty) && !var.moved {
                     seen.push(var.ty);
                 }
             }
         }
         for var in &self.consts {
-            if matches!(var.ty, Ty::Whole(_)) {
+            if Self::numeric(var.ty) {
                 seen.push(var.ty);
             }
         }
@@ -348,7 +362,7 @@ impl<'a> Writer<'a> {
         let mut choices: Vec<(String, Ty)> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if matches!(var.ty, Ty::Whole(_)) && var.mutable && !var.moved {
+                if Self::numeric(var.ty) && var.mutable && !var.moved {
                     choices.push((var.name.clone(), var.ty));
                 }
             }
@@ -497,6 +511,7 @@ impl<'a> Writer<'a> {
         let number = self.pick_name(ty);
         let text = if ty == COUNTED { self.pick_name(Ty::Str) } else { None };
         let callable = self.funs.iter().any(|f| f.answers == ty && f.name != "consume");
+        let _ = &text;
         match self.rng.below(4) {
             0 if number.is_some() => {
                 let name = number.unwrap();
@@ -552,7 +567,7 @@ impl<'a> Writer<'a> {
                     self.literal(Ty::Str);
                 }
             }
-            Ty::Whole(_) => self.number(ty, depth),
+            Ty::Whole(_) | Ty::Real(_) => self.number(ty, depth),
         }
     }
 
@@ -652,6 +667,20 @@ impl<'a> Writer<'a> {
                 let value = self.rng.between(low, high);
                 self.out.push('*');
                 push_number(self.out, value);
+                self.out.push('*');
+            }
+            Ty::Real(which) => {
+                // Small enough that a `bin16` holds it, and written with a
+                // fraction often enough to be worth having.
+                let whole = self.rng.between(if which == 0 { -60 } else { -400 },
+                                             if which == 0 { 60 } else { 400 });
+                self.out.push('*');
+                push_number(self.out, whole);
+                if self.rng.chance(60) {
+                    self.out.push('.');
+                    let fraction = self.rng.between(1, 999);
+                    push_number(self.out, fraction);
+                }
                 self.out.push('*');
             }
             Ty::Bool => {
