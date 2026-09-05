@@ -6,6 +6,8 @@ SafetyBolt is a compiled language with Rust-style ownership, no garbage collecto
 and two ahead-of-time execution paths (native code, and a form run by an AOT
 interpreter). This document covers only how it is written.
 
+Source files are `.sbls` — SafetyBolt Language Source.
+
 ## A value is a list of items
 
 Items sit next to each other and are used in order. Nothing is concatenated into a
@@ -246,7 +248,6 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **File extension.** `.sb` is a placeholder.
 - **Precedence.** What binds tighter than what, and which way `^` associates.
 - **Comparisons.** `<` `<=` `>` `>=` `==` `!=` are what the lexer reads today, chosen
   to have something to tokenise. Quench spells two of them `<==` and `!==`.

@@ -19,7 +19,7 @@ int failures = 0;
 
 sb::LexResult lexText(const std::string &text) {
   static std::vector<sb::Source> kept;
-  kept.emplace_back("test.sb", text);
+  kept.emplace_back("test.sbls", text);
   return sb::lex(kept.back());
 }
 
@@ -164,13 +164,13 @@ void everyMistakeIsReported() {
 }
 
 void diagnosticsPointAtTheRightPlace() {
-  const sb::Source source("test.sb", "var.str ['s'] = [1000];");
+  const sb::Source source("test.sbls", "var.str ['s'] = [1000];");
   const sb::LexResult r = sb::lex(source);
   CHECK(!r.ok());
   std::ostringstream rendered;
   sb::render(source, r.diagnostics[0], rendered);
   const std::string text = rendered.str();
-  CHECK(text.find("test.sb:1:18") != std::string::npos);
+  CHECK(text.find("test.sbls:1:18") != std::string::npos);
   CHECK(text.find("^^^^ here") != std::string::npos);
   CHECK(text.find("Error code: E0005") != std::string::npos);
   CHECK(text.find("Rule(s) broken:") != std::string::npos);
