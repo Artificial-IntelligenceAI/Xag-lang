@@ -126,13 +126,22 @@ void commentsRunToEndOfLine() {
   CHECK(r.tokens[0].text == "yes");
 }
 
-void comparisonsGlue() {
-  const sb::LexResult r = lexText("< <= > >= == != =");
+void comparisonsCarryTheWholeEquality() {
+  const sb::LexResult r = lexText("< <== > >== == !== =");
   CHECK(r.ok());
   CHECK(kinds(r) == (std::vector<sb::TokenKind>{
                         sb::TokenKind::Less, sb::TokenKind::LessEqual, sb::TokenKind::Greater,
                         sb::TokenKind::GreaterEqual, sb::TokenKind::EqualEqual,
                         sb::TokenKind::BangEqual, sb::TokenKind::Equals, sb::TokenKind::End}));
+}
+
+void halfAnEqualityIsRefused() {
+  for (const std::string &written : {"<=", ">=", "!="}) {
+    const sb::LexResult r = lexText("'a' " + written + " 'b'");
+    CHECK(!r.ok());
+    CHECK(r.diagnostics.size() == 1);
+    CHECK(r.diagnostics[0].code == "E0009");
+  }
 }
 
 void aQuoteOffersBothMarks() {
@@ -189,7 +198,8 @@ int main() {
   aWordIsPlainerThanAName();
   arithmeticIsFiveThings();
   commentsRunToEndOfLine();
-  comparisonsGlue();
+  comparisonsCarryTheWholeEquality();
+  halfAnEqualityIsRefused();
   aQuoteOffersBothMarks();
   aBareNumberIsToldToWearMarks();
   anUnclosedMarkIsReported();

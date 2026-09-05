@@ -9,7 +9,7 @@ fn.ref.str echo [ref.str 'text'] {
 # Two borrowed parameters. The answer comes from one of them, the compiler
 # cannot see which, so the loan is named and everything on it says so.
 fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {
-    if [call count['a'] > call count['b']] {
+    if [call count['a'] >== call count['b']] {
         give ['a'];
     } else {
         give ['b'];

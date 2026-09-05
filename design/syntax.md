@@ -84,6 +84,37 @@ other, and position tells it apart.
 
 `x` is reserved. No function may be called `x`.
 
+## Comparison carries the whole of `==`
+
+```
+'a' <  'b'     'a' <== 'b'     'a' == 'b'
+'a' >  'b'     'a' >== 'b'     'a' !== 'b'
+```
+
+One `=` assigns. Two are the equality token — so a comparison that includes
+equality carries it whole, and `<=` would read as *less-than-assign*, which
+means nothing.
+
+What that buys is a line you can classify by counting: **one `=` is always an
+assignment, two are always a comparison**, and neither has to be told apart from
+the other by what surrounds it.
+
+Writing `<=`, `>=` or `!=` out of habit is its own error rather than a quiet
+acceptance:
+
+```text
+`<=` is not how a comparison is written.
+
+  1 | if ['a' <= 'b'] {
+    |         ^^ here
+
+Error code: E0009
+Rule(s) broken: one `=` assigns, and equality is written `==`
+Tip(s): a comparison that includes equality carries the whole of it, so the
+        number of `=` says whether a line assigns or compares without ever
+        consulting what is around it.
+```
+
 ## Brackets bound a list that nothing else bounds
 
 A value is a list of **juxtaposed** items, so nothing inside it says where one item
@@ -249,8 +280,6 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 ## Open
 
 - **Precedence.** What binds tighter than what, and which way `^` associates.
-- **Comparisons.** `<` `<=` `>` `>=` `==` `!=` are what the lexer reads today, chosen
-  to have something to tokenise. Quench spells two of them `<==` and `!==`.
 - **Entry point.** `START` is borrowed from Quench pending a decision.
 - **Turning a number into text.** Pieces side by side join, and nothing converts on
   its own, so something has to do it and be named.

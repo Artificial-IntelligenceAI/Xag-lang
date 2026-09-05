@@ -28,10 +28,10 @@ const char *describe(TokenKind kind) {
   case TokenKind::Caret:        return "`^`";
   case TokenKind::Less:         return "`<`";
   case TokenKind::Greater:      return "`>`";
-  case TokenKind::LessEqual:    return "`<=`";
-  case TokenKind::GreaterEqual: return "`>=`";
+  case TokenKind::LessEqual:    return "`<==`";
+  case TokenKind::GreaterEqual: return "`>==`";
   case TokenKind::EqualEqual:   return "`==`";
-  case TokenKind::BangEqual:    return "`!=`";
+  case TokenKind::BangEqual:    return "`!==`";
   }
   return "something";
 }
@@ -124,6 +124,33 @@ private:
               "marks, which is why `\\" + markText + "` exists."});
   }
 
+  // `<` and `>` read the same way, and mis-writing either reads the same way too.
+  void leaning(TokenKind alone, TokenKind withEquality, const char *sign) {
+    const unsigned begin = at_;
+    if (peek(1) == '=' && peek(2) == '=') {
+      at_ += 3;
+      emit(withEquality, begin);
+      return;
+    }
+    if (peek(1) == '=') {
+      at_ += 2;
+      halfAnEquality(std::string(sign) + "=");
+      return;
+    }
+    ++at_;
+    emit(alone, begin);
+  }
+
+  // Reached when someone writes `<=`, `>=` or `!=` out of habit.
+  void halfAnEquality(std::string written) {
+    complain(Span{at_ - static_cast<unsigned>(written.size()), at_}, "E0009",
+             "`" + written + "` is not how a comparison is written.",
+             {"one `=` assigns, and equality is written `==`"},
+             {"a comparison that includes equality carries the whole of it, so the "
+              "number of `=` says whether a line assigns or compares without ever "
+              "consulting what is around it."});
+  }
+
   void one() {
     const unsigned begin = at_;
     const char c = text_[at_];
@@ -182,27 +209,28 @@ private:
     // on written values and never means multiply.
     case '^': ++at_; emit(TokenKind::Caret, begin); return;
 
+    // One `=` assigns. Two are the equality token, and a comparison that
+    // includes equality carries it whole: `<==`, `>==`, `!==`.
     case '=':
       at_ += peek(1) == '=' ? 2 : 1;
       emit(at_ - begin == 2 ? TokenKind::EqualEqual : TokenKind::Equals, begin);
       return;
-    case '<':
-      at_ += peek(1) == '=' ? 2 : 1;
-      emit(at_ - begin == 2 ? TokenKind::LessEqual : TokenKind::Less, begin);
-      return;
-    case '>':
-      at_ += peek(1) == '=' ? 2 : 1;
-      emit(at_ - begin == 2 ? TokenKind::GreaterEqual : TokenKind::Greater, begin);
-      return;
+    case '<': return leaning(TokenKind::Less, TokenKind::LessEqual, "<");
+    case '>': return leaning(TokenKind::Greater, TokenKind::GreaterEqual, ">");
     case '!':
+      if (peek(1) == '=' && peek(2) == '=') {
+        at_ += 3;
+        emit(TokenKind::BangEqual, begin);
+        return;
+      }
       if (peek(1) == '=') {
         at_ += 2;
-        emit(TokenKind::BangEqual, begin);
+        halfAnEquality("!=");
         return;
       }
       ++at_;
       complain(Span{begin, at_}, "E0006", "`!` on its own means nothing here.",
-               {"`!=` is the only place `!` appears"}, {});
+               {"`!==` is the only place `!` appears"}, {});
       return;
 
     default: break;
