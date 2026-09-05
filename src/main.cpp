@@ -1,4 +1,5 @@
 #include "xag/Lexer.h"
+#include "xag/Check.h"
 #include "xag/Parser.h"
 #include "xag/Source.h"
 
@@ -19,6 +20,7 @@ void usage() {
   std::cout << "xagc — the Xag compiler\n\n"
                "    xagc lex <file>     read it and print the tokens\n"
                "    xagc parse <file>   read it and print the tree\n"
+               "    xagc check <file>   read it, check it, and stop\n"
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
                "    xagc --help         this\n\n"
                "Nothing else is built yet.\n";
@@ -82,6 +84,24 @@ int parseFile(const std::string &path) {
   return report(source, parsed.diagnostics);
 }
 
+int checkFile(const std::string &path) {
+  std::string text;
+  if (!readSource(path, text))
+    return 1;
+
+  const xag::Source source(path, text);
+  const xag::LexResult lexed = xag::lex(source);
+  if (!lexed.ok())
+    return report(source, lexed.diagnostics);
+
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  if (!parsed.ok())
+    return report(source, parsed.diagnostics);
+
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  return report(source, checked.diagnostics);
+}
+
 int llvmSmoke() {
   llvm::LLVMContext context;
   llvm::Module module("xag.smoke", context);
@@ -111,6 +131,8 @@ int main(int argc, char **argv) {
     return lexFile(argv[2]);
   if (command == "parse" && argc > 2)
     return parseFile(argv[2]);
+  if (command == "check" && argc > 2)
+    return checkFile(argv[2]);
   if (command == "llvm-smoke")
     return llvmSmoke();
 

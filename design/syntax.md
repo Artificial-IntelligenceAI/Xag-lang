@@ -51,9 +51,6 @@ print.stdout[str:*Hello, * 'name' str:*!* \n];
 
 A name needs no annotation anywhere: its declaration gave it one already.
 
-> Not yet enforced. Which context supplies a type depends on what a name
-> resolves to, so this is the checker's rule, and the checker does not exist.
-
 ### Escapes stand outside
 
 ```
