@@ -324,23 +324,43 @@ private:
     if (!atUnsettled())
       return left;
 
+    const bool settledAlready = left->kind == ExprKind::Binary;
     const Token op = advance();
     ExprPtr right = primary();
 
-    if (left->kind == ExprKind::Binary) {
+    if (settledAlready)
       // `a + b mod c` — the settled operator was already taken, so say so.
       complainAmbiguous(*left->children[0], left->text, *left->children[1], op.text,
                         *right, Span{left->span.begin, right->span.end});
-    } else if (atSettledOperator()) {
+
+    auto join = [&](ExprPtr a, const std::string &word, ExprPtr b) {
+      Span span{a->span.begin, b->span.end};
+      auto node = make(ExprKind::Binary, span, word);
+      node->children.push_back(std::move(a));
+      node->children.push_back(std::move(b));
+      return node;
+    };
+
+    ExprPtr node = join(std::move(left), op.text, std::move(right));
+
+    // `and` and `or` are associative, so repeating one asks nothing of a reader
+    // and needs no brackets. `mod` is not associative, so repeating it does.
+    const bool associative = op.text == "and" || op.text == "or";
+    while (associative && peek().kind == TokenKind::Word && peek().text == op.text) {
+      advance();
+      ExprPtr more = primary();
+      node = join(std::move(node), op.text, std::move(more));
+    }
+
+    if (atSettledOperator()) {
       // `a mod b + c` — the settled operator is still to come.
-      const Token next = peek();
-      const std::string nextOp = describeOperator(next);
+      const std::string nextOp = describeOperator(peek());
       advance();
       ExprPtr tail = primary();
-      complainAmbiguous(*left, op.text, *right, nextOp, *tail,
-                        Span{left->span.begin, tail->span.end});
+      complainAmbiguous(*node->children[0], op.text, *node->children[1], nextOp, *tail,
+                        Span{node->span.begin, tail->span.end});
     } else if (atUnsettled()) {
-      complain(Span{left->span.begin, peek().span.end}, "E0301",
+      complain(Span{node->span.begin, peek().span.end}, "E0301",
                "`" + op.text + "` and `" + peek().text +
                    "` have no agreed order, so this could be read two ways.",
                {"precedence is kept where mathematics settled it, and invented nowhere"},
@@ -348,10 +368,6 @@ private:
       advance();
     }
 
-    Span span{left->span.begin, right->span.end};
-    auto node = make(ExprKind::Binary, span, op.text);
-    node->children.push_back(std::move(left));
-    node->children.push_back(std::move(right));
     return node;
   }
 

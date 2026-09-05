@@ -109,6 +109,26 @@ void unsettledOrderNeedsBrackets() {
   const Parsed andOr = inStart("var.bool 'b' = ['p' and 'q' or 'r'];");
   CHECK(!andOr.parsed.ok());
   CHECK(andOr.code(0) == "E0301");
+
+  // A settled operator arriving after an unsettled one is the same mistake.
+  const Parsed after = inStart("var.i64 'n' = [*a* mod *b* + *c*];");
+  CHECK(!after.parsed.ok());
+  CHECK(after.code(0) == "E0301");
+}
+
+void repeatingAnAssociativeOperatorIsFine() {
+  // `and` and `or` are associative, so the brackets would say nothing.
+  const Parsed p = inStart("var.bool 'b' = ['p' and 'q' and 'r' and 's'];");
+  CHECK(p.ok());
+  CHECK(inStart("var.bool 'b' = ['p' or 'q' or 'r'];").ok());
+
+  // `mod` is not associative, so repeating it still asks a question.
+  const Parsed m = inStart("var.i64 'n' = [*9* mod *5* mod *3*];");
+  CHECK(!m.parsed.ok());
+  CHECK(m.code(0) == "E0301");
+
+  // Mixing the two still needs brackets even though each repeats fine.
+  CHECK(!inStart("var.bool 'b' = ['p' or 'q' and 'r'];").parsed.ok());
 }
 
 void bracketsSettleIt() {
@@ -180,6 +200,7 @@ int main() {
   precedenceIsMathematics();
   powerLeansRight();
   unsettledOrderNeedsBrackets();
+  repeatingAnAssociativeOperatorIsFine();
   bracketsSettleIt();
   writingADefaultIsAnError();
   transfersAreSpelled();

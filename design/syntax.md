@@ -119,6 +119,15 @@ Rule(s) broken: precedence is kept where mathematics settled it, and invented no
 The two readings sit in the message because they *are* the message: the compiler
 is not advising, it is saying what it cannot decide.
 
+Repeating `and` or `or` is the one thing that needs no brackets, because both are
+associative and the brackets would say nothing:
+
+```
+['p' and 'q' and 'r']        # fine
+['p' and 'q' or 'r']         # brackets — these are different operators
+[*9* mod *5* mod *3*]        # brackets — `mod` is not associative
+```
+
 ## Comparison carries the whole of `==`
 
 ```
