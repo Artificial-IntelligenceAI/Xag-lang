@@ -1,12 +1,12 @@
-# SafetyBolt syntax — v0 working draft
+# Xag syntax — v0 working draft
 
 Status: the shape below is settled. Everything under **Open** is not.
 
-SafetyBolt is a compiled language with Rust-style ownership, no garbage collector,
+Xag is a compiled language with Rust-style ownership, no garbage collector,
 and two ahead-of-time execution paths (native code, and a form run by an AOT
 interpreter). This document covers only how it is written.
 
-Source files are `.sbls` — SafetyBolt Language Source.
+Source files are `.xag` — Xag source.
 
 ## A value is a list of items
 
@@ -37,7 +37,7 @@ var.str 's' = [*line one* \n *line two*];
 ```
 
 `\n` is an item sitting beside the text, not hidden inside it. So `*a\nb*` is a
-backslash and an `n`. Reading a piece of SafetyBolt text never means working out
+backslash and an `n`. Reading a piece of Xag text never means working out
 which of its characters were secretly instructions.
 
 Escapes: `\n`, `\t`, `\r`, `\\`. Inside a mark, `\*` and `\'` write the closing mark
@@ -95,13 +95,13 @@ Those five words are reserved. No function may be named one of them.
 
 That is the table everybody learns before they meet a keyboard, and it is what
 makes `ax² + bx + c` readable unbracketed. Mathematics' own famous ambiguity —
-`8 ÷ 2(2+2)` — comes entirely from *implicit* multiplication, which SafetyBolt
+`8 ÷ 2(2+2)` — comes entirely from *implicit* multiplication, which Xag
 does not have, because `x` is written.
 
 Everything programming added has no agreed order, because nothing outside
 programming ever needed one. `mod` written infix, `and` against `or`: C put `&`
 looser than `==` and Python put it tighter, and both choices produced a famous
-trap. So there is no answer to inherit, and SafetyBolt does not invent one —
+trap. So there is no answer to inherit, and Xag does not invent one —
 **those need brackets**, and writing them without is an error that names both
 readings rather than picking one.
 

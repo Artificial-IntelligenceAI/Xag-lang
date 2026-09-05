@@ -1,12 +1,12 @@
 #pragma once
 
-#include "safetybolt/Source.h"
+#include "xag/Source.h"
 
 #include <iosfwd>
 #include <string>
 #include <vector>
 
-namespace sb {
+namespace xag {
 
 // A diagnostic says what happened, points at it, names the rule it broke, and
 // explains why the rule exists. It does not say what to type instead: the
@@ -27,4 +27,4 @@ void render(const Source &source, const Diagnostic &diagnostic, std::ostream &ou
 void renderOpening(std::ostream &out);
 void renderTally(std::size_t errors, std::ostream &out);
 
-} // namespace sb
+} // namespace xag

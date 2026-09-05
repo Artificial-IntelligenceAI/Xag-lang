@@ -1,4 +1,4 @@
-#include "safetybolt/Lexer.h"
+#include "xag/Lexer.h"
 
 #include <iostream>
 #include <sstream>
@@ -17,30 +17,30 @@ int failures = 0;
     }                                                                                    \
   } while (false)
 
-sb::LexResult lexText(const std::string &text) {
-  static std::vector<sb::Source> kept;
-  kept.emplace_back("test.sbls", text);
-  return sb::lex(kept.back());
+xag::LexResult lexText(const std::string &text) {
+  static std::vector<xag::Source> kept;
+  kept.emplace_back("test.xag", text);
+  return xag::lex(kept.back());
 }
 
-std::vector<sb::TokenKind> kinds(const sb::LexResult &result) {
-  std::vector<sb::TokenKind> out;
-  for (const sb::Token &token : result.tokens)
+std::vector<xag::TokenKind> kinds(const xag::LexResult &result) {
+  std::vector<xag::TokenKind> out;
+  for (const xag::Token &token : result.tokens)
     out.push_back(token.kind);
   return out;
 }
 
 void marksCarryTheirContents() {
-  const sb::LexResult r = lexText("'greeting' *Hello, world*");
+  const xag::LexResult r = lexText("'greeting' *Hello, world*");
   CHECK(r.ok());
-  CHECK(kinds(r) == (std::vector<sb::TokenKind>{sb::TokenKind::Name, sb::TokenKind::Written,
-                                                sb::TokenKind::End}));
+  CHECK(kinds(r) == (std::vector<xag::TokenKind>{xag::TokenKind::Name, xag::TokenKind::Written,
+                                                xag::TokenKind::End}));
   CHECK(r.tokens[0].text == "greeting");
   CHECK(r.tokens[1].text == "Hello, world");
 }
 
 void aMarkIsWrittenWithABackslash() {
-  const sb::LexResult r = lexText("*a\\*b* 'it\\'s'");
+  const xag::LexResult r = lexText("*a\\*b* 'it\\'s'");
   CHECK(r.ok());
   CHECK(r.tokens[0].text == "a*b");
   CHECK(r.tokens[1].text == "it's");
@@ -48,81 +48,81 @@ void aMarkIsWrittenWithABackslash() {
 
 void escapesStandOutside() {
   // Inside a mark a backslash is just a backslash; only the closing mark escapes.
-  const sb::LexResult inside = lexText("*a\\nb*");
+  const xag::LexResult inside = lexText("*a\\nb*");
   CHECK(inside.ok());
   CHECK(inside.tokens[0].text == "a\\nb");
 
-  const sb::LexResult beside = lexText("*line one* \\n *line two*");
+  const xag::LexResult beside = lexText("*line one* \\n *line two*");
   CHECK(beside.ok());
-  CHECK(kinds(beside) == (std::vector<sb::TokenKind>{sb::TokenKind::Written,
-                                                     sb::TokenKind::Escape,
-                                                     sb::TokenKind::Written,
-                                                     sb::TokenKind::End}));
+  CHECK(kinds(beside) == (std::vector<xag::TokenKind>{xag::TokenKind::Written,
+                                                     xag::TokenKind::Escape,
+                                                     xag::TokenKind::Written,
+                                                     xag::TokenKind::End}));
   CHECK(beside.tokens[1].text == "n");
 }
 
 void chainsAreWordsAndDots() {
-  const sb::LexResult r = lexText("var.mut.i64 ['total'] = [*0*];");
+  const xag::LexResult r = lexText("var.mut.i64 ['total'] = [*0*];");
   CHECK(r.ok());
-  CHECK(r.tokens[0].kind == sb::TokenKind::Word && r.tokens[0].text == "var");
-  CHECK(r.tokens[1].kind == sb::TokenKind::Dot);
+  CHECK(r.tokens[0].kind == xag::TokenKind::Word && r.tokens[0].text == "var");
+  CHECK(r.tokens[1].kind == xag::TokenKind::Dot);
   CHECK(r.tokens[2].text == "mut");
   CHECK(r.tokens[4].text == "i64");
-  CHECK(r.tokens.back().kind == sb::TokenKind::End);
+  CHECK(r.tokens.back().kind == xag::TokenKind::End);
 }
 
 void aHyphenJoinsAWordButDoesNotSubtract() {
-  const sb::LexResult joined = lexText("sum-to");
+  const xag::LexResult joined = lexText("sum-to");
   CHECK(joined.ok());
-  CHECK(kinds(joined) == (std::vector<sb::TokenKind>{sb::TokenKind::Word, sb::TokenKind::End}));
+  CHECK(kinds(joined) == (std::vector<xag::TokenKind>{xag::TokenKind::Word, xag::TokenKind::End}));
   CHECK(joined.tokens[0].text == "sum-to");
 
   // A `-` joins only between two word characters.
   for (const std::string &spaced : {"count - *1*", "count- *1*", "count -*1*"}) {
-    const sb::LexResult r = lexText(spaced);
+    const xag::LexResult r = lexText(spaced);
     CHECK(r.ok());
     CHECK(r.tokens.size() == 4);
     CHECK(r.tokens[0].text == "count");
-    CHECK(r.tokens[1].kind == sb::TokenKind::Minus);
-    CHECK(r.tokens[2].kind == sb::TokenKind::Written);
+    CHECK(r.tokens[1].kind == xag::TokenKind::Minus);
+    CHECK(r.tokens[2].kind == xag::TokenKind::Written);
   }
 }
 
 void aWordIsPlainerThanAName() {
-  const sb::LexResult underscore = lexText("sum_to");
+  const xag::LexResult underscore = lexText("sum_to");
   CHECK(underscore.ok());
   CHECK(underscore.tokens[0].text == "sum_to");
 
   // An emoji is fine in a name and is not a word.
-  const sb::LexResult emoji = lexText("sum\xF0\x9F\x98\x80to");
+  const xag::LexResult emoji = lexText("sum\xF0\x9F\x98\x80to");
   CHECK(!emoji.ok());
   CHECK(emoji.diagnostics[0].code == "E0008");
 
-  const sb::LexResult name = lexText("'sum_to \xF0\x9F\x98\x80'");
+  const xag::LexResult name = lexText("'sum_to \xF0\x9F\x98\x80'");
   CHECK(name.ok());
-  CHECK(name.tokens[0].kind == sb::TokenKind::Name);
+  CHECK(name.tokens[0].kind == xag::TokenKind::Name);
 }
 
 void arithmeticIsFiveThings() {
-  const sb::LexResult r = lexText("'a' x 'b' ^ *2* + *1* - *3* / *4*");
+  const xag::LexResult r = lexText("'a' x 'b' ^ *2* + *1* - *3* / *4*");
   CHECK(r.ok());
-  CHECK(kinds(r) == (std::vector<sb::TokenKind>{
-                        sb::TokenKind::Name, sb::TokenKind::Word, sb::TokenKind::Name,
-                        sb::TokenKind::Caret, sb::TokenKind::Written, sb::TokenKind::Plus,
-                        sb::TokenKind::Written, sb::TokenKind::Minus, sb::TokenKind::Written,
-                        sb::TokenKind::Slash, sb::TokenKind::Written, sb::TokenKind::End}));
+  CHECK(kinds(r) == (std::vector<xag::TokenKind>{
+                        xag::TokenKind::Name, xag::TokenKind::Word, xag::TokenKind::Name,
+                        xag::TokenKind::Caret, xag::TokenKind::Written, xag::TokenKind::Plus,
+                        xag::TokenKind::Written, xag::TokenKind::Minus, xag::TokenKind::Written,
+                        xag::TokenKind::Slash, xag::TokenKind::Written, xag::TokenKind::End}));
   // `x` is a letter, so it reaches the parser as a word like any other.
   CHECK(r.tokens[1].text == "x");
 
   // And a word merely starting with x is one word, not an operator.
-  const sb::LexResult xs = lexText("xs");
+  const xag::LexResult xs = lexText("xs");
   CHECK(xs.ok() && xs.tokens[0].text == "xs" && xs.tokens.size() == 2);
 
   // The operators spelled with letters need no tokens of their own.
-  const sb::LexResult words = lexText("'a' mod 'b' and not 'c' or 'd'");
+  const xag::LexResult words = lexText("'a' mod 'b' and not 'c' or 'd'");
   CHECK(words.ok());
   for (unsigned i : {1u, 3u, 4u, 6u}) {
-    CHECK(words.tokens[i].kind == sb::TokenKind::Word);
+    CHECK(words.tokens[i].kind == xag::TokenKind::Word);
   }
   CHECK(words.tokens[1].text == "mod");
   CHECK(words.tokens[3].text == "and");
@@ -131,24 +131,24 @@ void arithmeticIsFiveThings() {
 }
 
 void commentsRunToEndOfLine() {
-  const sb::LexResult r = lexText("# 'not' *a* token\n'yes'");
+  const xag::LexResult r = lexText("# 'not' *a* token\n'yes'");
   CHECK(r.ok());
-  CHECK(kinds(r) == (std::vector<sb::TokenKind>{sb::TokenKind::Name, sb::TokenKind::End}));
+  CHECK(kinds(r) == (std::vector<xag::TokenKind>{xag::TokenKind::Name, xag::TokenKind::End}));
   CHECK(r.tokens[0].text == "yes");
 }
 
 void comparisonsCarryTheWholeEquality() {
-  const sb::LexResult r = lexText("< <== > >== == !== =");
+  const xag::LexResult r = lexText("< <== > >== == !== =");
   CHECK(r.ok());
-  CHECK(kinds(r) == (std::vector<sb::TokenKind>{
-                        sb::TokenKind::Less, sb::TokenKind::LessEqual, sb::TokenKind::Greater,
-                        sb::TokenKind::GreaterEqual, sb::TokenKind::EqualEqual,
-                        sb::TokenKind::BangEqual, sb::TokenKind::Equals, sb::TokenKind::End}));
+  CHECK(kinds(r) == (std::vector<xag::TokenKind>{
+                        xag::TokenKind::Less, xag::TokenKind::LessEqual, xag::TokenKind::Greater,
+                        xag::TokenKind::GreaterEqual, xag::TokenKind::EqualEqual,
+                        xag::TokenKind::BangEqual, xag::TokenKind::Equals, xag::TokenKind::End}));
 }
 
 void halfAnEqualityIsRefused() {
   for (const std::string &written : {"<=", ">=", "!="}) {
-    const sb::LexResult r = lexText("'a' " + written + " 'b'");
+    const xag::LexResult r = lexText("'a' " + written + " 'b'");
     CHECK(!r.ok());
     CHECK(r.diagnostics.size() == 1);
     CHECK(r.diagnostics[0].code == "E0009");
@@ -156,41 +156,41 @@ void halfAnEqualityIsRefused() {
 }
 
 void aQuoteOffersBothMarks() {
-  const sb::LexResult r = lexText("\"hello\"");
+  const xag::LexResult r = lexText("\"hello\"");
   CHECK(!r.ok());
   CHECK(r.diagnostics.size() == 1);
   CHECK(r.diagnostics[0].code == "E0003");
 }
 
 void aBareNumberIsToldToWearMarks() {
-  const sb::LexResult r = lexText("1000");
+  const xag::LexResult r = lexText("1000");
   CHECK(!r.ok());
   CHECK(r.diagnostics.size() == 1);
   CHECK(r.diagnostics[0].code == "E0005");
 }
 
 void anUnclosedMarkIsReported() {
-  const sb::LexResult r = lexText("*hello\n'world'");
+  const xag::LexResult r = lexText("*hello\n'world'");
   CHECK(!r.ok());
   CHECK(r.diagnostics.size() == 1);
   // Recovery continues on the next line rather than swallowing the file.
   CHECK(r.tokens.size() == 2);
-  CHECK(r.tokens[0].kind == sb::TokenKind::Name && r.tokens[0].text == "world");
+  CHECK(r.tokens[0].kind == xag::TokenKind::Name && r.tokens[0].text == "world");
 }
 
 void everyMistakeIsReported() {
-  const sb::LexResult r = lexText("1 \"x\" 2");
+  const xag::LexResult r = lexText("1 \"x\" 2");
   CHECK(r.diagnostics.size() == 3);
 }
 
 void diagnosticsPointAtTheRightPlace() {
-  const sb::Source source("test.sbls", "var.str ['s'] = [1000];");
-  const sb::LexResult r = sb::lex(source);
+  const xag::Source source("test.xag", "var.str ['s'] = [1000];");
+  const xag::LexResult r = xag::lex(source);
   CHECK(!r.ok());
   std::ostringstream rendered;
-  sb::render(source, r.diagnostics[0], rendered);
+  xag::render(source, r.diagnostics[0], rendered);
   const std::string text = rendered.str();
-  CHECK(text.find("test.sbls:1:18") != std::string::npos);
+  CHECK(text.find("test.xag:1:18") != std::string::npos);
   CHECK(text.find("^^^^ here") != std::string::npos);
   CHECK(text.find("Error code: E0005") != std::string::npos);
   CHECK(text.find("Rule(s) broken:") != std::string::npos);

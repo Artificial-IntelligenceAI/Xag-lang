@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(safetybolt
+project(xag
   VERSION 0.0.0
-  DESCRIPTION "The SafetyBolt programming language"
+  DESCRIPTION "The Xag programming language"
   LANGUAGES C CXX)  # C is unused, but LLVM's CMake config runs C probes
 
 set(CMAKE_CXX_STANDARD 20)
@@ -13,14 +13,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Homebrew keeps LLVM keg-only, so it is not on the default search path.
 # Give CMake a hint rather than making every developer pass -DCMAKE_PREFIX_PATH.
 if(APPLE AND NOT LLVM_DIR)
-  find_program(SB_BREW brew)
-  if(SB_BREW)
-    execute_process(COMMAND ${SB_BREW} --prefix llvm
-      OUTPUT_VARIABLE SB_LLVM_PREFIX
+  find_program(XAG_BREW brew)
+  if(XAG_BREW)
+    execute_process(COMMAND ${XAG_BREW} --prefix llvm
+      OUTPUT_VARIABLE XAG_LLVM_PREFIX
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET)
-    if(SB_LLVM_PREFIX)
-      list(APPEND CMAKE_PREFIX_PATH "${SB_LLVM_PREFIX}")
+    if(XAG_LLVM_PREFIX)
+      list(APPEND CMAKE_PREFIX_PATH "${XAG_LLVM_PREFIX}")
     endif()
   endif()
 endif()
@@ -30,9 +30,9 @@ endif()
 find_package(LLVM REQUIRED CONFIG)
 if(LLVM_VERSION_MAJOR LESS 23)
   message(FATAL_ERROR
-    "SafetyBolt needs LLVM 23 or newer; found ${LLVM_PACKAGE_VERSION} at ${LLVM_DIR}")
+    "Xag needs LLVM 23 or newer; found ${LLVM_PACKAGE_VERSION} at ${LLVM_DIR}")
 endif()
-message(STATUS "SafetyBolt: LLVM ${LLVM_PACKAGE_VERSION} from ${LLVM_DIR}")
+message(STATUS "Xag: LLVM ${LLVM_PACKAGE_VERSION} from ${LLVM_DIR}")
 
 # LLVM_DEFINITIONS arrives as one space-separated string; CMake needs a list.
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
@@ -42,27 +42,27 @@ separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 llvm_map_components_to_libnames(LLVM_LIBS core)
 
 # The front end knows nothing about LLVM, so it builds and tests without it.
-add_library(sbfront STATIC
+add_library(xagfront STATIC
   src/Source.cpp
   src/Diagnostic.cpp
   src/Lexer.cpp)
-target_include_directories(sbfront PUBLIC include)
-target_compile_options(sbfront PRIVATE -fno-exceptions -Wall -Wextra)
+target_include_directories(xagfront PUBLIC include)
+target_compile_options(xagfront PRIVATE -fno-exceptions -Wall -Wextra)
 
-add_executable(sbc src/main.cpp)
-target_link_libraries(sbc PRIVATE sbfront)
+add_executable(xagc src/main.cpp)
+target_link_libraries(xagc PRIVATE xagfront)
 
 # SYSTEM so LLVM's own headers never emit warnings into our build output.
-target_include_directories(sbc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
-target_compile_definitions(sbc PRIVATE ${LLVM_DEFINITIONS_LIST})
-target_link_libraries(sbc PRIVATE ${LLVM_LIBS})
+target_include_directories(xagc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+target_compile_definitions(xagc PRIVATE ${LLVM_DEFINITIONS_LIST})
+target_link_libraries(xagc PRIVATE ${LLVM_LIBS})
 
 # LLVM is built without exceptions; match it so our objects agree with its headers.
-target_compile_options(sbc PRIVATE -fno-exceptions -Wall -Wextra)
+target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
 add_executable(lexer_tests tests/lexer_tests.cpp)
-target_link_libraries(lexer_tests PRIVATE sbfront)
+target_link_libraries(lexer_tests PRIVATE xagfront)
 target_compile_options(lexer_tests PRIVATE -fno-exceptions -Wall -Wextra)
 add_test(NAME lexer COMMAND lexer_tests)

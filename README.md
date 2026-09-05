@@ -1,4 +1,4 @@
-# SafetyBolt coding language
+# Xag coding language
 
 A programming language built around high performance, helpful error messages,
 and Rust-style memory management. Programs are compiled ahead of time,
@@ -16,14 +16,14 @@ Requirements: **LLVM 23 or newer**, CMake, Ninja.
 brew install llvm cmake ninja
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 ninja -C build
-./build/sbc
+./build/xagc
 ```
 
 CMake finds Homebrew's keg-only LLVM on its own. Build with Apple's `clang++`
 (the default) rather than Homebrew's — Homebrew's driver ships its own libc++
 and collides with the macOS SDK headers once LLVM's include directory is added.
 
-Source files are `.sbls`. `sbc lex <file>` reads one and prints its tokens; `sbc llvm-smoke`
+Source files are `.xag`. `xagc lex <file>` reads one and prints its tokens; `xagc llvm-smoke`
 proves the LLVM backend is reachable. Run the tests with `ctest --test-dir build`.
 Only the lexer exists so far — there is no parser, no checker, and no code
 generation yet.

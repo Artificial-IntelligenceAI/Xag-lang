@@ -1,5 +1,5 @@
-#include "safetybolt/Lexer.h"
-#include "safetybolt/Source.h"
+#include "xag/Lexer.h"
+#include "xag/Source.h"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -14,52 +14,52 @@
 namespace {
 
 void usage() {
-  std::cout << "sbc — the SafetyBolt compiler\n\n"
-               "    sbc lex <file>     read it and print the tokens\n"
-               "    sbc llvm-smoke     prove the LLVM backend is reachable\n"
-               "    sbc --help         this\n\n"
+  std::cout << "xagc — the Xag compiler\n\n"
+               "    xagc lex <file>     read it and print the tokens\n"
+               "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
+               "    xagc --help         this\n\n"
                "Nothing else is built yet.\n";
 }
 
 int lexFile(const std::string &path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) {
-    std::cerr << "sbc: cannot read " << path << '\n';
+    std::cerr << "xagc: cannot read " << path << '\n';
     return 1;
   }
   std::ostringstream buffer;
   buffer << in.rdbuf();
 
-  const sb::Source source(path, buffer.str());
-  const sb::LexResult result = sb::lex(source);
+  const xag::Source source(path, buffer.str());
+  const xag::LexResult result = xag::lex(source);
 
   // Tokens after a failed lex describe a file the reader has not written yet.
-  for (const sb::Token &token : result.ok() ? result.tokens : std::vector<sb::Token>{}) {
-    const sb::Source::Position at = source.positionOf(token.span.begin);
-    std::cout << at.line << ':' << at.column << '\t' << sb::describe(token.kind);
+  for (const xag::Token &token : result.ok() ? result.tokens : std::vector<xag::Token>{}) {
+    const xag::Source::Position at = source.positionOf(token.span.begin);
+    std::cout << at.line << ':' << at.column << '\t' << xag::describe(token.kind);
     if (!token.text.empty())
       std::cout << '\t' << token.text;
     std::cout << '\n';
   }
 
   if (!result.ok()) {
-    sb::renderOpening(std::cerr);
-    for (const sb::Diagnostic &diagnostic : result.diagnostics)
-      sb::render(source, diagnostic, std::cerr);
-    sb::renderTally(result.diagnostics.size(), std::cerr);
+    xag::renderOpening(std::cerr);
+    for (const xag::Diagnostic &diagnostic : result.diagnostics)
+      xag::render(source, diagnostic, std::cerr);
+    xag::renderTally(result.diagnostics.size(), std::cerr);
   }
   return result.ok() ? 0 : 1;
 }
 
 int llvmSmoke() {
   llvm::LLVMContext context;
-  llvm::Module module("safetybolt.smoke", context);
+  llvm::Module module("xag.smoke", context);
   llvm::IRBuilder<> builder(context);
 
   llvm::FunctionType *signature =
       llvm::FunctionType::get(builder.getInt32Ty(), /*isVarArg=*/false);
   llvm::Function *answer = llvm::Function::Create(
-      signature, llvm::Function::ExternalLinkage, "sb_answer", module);
+      signature, llvm::Function::ExternalLinkage, "xag_answer", module);
   builder.SetInsertPoint(llvm::BasicBlock::Create(context, "entry", answer));
   builder.CreateRet(builder.getInt32(42));
 

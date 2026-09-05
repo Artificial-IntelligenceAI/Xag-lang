@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-namespace sb {
+namespace xag {
 
 // A half-open byte range into a Source.
 struct Span {
@@ -12,7 +12,7 @@ struct Span {
   unsigned end = 0;
 };
 
-// One file of SafetyBolt, plus the line index a diagnostic needs to point at it.
+// One file of Xag, plus the line index a diagnostic needs to point at it.
 class Source {
 public:
   struct Position {
@@ -34,4 +34,4 @@ private:
   std::vector<unsigned> lineStarts_;
 };
 
-} // namespace sb
+} // namespace xag

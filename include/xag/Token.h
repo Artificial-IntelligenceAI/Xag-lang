@@ -1,10 +1,10 @@
 #pragma once
 
-#include "safetybolt/Source.h"
+#include "xag/Source.h"
 
 #include <string>
 
-namespace sb {
+namespace xag {
 
 enum class TokenKind {
   End,
@@ -45,4 +45,4 @@ struct Token {
   std::string text;
 };
 
-} // namespace sb
+} // namespace xag

@@ -1,10 +1,10 @@
-#include "safetybolt/Diagnostic.h"
+#include "xag/Diagnostic.h"
 
 #include <algorithm>
 #include <ostream>
 #include <string>
 
-namespace sb {
+namespace xag {
 
 void renderOpening(std::ostream &out) {
   out << "Hello, I think there may be thing(s) wrong with your code. "
@@ -55,4 +55,4 @@ void render(const Source &source, const Diagnostic &diagnostic, std::ostream &ou
   }
 }
 
-} // namespace sb
+} // namespace xag

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "safetybolt/Diagnostic.h"
-#include "safetybolt/Token.h"
+#include "xag/Diagnostic.h"
+#include "xag/Token.h"
 
 #include <vector>
 
-namespace sb {
+namespace xag {
 
 struct LexResult {
   std::vector<Token> tokens;
@@ -18,4 +18,4 @@ struct LexResult {
 // stepped over, so one run reports everything it can see.
 LexResult lex(const Source &source);
 
-} // namespace sb
+} // namespace xag

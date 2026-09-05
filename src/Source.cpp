@@ -1,8 +1,8 @@
-#include "safetybolt/Source.h"
+#include "xag/Source.h"
 
 #include <algorithm>
 
-namespace sb {
+namespace xag {
 
 Source::Source(std::string name, std::string text)
     : name_(std::move(name)), text_(std::move(text)) {
@@ -31,4 +31,4 @@ std::string_view Source::lineText(unsigned line) const {
   return std::string_view(text_).substr(start, stop - start);
 }
 
-} // namespace sb
+} // namespace xag

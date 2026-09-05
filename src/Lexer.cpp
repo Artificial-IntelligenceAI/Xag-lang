@@ -1,8 +1,8 @@
-#include "safetybolt/Lexer.h"
+#include "xag/Lexer.h"
 
 #include <cctype>
 
-namespace sb {
+namespace xag {
 
 const char *describe(TokenKind kind) {
   switch (kind) {
@@ -185,7 +185,7 @@ private:
       if (at_ < text_.size() && text_[at_] == '"')
         ++at_;
       complain(Span{begin, at_}, "E0003",
-               "SafetyBolt does not write anything between double quotes.",
+               "Xag does not write anything between double quotes.",
                {"a name is quoted with `'`, and a written value goes between `*` marks"},
                {"the two are kept apart on purpose, so a quoted thing is always a name "
                 "and never has to be read as a value depending on where it sits."});
@@ -281,7 +281,7 @@ private:
     }
 
     ++at_;
-    complain(Span{begin, at_}, "E0001", "this character means nothing in SafetyBolt.", {}, {});
+    complain(Span{begin, at_}, "E0001", "this character means nothing in Xag.", {}, {});
   }
 };
 
@@ -289,4 +289,4 @@ private:
 
 LexResult lex(const Source &source) { return Lexer(source).run(); }
 
-} // namespace sb
+} // namespace xag
