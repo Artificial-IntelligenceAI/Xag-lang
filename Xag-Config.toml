@@ -1,0 +1,51 @@
+# What this project has decided, once, for every file in it.
+#
+# Settings come in two kinds and they do not cost the same. One changes what a
+# program *answers*, and every value of it is a separate language that all three
+# engines must agree under. The other changes what gets *delivered*, and costs
+# nothing to test.
+
+[defaults]
+# Changes what a program answers. `truncated` rounds toward zero and the
+# remainder follows the dividend, which is what a processor does. `floored`
+# rounds toward negative infinity and the remainder follows the divisor, which
+# is what a mathematician means and what makes `n mod k` always land in `0..k`.
+division = "truncated"
+
+# Also changes what a program answers. `wrap` puts a sum that does not fit back
+# into the type, as a processor does; `stop` stops instead, in the same place
+# and for the same reason in every engine.
+overflow = "wrap"
+
+# Also changes what a program answers. `stops-early` means `and` asks its right
+# side only when the left was true, and `or` only when it was false. The reason
+# it is the default is not speed: under `asks-both` a guard like
+# `('n' !== *0*) and ((*100* / 'n') > *5*)` does not waste a division, it stops.
+logic = "stops-early"
+
+# Also changes what a program answers, and the only one about text. What counts
+# as one character of a `str`, which is what `count` counts.
+#
+# `count['café']` is 4 either way. `count['🧑‍🧑‍🧒‍🧒']` is 1 under `clusters` and 7
+# under `letters`, because that emoji is seven scalars welded together with
+# zero-width joiners and one thing on the page.
+#
+# `clusters` is what a person counting characters means. What it costs is that
+# the answer is tied to a Unicode version. `letters` is one Unicode scalar,
+# which needs no table and never changes.
+characters = "clusters"
+
+[build]
+# Changes what gets delivered, never what a program answers — every level has to
+# produce the same number, which is what the oracle checks. `none`, `speed`.
+optimise = "speed"
+
+[run]
+# Changes only how a program runs, never what it says.
+# `test-interpreter` does the least and is the one to believe.
+# `fast-interpreter` runs bytecode. `native` is compiled ahead of time.
+engine = "test-interpreter"
+
+# Nothing reads this file yet. The defaults above are decided so that the first
+# engine is written against a settled semantics; the other values of each knob
+# arrive with the engine that has to branch on them.

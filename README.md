@@ -29,8 +29,12 @@ mid-level IR, and `xagc llvm-smoke` proves the LLVM backend is reachable. Run th
 tests with `ctest --test-dir build`.
 
 The lexer, the parser, the name and type checker, the ownership pass, lowering to
-a mid-level IR, and drop elaboration exist. There is no code generation yet, and
-no region inference.
+a mid-level IR, drop elaboration, and the runtime exist. Nothing runs a program
+yet: there is no interpreter and no code generation.
+
+Three ways of running a program are planned, and all three call one runtime, so
+none of them can disagree about what joining or counting means. `Xag-Config.toml`
+holds what this project has decided once for every file in it.
 
 ## Reporting a problem
 

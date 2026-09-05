@@ -41,6 +41,12 @@ separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 # warn about a duplicate archive.
 llvm_map_components_to_libnames(LLVM_LIBS core)
 
+# The one place a value is made, joined, counted, printed and freed. Every engine
+# calls it, so none of them can disagree about what those mean.
+add_library(xagrt STATIC runtime/xag_runtime.cpp)
+target_include_directories(xagrt PUBLIC runtime)
+target_compile_options(xagrt PRIVATE -fno-exceptions -Wall -Wextra)
+
 # The front end knows nothing about LLVM, so it builds and tests without it.
 add_library(xagfront STATIC
   src/Source.cpp
@@ -69,9 +75,9 @@ target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
-foreach(suite lexer parser check own mir)
+foreach(suite lexer parser check own mir runtime)
   add_executable(${suite}_tests tests/${suite}_tests.cpp)
-  target_link_libraries(${suite}_tests PRIVATE xagfront)
+  target_link_libraries(${suite}_tests PRIVATE xagfront xagrt)
   target_compile_options(${suite}_tests PRIVATE -fno-exceptions -Wall -Wextra)
   add_test(NAME ${suite} COMMAND ${suite}_tests)
 endforeach()
