@@ -20,6 +20,10 @@ const char *spell(Type type) {
 
 bool copies(Type type) { return type == Type::I64 || type == Type::Bool; }
 
+// Only text holds anything that has to be given back. `nothing` is not a value
+// that copies, but it is not one that owns either.
+bool owns(Type type) { return type == Type::Str; }
+
 class Builder {
 public:
   Builder(const Program &program, const CheckResult &checked)
@@ -160,6 +164,16 @@ private:
 
   unsigned temporary(TypeRef type, bool copyable) { return addLocal("", type, copyable); }
 
+  // A temporary that owns something is owned by the scope it was made in, and
+  // ends there like anything else. If it is moved out first, elaboration sees
+  // that and takes the drop away again.
+  unsigned owningTemporary(TypeRef type) {
+    const unsigned id = addLocal("", type, false);
+    if (!scopes_.empty())
+      scopes_.back().push_back(id);
+    return id;
+  }
+
   unsigned addBlock() {
     const unsigned id = static_cast<unsigned>(body_.blocks.size());
     body_.blocks.push_back(BasicBlock{id, {}, Terminator{}});
@@ -282,7 +296,14 @@ private:
       std::vector<Operand> arguments;
       for (const Value &value : e.args.values)
         arguments.push_back(valueOperand(value));
-      const unsigned into = temporary(typeRef(spell(type)), copies(type));
+      // A print reads what it is given and builds nothing, so what it is given
+      // stays where it was and is ended by whoever owns it.
+      if (callee == "print.stdout")
+        for (Operand &argument : arguments)
+          if (argument.kind == OperandKind::Move)
+            argument.kind = OperandKind::Copy;
+      const unsigned into = owns(type) ? owningTemporary(typeRef(spell(type)))
+                                       : temporary(typeRef(spell(type)), copies(type));
       emit(Statement{StatementKind::Assign, e.span, into,
                      RValue{RValueKind::Call, {}, callee, 0, std::move(arguments),
                             typeRef(spell(type))}});
@@ -302,7 +323,7 @@ private:
     std::vector<Operand> pieces;
     for (const ExprPtr &item : value.items)
       pieces.push_back(operandOf(*item));
-    const unsigned into = temporary(typeRef("str"), false);
+    const unsigned into = owningTemporary(typeRef("str"));
     emit(Statement{StatementKind::Assign, value.span, into,
                    RValue{RValueKind::Join, {}, {}, 0, std::move(pieces), typeRef("str")}});
     return Operand{OperandKind::Move, into, {}, typeRef("str")};

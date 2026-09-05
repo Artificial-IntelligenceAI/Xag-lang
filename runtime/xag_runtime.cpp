@@ -73,32 +73,34 @@ bool isRegional(uint32_t c) { return c >= 0x1F1E6 && c <= 0x1F1FF; }
 
 extern "C" {
 
-XagStr xag_str_from(const char *bytes, uint64_t length) {
-  XagStr text{nullptr, length, length};
+void xag_str_from(XagStr *out, const char *bytes, uint64_t length) {
+  if (!out)
+    return;
+  *out = XagStr{nullptr, length, length};
   if (length == 0)
-    return text;
-  text.bytes = take(length);
-  std::memcpy(text.bytes, bytes, length);
-  return text;
+    return;
+  out->bytes = take(length);
+  std::memcpy(out->bytes, bytes, length);
 }
 
-XagStr xag_str_join(const XagStr *pieces, uint64_t count) {
+void xag_str_join(XagStr *out, const XagStr *pieces, uint64_t count) {
+  if (!out)
+    return;
   uint64_t total = 0;
   for (uint64_t i = 0; i < count; ++i)
     total += pieces[i].length;
 
-  XagStr joined{nullptr, total, total};
+  *out = XagStr{nullptr, total, total};
   if (total == 0)
-    return joined;
-  joined.bytes = take(total);
+    return;
+  out->bytes = take(total);
   uint64_t at = 0;
   for (uint64_t i = 0; i < count; ++i) {
     if (pieces[i].length == 0)
       continue;
-    std::memcpy(joined.bytes + at, pieces[i].bytes, pieces[i].length);
+    std::memcpy(out->bytes + at, pieces[i].bytes, pieces[i].length);
     at += pieces[i].length;
   }
-  return joined;
 }
 
 void xag_str_push(XagStr *text, const XagStr *tail) {

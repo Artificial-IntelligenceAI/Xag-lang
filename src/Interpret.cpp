@@ -129,7 +129,7 @@ private:
       } else {
         value.kind = Value::Kind::Text;
         std::string written = unescape(operand.written);
-        value.text = xag_str_from(written.data(), written.size());
+        xag_str_from(&value.text, written.data(), written.size());
         value.owns = true;
       }
       return value;
@@ -213,7 +213,7 @@ private:
       }
       Value joined;
       joined.kind = Value::Kind::Text;
-      joined.text = xag_str_join(pieces.data(), pieces.size());
+      xag_str_join(&joined.text, pieces.data(), pieces.size());
       joined.owns = true;
       for (Value &piece : read_)
         endValue(piece);

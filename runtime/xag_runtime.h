@@ -24,8 +24,11 @@ typedef struct {
   uint64_t capacity;
 } XagStr;
 
-XagStr xag_str_from(const char *bytes, uint64_t length);
-XagStr xag_str_join(const XagStr *pieces, uint64_t count);
+// Anything that produces a `str` writes it through a pointer rather than
+// returning it. A struct returned by value has a platform ABI to match, and
+// matching one by hand in generated IR is a bug nobody would find quickly.
+void xag_str_from(XagStr *out, const char *bytes, uint64_t length);
+void xag_str_join(XagStr *out, const XagStr *pieces, uint64_t count);
 int64_t xag_str_count(const XagStr *text);
 void xag_str_push(XagStr *text, const XagStr *tail); // grows in place when it can
 void xag_str_drop(XagStr *text);

@@ -22,7 +22,9 @@ int failures = 0;
   } while (false)
 
 XagStr of(const std::string &text) {
-  return xag_str_from(text.data(), text.size());
+  XagStr out{nullptr, 0, 0};
+  xag_str_from(&out, text.data(), text.size());
+  return out;
 }
 
 std::string read(const XagStr &text) {
@@ -48,7 +50,8 @@ void joiningBuildsSomethingNew() {
   XagStr b = of("world");
   XagStr c = of("!");
   const XagStr pieces[3] = {a, b, c};
-  XagStr joined = xag_str_join(pieces, 3);
+  XagStr joined{nullptr, 0, 0};
+  xag_str_join(&joined, pieces, 3);
   CHECK(read(joined) == "Hello, world!");
   // The pieces are read, not taken: they are still there afterwards.
   CHECK(read(a) == "Hello, ");
