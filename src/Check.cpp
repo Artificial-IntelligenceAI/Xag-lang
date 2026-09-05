@@ -167,6 +167,12 @@ private:
   // ---- expressions
 
   Type expr(const Expr &e, Type expected) {
+    const Type got = exprKind(e, expected);
+    result_.expressions[&e] = got;
+    return got;
+  }
+
+  Type exprKind(const Expr &e, Type expected) {
     switch (e.kind) {
     case ExprKind::Name: {
       const Symbol *symbol = lookup(e.text);
@@ -348,6 +354,7 @@ private:
     switch (s.kind) {
     case StmtKind::Declare: {
       const Type type = typeOfChain(s.chain);
+      result_.declarations[&s] = type;
       onlyValueChecked(s.value, type, s.span);
       declare(s.name, Symbol{type, changeable(s.chain), s.nameSpan});
       break;
@@ -387,6 +394,7 @@ private:
 
     case StmtKind::LoopRange: {
       const Type type = typeOfChain(s.chain);
+      result_.declarations[&s] = type;
       if (s.value.values.size() != 2)
         complain(s.value.span, "E0505", "a counted loop runs between two values.",
                  {"`[first, last]` says where a count starts and stops"});
@@ -478,6 +486,7 @@ private:
     case ItemKind::Function: {
       inFunction_ = true;
       giving_ = typeOfChain(item.chain);
+      result_.items[&item] = giving_;
       scopes_.emplace_back();
       for (const Param &param : item.params)
         declare(param.name, Symbol{typeOfChain(param.chain), changeable(param.chain),
