@@ -1,5 +1,7 @@
 # Xag coding language
 
+Official domains: `xag-lang.com`, and `xag-lang.org` **only**
+
 A programming language built around high performance, helpful error messages,
 and Rust-style memory management. A size is always written: there is no `int`
 on its own, because there is no size to assume. Programs are compiled ahead of time,
