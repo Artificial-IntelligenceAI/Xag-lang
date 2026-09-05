@@ -66,6 +66,12 @@ struct Statement {
   Span span;
   unsigned place = 0;
   RValue value;
+
+  // A drop that only sometimes has anything to do — because the value was moved
+  // down one path and not another — is guarded by a flag rather than duplicated
+  // into every path. `conditional` says to read `flag` first.
+  bool conditional = false;
+  unsigned flag = 0;
 };
 
 enum class TerminatorKind {
@@ -115,6 +121,12 @@ struct MirResult {
 // again. Drops are placed where a scope ends; making them conditional on what
 // was moved is drop elaboration, which does not exist yet.
 MirResult build(const Source &source, const Program &program, const CheckResult &checked);
+
+// Drops arrive from lowering placed at every scope end, whether or not anything
+// is still there to drop. Elaboration reads the graph and settles each one: gone
+// where the value was certainly moved, kept where it certainly was not, and
+// guarded by a flag where the paths disagree.
+void elaborate(Mir &mir);
 
 void print(const Mir &mir, std::ostream &out);
 

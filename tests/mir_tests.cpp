@@ -29,6 +29,16 @@ struct Built {
 
   bool clean() const { return lexed.ok() && parsed.ok() && checked.ok(); }
   bool has(const std::string &needle) const { return text.find(needle) != std::string::npos; }
+  // The printout holds every body, so a claim about one has to say which.
+  bool hasIn(const std::string &fn, const std::string &needle) const {
+    const size_t from = text.find("fn " + fn + " ");
+    if (from == std::string::npos)
+      return false;
+    size_t to = text.find("\nfn ", from + 1);
+    if (to == std::string::npos)
+      to = text.size();
+    return text.substr(from, to - from).find(needle) != std::string::npos;
+  }
   unsigned count(const std::string &needle) const {
     unsigned n = 0;
     for (size_t at = text.find(needle); at != std::string::npos;
@@ -39,12 +49,14 @@ struct Built {
   const xag::Body &body(unsigned i) const { return built.mir.bodies[i]; }
 };
 
-Built run(const std::string &text) {
+Built run(const std::string &text, bool elaborate = true) {
   Built b{xag::Source("test.xag", text), {}, {}, {}, {}, {}};
   b.lexed = xag::lex(b.source);
   b.parsed = xag::parse(b.source, b.lexed.tokens);
   b.checked = xag::check(b.source, b.parsed.program);
   b.built = xag::build(b.source, b.parsed.program, b.checked);
+  if (elaborate)
+    xag::elaborate(b.built.mir);
   std::ostringstream out;
   xag::print(b.built.mir, out);
   b.text = out.str();
@@ -52,6 +64,8 @@ Built run(const std::string &text) {
 }
 
 Built inStart(const std::string &body) { return run("START {\n" + body + "\n}\n"); }
+Built raw(const std::string &body) { return run("START {\n" + body + "\n}\n", false); }
+const char *kKeep = "fn.nothing keep [str 'text'] { print.stdout['text' \n]; }\n";
 
 void everyBodyBecomesBlocks() {
   const Built b = run("fn.i64 twice [i64 'n'] { give ['n' + 'n']; }\nSTART { }\n");
@@ -121,6 +135,42 @@ void whatIsOwnedIsDropped() {
   CHECK(!inStart("var.i64 'n' = [*1*];").has("drop "));
 }
 
+void elaborationSettlesEveryDrop() {
+  // Lowering places a drop at every scope end; elaboration decides each one.
+  const Built before = raw(std::string("var.str 's' = [*hi*];\n    keep[move 's'];"));
+  (void)before;
+
+  // Certainly moved: nothing is left there to end.
+  const Built gone = run(std::string(kKeep) +
+                         "START { var.str 's' = [*hi*]; keep[move 's']; }\n");
+  CHECK(gone.clean());
+  CHECK(!gone.hasIn("START", "drop "));
+
+  // Certainly not moved: the drop stands, and asks nothing first.
+  const Built kept = inStart("var.str 's' = [*hi*];");
+  CHECK(kept.has("drop "));
+  CHECK(!kept.has(" if "));
+
+  // Moved down one path only: a flag carries the answer to the drop.
+  const Built maybe = run(std::string(kKeep) +
+                          "START {\n"
+                          "  var.str 's' = [*hi*];\n"
+                          "  var.i64 'n' = [*1*];\n"
+                          "  if 'n' == *1* { keep[move 's']; }\n"
+                          "}\n");
+  CHECK(maybe.clean());
+  CHECK(maybe.hasIn("START", "drop "));
+  CHECK(maybe.hasIn("START", " if "));
+  CHECK(maybe.hasIn("START", "*false*"));
+  CHECK(maybe.hasIn("START", "*true*"));
+}
+
+void aParameterTakenByValueEndsWithItsCallee() {
+  const Built b = run("fn.nothing keep [str 'text'] { print.stdout['text' \n]; }\nSTART { }\n");
+  CHECK(b.clean());
+  CHECK(b.has("drop _1'text'"));
+}
+
 void joiningIsItsOwnStep() {
   const Built b = inStart("var.str 'a' = [*x*];\n    var.str 's' = [*hello * 'a' *!*];");
   CHECK(b.clean());
@@ -145,6 +195,8 @@ int main() {
   switchIsGeneralFromTheStart();
   typesAreSymbolic();
   whatIsOwnedIsDropped();
+  elaborationSettlesEveryDrop();
+  aParameterTakenByValueEndsWithItsCallee();
   joiningIsItsOwnStep();
   aCallKeepsItsArguments();
 

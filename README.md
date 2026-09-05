@@ -28,10 +28,9 @@ prints its tree, `xagc check <file>` checks it, `xagc mir <file>` prints the
 mid-level IR, and `xagc llvm-smoke` proves the LLVM backend is reachable. Run the
 tests with `ctest --test-dir build`.
 
-The lexer, the parser, the name and type checker, the ownership pass, and
-lowering to a mid-level IR exist. There is no code generation yet, no region
-inference, and drops are placed where a scope ends without yet accounting for
-what was moved out of it.
+The lexer, the parser, the name and type checker, the ownership pass, lowering to
+a mid-level IR, and drop elaboration exist. There is no code generation yet, and
+no region inference.
 
 ## Reporting a problem
 

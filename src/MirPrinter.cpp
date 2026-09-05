@@ -64,7 +64,8 @@ struct Printer {
       out << "\n  block" << block.id << ":\n";
       for (const Statement &s : block.statements) {
         if (s.kind == StatementKind::Drop)
-          out << "    drop " << local(s.place) << '\n';
+          out << "    drop " << local(s.place)
+              << (s.conditional ? " if " + local(s.flag) : "") << '\n';
         else
           out << "    " << local(s.place) << " = " << rvalue(s.value) << '\n';
       }

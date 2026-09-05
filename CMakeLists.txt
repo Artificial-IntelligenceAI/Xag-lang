@@ -51,7 +51,8 @@ add_library(xagfront STATIC
   src/Check.cpp
   src/Own.cpp
   src/MirBuild.cpp
-  src/MirPrinter.cpp)
+  src/MirPrinter.cpp
+  src/MirElaborate.cpp)
 target_include_directories(xagfront PUBLIC include)
 target_compile_options(xagfront PRIVATE -fno-exceptions -Wall -Wextra)
 

@@ -156,12 +156,13 @@ private:
   Operand operandOf(const Expr &e) {
     switch (e.kind) {
     case ExprKind::Name: {
+      // Naming something reads it. Taking it is spelled `move`, and arrives as
+      // its own node — so joining and printing leave what they read alone.
       const unsigned *local = findName(e.text);
       if (!local)
         return Operand{OperandKind::Written, 0, e.text, typeRef("?")};
       const Local &slot = body_.locals[*local];
-      return Operand{slot.copies ? OperandKind::Copy : OperandKind::Move, *local, {},
-                     slot.type};
+      return Operand{OperandKind::Copy, *local, {}, slot.type};
     }
     case ExprKind::Written:
       return Operand{OperandKind::Written, 0, e.text, typeRef(spell(checked_.of(&e)))};
@@ -400,6 +401,11 @@ private:
     case StmtKind::Give: {
       if (!s.value.values.empty()) {
         Operand answer = valueOperand(s.value.values[0]);
+        // `give` is the word: it needs no `move` written, but it takes all the
+        // same, so the answer leaves rather than being read in place.
+        if (answer.kind == OperandKind::Copy && answer.local < body_.locals.size() &&
+            !body_.locals[answer.local].copies)
+          answer.kind = OperandKind::Move;
         emit(Statement{StatementKind::Assign, s.span, 0,
                        RValue{RValueKind::Use, {}, {}, 0, {answer}, answer.type}});
         finish(Terminator{TerminatorKind::Return, s.span, {}, {}, {}, true,

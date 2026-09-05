@@ -128,7 +128,8 @@ int mirFile(const std::string &path) {
   if (!owned.ok())
     return report(source, owned.diagnostics);
 
-  const xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::elaborate(built.mir);
   if (built.ok())
     xag::print(built.mir, std::cout);
   return report(source, built.diagnostics);
