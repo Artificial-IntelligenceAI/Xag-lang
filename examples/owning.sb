@@ -5,7 +5,7 @@ fn.i64 size [ref.str 'text'] {
 }
 
 fn.nothing excite [refmut.str 'text'] {
-    set ['text'] = ['text' *!*];
+    set 'text' = ['text' *!*];
 }
 
 # No ownership word, so this one takes it.
@@ -14,7 +14,7 @@ fn.nothing keep [str 'text'] {
 }
 
 START {
-    var.mut.str ['greeting'] = [*Hello, * *world*];
+    var.mut.str 'greeting' = [*Hello, * *world*];
 
     print.stdout[str:*size = * call size[ref 'greeting'] \n];
 

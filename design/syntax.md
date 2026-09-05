@@ -12,12 +12,8 @@ Items sit next to each other and are used in order. Nothing is concatenated into
 third thing, so there is no `+` for text.
 
 ```
-var.str ['greeting'] = [*Hello, * 'name' *!*];
+var.str 'greeting' = [*Hello, * 'name' *!*];
 ```
-
-A comma says where one value stops, which is what lets a value run to as many items
-as it likes — and what makes declaring several names on one line fall out for free
-rather than needing a special form.
 
 ## Two marks, and only two
 
@@ -35,7 +31,7 @@ that: `*1000*` is a number under `i64` and four characters under `str`.
 ### Escapes stand outside
 
 ```
-var.str ['s'] = [*line one* \n *line two*];
+var.str 's' = [*line one* \n *line two*];
 ```
 
 `\n` is an item sitting beside the text, not hidden inside it. So `*a\nb*` is a
@@ -50,25 +46,50 @@ itself — the one character that could not otherwise appear there.
 A **name** wears marks, so it may hold anything at all — spaces, punctuation,
 emoji — because the marks say where it stops.
 
-A **word** wears none, so it has to be plainer: letters, digits and `_`, joined
-by `-`. Words are function names, chain segments and types.
+A **word** wears none, so it has to be plainer: letters, digits and `_`, joined by
+`-`. Words are function names, chain segments and types.
 
 ```
 fn.i64 sum-to [i64 'n'] { ... }
 
 call sum-to['LIMIT'];
-var.str ['a name with spaces 🙂'] = [*fine*];
+var.str 'a name with spaces 🙂' = [*fine*];
 ```
 
 That is one more thing a reader never has to work out from context: marks say
 *variable*, bareness says *function*, everywhere and always.
 
 `-` joins a word only when it sits between two word characters, which is what
-keeps it apart from subtraction — subtraction's operands are marked or
-bracketed, so `sum-to` is one word and `count - *1*` is three tokens.
+keeps it apart from subtraction — subtraction's operands are marked or bracketed,
+so `sum-to` is one word and `count - *1*` is three tokens.
 
-Nothing outside ASCII is a word character — though it is perfectly good inside a
-name.
+Nothing outside ASCII is a word character, though it is perfectly good inside a name.
+
+## Brackets bound a list that nothing else bounds
+
+A value is a list of **juxtaposed** items, so nothing inside it says where one item
+stops. Brackets supply the bounds, and they are load-bearing:
+
+```
+[*Hello, * 'name' *!*]
+```
+
+Parameters and call arguments are lists too, running up against a `{` or a `;` that
+is too far away to help, so they are bracketed as well.
+
+A declared name is not a list, and it is already bounded by its own marks. So it
+takes no brackets:
+
+```
+var.mut.i64 'total' = [*0*];
+set 'total' = ['total' + *1*];
+set 'xs'[*2*] = [*99*];
+loop.range.i64 'i' = [*1*, 'n'] { ... }
+```
+
+One name is declared at a time. Nothing about the notation forbids several, but
+declaring several at once has to say what each of them ends up owning, and that
+question is not worth the line it saves.
 
 ## Declarations are chains
 
@@ -76,9 +97,9 @@ Each segment answers one question, and the segment nearest the name is always th
 type.
 
 ```
-var.mut.i64 ['total'] = [*0*];
+var.mut.i64 'total' = [*0*];
 fn.export.i64 add [i64 'a', i64 'b'] { give ['a' + 'b']; }
-loop.perm.range.i64 ['i'] = [*1*, *100*] { ... }
+loop.perm.range.i64 'i' = [*1*, *100*] { ... }
 ```
 
 ### Every segment but the type has a default
@@ -94,20 +115,17 @@ asking for something.**
 | loop counter | `temp` | `perm` — asking to keep it after the loop |
 | type | *none* | always |
 
-So `var.str ['greeting']` is immutable, owned, and visible in this file only. A bare
+So `var.str 'greeting'` is immutable, owned, and visible in this file only. A bare
 chain is the safest chain: nothing risky can hide in an omission, and verbosity
 scales with how unusual a declaration is.
 
 **There is exactly one spelling.** Writing a default is an error, not an allowed
 redundancy:
 
-```
-var.immut.str ['s'] = [*hi*];
-```
 ```text
 `immut` is what a name is when nothing says otherwise.
 
-  1 | var.immut.str ['s'] = [*hi*];
+  1 | var.immut.str 's' = [*hi*];
     |     ^^^^^ here
 
 Error code: E0201
@@ -123,7 +141,7 @@ intent and the compiler does not.
 A name owns its value until the value is moved, and then it holds nothing.
 
 ```
-fn.i64 size [ref.str 'text'] { ... }          # borrowed, read-only
+fn.i64 size [ref.str 'text'] { ... }           # borrowed, read-only
 fn.nothing excite [refmut.str 'text'] { ... }  # borrowed, writable
 fn.nothing keep [str 'text'] { ... }           # takes it — `own` is the default
 ```
@@ -157,12 +175,8 @@ special form.
 - **File extension.** `.sb` is a placeholder.
 - **Multiplication.** `*` is spent on written values, so it cannot also mean multiply
   without a stateful lexer. Quench answered `x`; SafetyBolt has not answered.
+- **Comparisons.** `<` `<=` `>` `>=` `==` `!=` are what the lexer reads today, chosen
+  to have something to tokenise. Quench spells two of them `<==` and `!==`.
 - **Entry point.** `START` is borrowed from Quench pending a decision.
-- **Whether v0 ships borrowing at all.** Move-only semantics — one owner, passing
-  hands it over, using it afterwards is an error — is a sound memory model on its
-  own, needs no lifetimes or region analysis, and is perhaps a fifth of the work.
-  Borrowing could be an addition to a working language rather than a prerequisite.
-- **Multi-declare against moves.** `var.str ['a', 'b'] = [*x*, 'a']` has to say what
-  each name ends up owning.
 - **Turning a number into text.** Pieces side by side join, and nothing converts on
   its own, so something has to do it and be named.
