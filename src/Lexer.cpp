@@ -37,8 +37,11 @@ const char *describe(TokenKind kind) {
 
 namespace {
 
-bool startsWord(char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; }
-bool continuesWord(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
+// A word is a function name, a chain segment, or a type. It is written in
+// letters and digits, joined by `-`. A variable never comes through here:
+// variables are names, and names wear marks, so they may hold anything.
+bool startsWord(char c) { return std::isalpha(static_cast<unsigned char>(c)); }
+bool continuesWord(char c) { return std::isalnum(static_cast<unsigned char>(c)); }
 
 class Lexer {
 public:
@@ -202,9 +205,31 @@ private:
     }
 
     if (startsWord(c)) {
-      while (at_ < text_.size() && continuesWord(text_[at_]))
-        ++at_;
+      ++at_;
+      while (at_ < text_.size()) {
+        if (continuesWord(text_[at_])) {
+          ++at_;
+          continue;
+        }
+        // A `-` joins a word only between two word characters, which is why
+        // `sum-to` is one word and `count - *1*` is three tokens.
+        if (text_[at_] == '-' && at_ + 1 < text_.size() && continuesWord(text_[at_ + 1])) {
+          at_ += 2;
+          continue;
+        }
+        break;
+      }
       emit(TokenKind::Word, begin, std::string(text_.substr(begin, at_ - begin)));
+      return;
+    }
+
+    if (c == '_') {
+      while (at_ < text_.size() && (text_[at_] == '_' || continuesWord(text_[at_])))
+        ++at_;
+      complain(Span{begin, at_}, "E0007", "an underscore is not written in a word.",
+               {"a word is written in letters and digits, joined by `-`"},
+               {"a word is a function, a chain segment or a type; a variable is a name, "
+                "and a name wears marks, so it may hold anything at all."});
       return;
     }
 
@@ -217,6 +242,18 @@ private:
                {"there is no separate mark for text and numbers, because the type "
                 "already answers that: `*1000*` is a number under `i64` and four "
                 "characters under `str`."});
+      return;
+    }
+
+    // A byte outside ASCII is almost always someone writing a word the way they
+    // would write a name, so say which of the two they are looking at.
+    if (static_cast<unsigned char>(c) >= 0x80) {
+      while (at_ < text_.size() && static_cast<unsigned char>(text_[at_]) >= 0x80)
+        ++at_;
+      complain(Span{begin, at_}, "E0008", "this is not written in a word.",
+               {"a word is written in letters and digits, joined by `-`"},
+               {"a name may hold any character, including this one, because its marks "
+                "say where it stops; a word has no marks and so has to be plainer."});
       return;
     }
 

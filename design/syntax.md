@@ -45,6 +45,31 @@ which of its characters were secretly instructions.
 Escapes: `\n`, `\t`, `\r`, `\\`. Inside a mark, `\*` and `\'` write the closing mark
 itself — the one character that could not otherwise appear there.
 
+## A word is a function, a name is a variable
+
+A **name** wears marks, so it may hold anything at all — spaces, punctuation,
+emoji — because the marks say where it stops.
+
+A **word** wears none, so it has to be plainer: letters and digits, joined by
+`-`. Words are function names, chain segments and types.
+
+```
+fn.i64 sum-to [i64 'n'] { ... }
+
+call sum-to['LIMIT'];
+var.str ['a name with spaces 🙂'] = [*fine*];
+```
+
+That is one more thing a reader never has to work out from context: marks say
+*variable*, bareness says *function*, everywhere and always.
+
+`-` joins a word only when it sits between two word characters, which is what
+keeps it apart from subtraction — subtraction's operands are marked or
+bracketed, so `sum-to` is one word and `count - *1*` is three tokens.
+
+An underscore is not a word character. Neither is anything outside ASCII. Both
+are perfectly good inside a name.
+
 ## Declarations are chains
 
 Each segment answers one question, and the segment nearest the name is always the
@@ -52,7 +77,7 @@ type.
 
 ```
 var.mut.i64 ['total'] = [*0*];
-fn.export.i64 ['add'] [i64 'a', i64 'b'] { give ['a' + 'b']; }
+fn.export.i64 add [i64 'a', i64 'b'] { give ['a' + 'b']; }
 loop.perm.range.i64 ['i'] = [*1*, *100*] { ... }
 ```
 
@@ -98,9 +123,9 @@ intent and the compiler does not.
 A name owns its value until the value is moved, and then it holds nothing.
 
 ```
-fn.i64 ['size'] [ref.str 'text'] { ... }        # borrowed, read-only
-fn.nothing ['excite'] [refmut.str 'text'] { ... }  # borrowed, writable
-fn.nothing ['keep'] [str 'text'] { ... }        # takes it — `own` is the default
+fn.i64 size [ref.str 'text'] { ... }          # borrowed, read-only
+fn.nothing excite [refmut.str 'text'] { ... }  # borrowed, writable
+fn.nothing keep [str 'text'] { ... }           # takes it — `own` is the default
 ```
 
 ### A transfer is always spelled at the call site
@@ -108,9 +133,9 @@ fn.nothing ['keep'] [str 'text'] { ... }        # takes it — `own` is the defa
 Declarations default; transfers never do.
 
 ```
-call 'size'[ref 'greeting'];
-call 'excite'[refmut 'greeting'];
-call 'keep'[move 'greeting'];
+call size[ref 'greeting'];
+call excite[refmut 'greeting'];
+call keep[move 'greeting'];
 ```
 
 A declaration describes a thing, but a call site *acts*, and the consequence here is
@@ -121,7 +146,7 @@ that `'greeting'` stops existing. That is worth a word every time.
 Names are already marked, so a lifetime needs no notation of its own:
 
 ```
-fn.ref.'life'.str ['longer'] [ref.'life'.str 'a', ref.'life'.str 'b'] { ... }
+fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] { ... }
 ```
 
 `'life'` is spelled like `'greeting'` because it is a name. Nothing about it is a

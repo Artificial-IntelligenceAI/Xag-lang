@@ -71,6 +71,38 @@ void chainsAreWordsAndDots() {
   CHECK(r.tokens.back().kind == sb::TokenKind::End);
 }
 
+void aHyphenJoinsAWordButDoesNotSubtract() {
+  const sb::LexResult joined = lexText("sum-to");
+  CHECK(joined.ok());
+  CHECK(kinds(joined) == (std::vector<sb::TokenKind>{sb::TokenKind::Word, sb::TokenKind::End}));
+  CHECK(joined.tokens[0].text == "sum-to");
+
+  // A `-` joins only between two word characters.
+  for (const std::string &spaced : {"count - *1*", "count- *1*", "count -*1*"}) {
+    const sb::LexResult r = lexText(spaced);
+    CHECK(r.ok());
+    CHECK(r.tokens.size() == 4);
+    CHECK(r.tokens[0].text == "count");
+    CHECK(r.tokens[1].kind == sb::TokenKind::Minus);
+    CHECK(r.tokens[2].kind == sb::TokenKind::Written);
+  }
+}
+
+void aWordIsPlainerThanAName() {
+  // An underscore and an emoji are both fine in a name and neither is a word.
+  const sb::LexResult underscore = lexText("sum_to");
+  CHECK(!underscore.ok());
+  CHECK(underscore.diagnostics[0].code == "E0007");
+
+  const sb::LexResult emoji = lexText("sum\xF0\x9F\x98\x80to");
+  CHECK(!emoji.ok());
+  CHECK(emoji.diagnostics[0].code == "E0008");
+
+  const sb::LexResult name = lexText("'sum_to \xF0\x9F\x98\x80'");
+  CHECK(name.ok());
+  CHECK(name.tokens[0].kind == sb::TokenKind::Name);
+}
+
 void commentsRunToEndOfLine() {
   const sb::LexResult r = lexText("# 'not' *a* token\n'yes'");
   CHECK(r.ok());
@@ -137,6 +169,8 @@ int main() {
   aMarkIsWrittenWithABackslash();
   escapesStandOutside();
   chainsAreWordsAndDots();
+  aHyphenJoinsAWordButDoesNotSubtract();
+  aWordIsPlainerThanAName();
   commentsRunToEndOfLine();
   comparisonsGlue();
   aQuoteOffersBothMarks();

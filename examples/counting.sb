@@ -2,7 +2,7 @@
 
 const.i64 ['LIMIT'] = [*10*];
 
-fn.i64 ['sum_to'] [i64 'n'] {
+fn.i64 sum-to [i64 'n'] {
     var.mut.i64 ['total'] = [*0*];
     loop.range.i64 ['i'] = [*1*, 'n'] {
         set ['total'] = ['total' + 'i'];
@@ -11,6 +11,6 @@ fn.i64 ['sum_to'] [i64 'n'] {
 }
 
 START {
-    var.i64 ['s'] = [call 'sum_to'['LIMIT']];
+    var.i64 ['s'] = [call sum-to['LIMIT']];
     print.stdout[str:*sum to * 'LIMIT' str:* = * 's' \n];
 }
