@@ -37,8 +37,35 @@ struct Answer {
 struct Finding {
     seed: u64,
     program: String,
-    interpreter: Answer,
-    native: Answer,
+    answers: Vec<(&'static str, Answer)>,
+    odd: Option<&'static str>,
+}
+
+/// Which engine, if any, is the one out of step. Two engines can only say that
+/// something is wrong; three can say which.
+fn oddOneOut(answers: &[(&'static str, Answer)]) -> Option<&'static str> {
+    for i in 0..answers.len() {
+        let mut agrees = 0;
+        for j in 0..answers.len() {
+            if i != j && answers[i].1.said == answers[j].1.said
+                && answers[i].1.status == answers[j].1.status
+            {
+                agrees += 1;
+            }
+        }
+        if agrees == 0 {
+            // Everyone else agrees with each other, and not with this one.
+            let others: Vec<usize> = (0..answers.len()).filter(|&j| j != i).collect();
+            let all = others.windows(2).all(|w| {
+                answers[w[0]].1.said == answers[w[1]].1.said
+                    && answers[w[0]].1.status == answers[w[1]].1.status
+            });
+            if all && others.len() >= 2 {
+                return Some(answers[i].0);
+            }
+        }
+    }
+    None
 }
 
 fn main() {
@@ -98,17 +125,18 @@ fn main() {
                                 );
                             }
                         }
-                        Verdict::Differed(interpreter, native) => {
+                        Verdict::Differed(answers) => {
                             let smaller = if settings.shrink {
                                 shrink(settings, &room, &program)
                             } else {
                                 program.clone()
                             };
+                            let odd = oddOneOut(&answers);
                             findings.lock().unwrap().push(Finding {
                                 seed,
                                 program: smaller,
-                                interpreter,
-                                native,
+                                answers,
+                                odd,
                             });
                             if !settings.keep_going {
                                 next.store(end, Ordering::Relaxed);
@@ -154,14 +182,13 @@ fn main() {
     for finding in &found {
         println!("\n──────── seed {} ────────", finding.seed);
         println!("{}", finding.program);
-        println!(
-            "test interpreter (status {}):\n{}",
-            finding.interpreter.status, finding.interpreter.said
-        );
-        println!(
-            "native (status {}):\n{}",
-            finding.native.status, finding.native.said
-        );
+        match finding.odd {
+            Some(name) => println!(">>> {name} is the one out of step; the other two agree.\n"),
+            None => println!(">>> all three say something different.\n"),
+        }
+        for (name, answer) in &finding.answers {
+            println!("{name} (status {}):\n{}", answer.status, answer.said);
+        }
     }
     println!("\n{} disagreement(s).", found.len());
     std::process::exit(1);
@@ -171,7 +198,7 @@ enum Verdict {
     Agreed,
     Skipped,
     Rejected(String),
-    Differed(Answer, Answer),
+    Differed(Vec<(&'static str, Answer)>),
 }
 
 /// One program, put to every engine.
@@ -185,9 +212,14 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
     if interpreted.status != 0 && interpreted.said.contains("Rule(s) broken") {
         return Verdict::Rejected(interpreted.said);
     }
-    // A case that outstays its welcome, or that runs past what the test
-    // interpreter will follow, says nothing about whether the engines agree.
+    // A case that outstays its welcome, or that runs past what an engine will
+    // follow, says nothing about whether they agree.
     if interpreted.status == -2 || interpreted.said.contains("longer than this engine") {
+        return Verdict::Skipped;
+    }
+
+    let quick = run(Command::new(&settings.xagc).arg("fast").arg(&source));
+    if quick.status == -2 || quick.said.contains("longer than this engine") {
         return Verdict::Skipped;
     }
 
@@ -202,10 +234,18 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
         return Verdict::Skipped;
     }
 
-    if interpreted.said == native.said && interpreted.status == native.status {
+    let answers = vec![
+        ("test interpreter", interpreted),
+        ("fast interpreter", quick),
+        ("native", native),
+    ];
+    let alike = answers
+        .windows(2)
+        .all(|w| w[0].1.said == w[1].1.said && w[0].1.status == w[1].1.status);
+    if alike {
         Verdict::Agreed
     } else {
-        Verdict::Differed(interpreted, native)
+        Verdict::Differed(answers)
     }
 }
 
@@ -224,7 +264,7 @@ fn shrink(settings: &Settings, room: &Path, program: &str) -> String {
             let mut tried = best.clone();
             tried.remove(at);
             let text = tried.join("\n");
-            if matches!(ask(settings, room, &text), Verdict::Differed(_, _)) {
+            if matches!(ask(settings, room, &text), Verdict::Differed(_)) {
                 best = tried;
                 improved = true;
             }

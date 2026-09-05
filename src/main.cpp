@@ -1,5 +1,6 @@
 #include "xag/Lexer.h"
 #include "xag/Check.h"
+#include "xag/Fast.h"
 #include "xag/Interpret.h"
 #include "xag/Native.h"
 #include "xag/Mir.h"
@@ -30,6 +31,7 @@ void usage() {
                "    xagc check <file>   read it, check it, and stop\n"
                "    xagc mir <file>     check it and print the mid-level IR\n"
                "    xagc run <file>     check it and run it\n"
+               "    xagc fast <file>    check it and run it on the fast engine\n"
                "    xagc ir <file>      check it and print the LLVM IR\n"
                "    xagc build <file>   check it and write a program beside it\n"
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
@@ -131,6 +133,21 @@ int runFile(const std::string &path) {
   xag::elaborate(built.mir);
 
   const xag::InterpretResult ran = xag::interpret(built.mir);
+  if (!ran.ran) {
+    std::cerr << "\nthe program stopped: " << ran.trouble << '\n';
+    return 1;
+  }
+  return 0;
+}
+
+int fastFile(const std::string &path) {
+  std::string text;
+  xag::MirResult built;
+  int status = 0;
+  if (!ready(path, text, built, status))
+    return status;
+
+  const xag::FastResult ran = xag::runFast(built.mir);
   if (!ran.ran) {
     std::cerr << "\nthe program stopped: " << ran.trouble << '\n';
     return 1;
@@ -285,6 +302,8 @@ int main(int argc, char **argv) {
     return mirFile(argv[2]);
   if (command == "run" && argc > 2)
     return runFile(argv[2]);
+  if (command == "fast" && argc > 2)
+    return fastFile(argv[2]);
   if (command == "ir" && argc > 2)
     return irFile(argv[2], argc > 3 && std::string(argv[3]) == "--raw" ? false : true);
   if (command == "build" && argc > 2)

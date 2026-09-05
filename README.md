@@ -37,12 +37,18 @@ tests with `ctest --test-dir build`.
 obviously correct rather than fast, which walks the IR as written and does nothing
 clever anywhere. It is the one to believe when the engines disagree.
 
+`xagc fast <file>` runs it on the fast interpreter, which turns the graph into
+flat code once and then runs it without looking anything up again. It shares
+nothing with the test interpreter but the runtime, on purpose: two engines that
+borrow from each other agree about what they borrowed, and a vote between them
+proves nothing.
+
 `xagc build <file>` compiles a program ahead of time through LLVM at `-O3` and
 writes an executable beside it. `xagc ir <file>` prints the LLVM IR, and
 `xagc ir <file> --raw` prints it before the optimiser sees it.
 
-Two of the three engines exist: the test interpreter and AOT native. The fast
-interpreter does not.
+All three engines exist: the test interpreter, the fast interpreter, and AOT
+native. Two engines can say that something is wrong; three can say which.
 
 All three engines call one runtime, so none of them can disagree about what
 joining or counting means. `Xag-Config.toml` holds what this project has decided
@@ -50,8 +56,8 @@ once for every file in it.
 
 ## The oracle
 
-`generator/` writes Xag programs and asks every engine what they say. Two engines
-detect a disagreement; three localise it, so a third is coming.
+`generator/` writes Xag programs and asks every engine what they say — and when
+they differ, which one is out of step with the other two.
 
 ```sh
 cd generator && cargo build --release
