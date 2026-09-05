@@ -32,6 +32,10 @@ struct Diagnostic {
 // One diagnostic, with its own file/line header and underlined source line.
 void render(const Source &source, const Diagnostic &diagnostic, std::ostream &out);
 
+// Where to say so when a diagnostic is wrong. The opening greeting hedges, and
+// a hedge with nowhere to go is just a shrug.
+extern const char *const kIssues;
+
 // The greeting that opens a failing run, and the tally that closes it.
 void renderOpening(std::ostream &out);
 void renderTally(std::size_t errors, std::ostream &out);

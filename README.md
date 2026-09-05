@@ -31,6 +31,15 @@ The lexer, the parser, the name and type checker, and the ownership pass exist.
 There is no code generation yet, and no region inference — loans are checked
 where a signature alone can decide.
 
+## Reporting a problem
+
+Wrong diagnostics, confusing ones, and anything Xag accepts that it should not:
+<https://github.com/Artificial-IntelligenceAI/Xag-lang/issues>
+
+A diagnostic that points at the wrong thing, or names a rule the program did not
+break, is a bug of the same kind as miscompiling — the compiler is telling the
+reader something untrue either way.
+
 ## License
 
 Copyright 2026 Tankun Sriket

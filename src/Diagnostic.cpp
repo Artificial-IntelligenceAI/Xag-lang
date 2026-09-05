@@ -6,6 +6,8 @@
 
 namespace xag {
 
+const char *const kIssues = "https://github.com/Artificial-IntelligenceAI/Xag-lang/issues";
+
 void renderOpening(std::ostream &out) {
   out << "Hello, I think there may be thing(s) wrong with your code. "
          "I'm sorry, if I'm wrong.\n";
@@ -13,6 +15,7 @@ void renderOpening(std::ostream &out) {
 
 void renderTally(std::size_t errors, std::ostream &out) {
   out << '\n' << errors << (errors == 1 ? " error.\n" : " errors.\n");
+  out << "If I am wrong about any of that, please tell me: " << kIssues << '\n';
 }
 
 namespace {
