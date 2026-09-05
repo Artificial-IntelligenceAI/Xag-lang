@@ -48,7 +48,8 @@ add_library(xagfront STATIC
   src/Lexer.cpp
   src/Parser.cpp
   src/AstPrinter.cpp
-  src/Check.cpp)
+  src/Check.cpp
+  src/Own.cpp)
 target_include_directories(xagfront PUBLIC include)
 target_compile_options(xagfront PRIVATE -fno-exceptions -Wall -Wextra)
 
@@ -65,7 +66,7 @@ target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
-foreach(suite lexer parser check)
+foreach(suite lexer parser check own)
   add_executable(${suite}_tests tests/${suite}_tests.cpp)
   target_link_libraries(${suite}_tests PRIVATE xagfront)
   target_compile_options(${suite}_tests PRIVATE -fno-exceptions -Wall -Wextra)

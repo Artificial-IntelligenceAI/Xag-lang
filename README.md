@@ -27,8 +27,9 @@ Source files are `.xag`. `xagc lex <file>` prints its tokens, `xagc parse <file>
 prints its tree, `xagc check <file>` reads it and checks it, and `xagc llvm-smoke`
 proves the LLVM backend is reachable. Run the tests with `ctest --test-dir build`.
 
-The lexer, parser and the name and type checker exist. There is no ownership
-analysis and no code generation yet.
+The lexer, the parser, the name and type checker, and the ownership pass exist.
+There is no code generation yet, and no region inference — loans are checked
+where a signature alone can decide.
 
 ## License
 

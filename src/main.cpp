@@ -1,5 +1,6 @@
 #include "xag/Lexer.h"
 #include "xag/Check.h"
+#include "xag/Own.h"
 #include "xag/Parser.h"
 #include "xag/Source.h"
 
@@ -99,7 +100,11 @@ int checkFile(const std::string &path) {
     return report(source, parsed.diagnostics);
 
   const xag::CheckResult checked = xag::check(source, parsed.program);
-  return report(source, checked.diagnostics);
+  if (!checked.ok())
+    return report(source, checked.diagnostics);
+
+  const xag::OwnResult owned = xag::own(source, parsed.program);
+  return report(source, owned.diagnostics);
 }
 
 int llvmSmoke() {

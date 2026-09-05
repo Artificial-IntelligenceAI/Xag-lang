@@ -284,10 +284,40 @@ keep[move 'greeting'];
 A declaration describes a thing, but a call site *acts*, and the consequence here is
 that `'greeting'` stops existing. That is worth a word every time.
 
+A word is written where there is a **choice**, though, and `give` has none — there
+is nothing else it could mean — so the answer is handed over without one:
+
+```
+fn.str greet [] {
+    var.str 's' = [*hi*];
+    give ['s'];
+}
+```
+
+Nor is a small value ever moved. An `i64` or a `bool` is handed over by being
+copied and the original stays where it was, so `move` on one is refused: it would
+say a name stops holding what it held, and it does not.
+
+### What was moved holds nothing
+
+```text
+`'greeting'` was moved, and holds nothing now.
+
+  8 |     print.stdout['greeting' \n];
+    |                  ^^^^^^^^^^ here
+
+Error code: E0403
+Rule(s) broken: a name holds its value until it is moved, and then holds nothing
+```
+
+A name given away down **any** arm of an `if` is gone after it, because the
+compiler does not get to assume which arm ran. A name given away inside a **loop**
+is an error where it stands: the second pass round would find nothing there.
+
 ### A borrow never outlasts what it borrows from
 
 ```
-fn.ref.str broken [] {
+fn.ref.str broken [ref.str 'other'] {
     var.str 'text' = [*hello*];
     give ['text'];
 }
@@ -296,7 +326,7 @@ fn.ref.str broken [] {
 ```text
 `'text'` stops existing when this function ends, and the answer would outlive it.
 
-  4 |     give ['text'];
+  3 |     give ['text'];
     |           ^^^^^^ here
 
 Error code: E0401
