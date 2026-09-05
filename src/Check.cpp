@@ -507,8 +507,6 @@ private:
                  {"a name holds what it was given unless its chain said `mut`"},
                  {"a bare chain is the safest chain, and not changing is the safest "
                   "thing a name can do."});
-      for (const ExprPtr &index : s.index)
-        expr(*index, Type::Int64);
       onlyValueChecked(s.value, symbol->type, s.span);
       break;
     }

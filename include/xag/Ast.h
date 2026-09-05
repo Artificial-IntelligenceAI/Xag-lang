@@ -102,7 +102,6 @@ struct Stmt {
   Chain chain;                 // Declare, LoopRange
   Span nameSpan;               // Declare, Set, LoopRange
   std::string name;            //  "
-  std::vector<ExprPtr> index;  // Set, when written `set 'xs'[*2*] = …`
   ValueList value;             // Declare, Set, LoopRange, Give
   ExprPtr condition;           // LoopWhile
   std::vector<Branch> branches;// If

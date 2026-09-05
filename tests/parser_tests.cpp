@@ -192,6 +192,78 @@ void readingContinuesAfterAMistake() {
   CHECK(p.parsed.diagnostics.size() >= 2);
 }
 
+void aSegmentHasToMeanSomething() {
+  // The hole this closes: every one of these used to compile and run, because a
+  // chain was read by taking its last segment and passing over the rest.
+  for (const std::string &word : {"banana", "arr", "wat", "mtu"}) {
+    const Parsed p = inStart("var." + word + ".int64 'n' = [*1*];");
+    CHECK(!p.parsed.ok());
+    CHECK(p.code(0) == "E0202");
+  }
+  CHECK(!run("fn.mut.wat.int64 f [] { give [*7*]; }\n").parsed.ok());
+}
+
+void eachChainAsksItsOwnQuestions() {
+  // `mut` is a real word in the wrong chain: a function's answer is a value,
+  // and a value does not change.
+  const Parsed f = run("fn.mut.int64 f [] { give [*7*]; }\n");
+  CHECK(!f.parsed.ok());
+  CHECK(f.code(0) == "E0203");
+
+  // `perm` belongs to a loop counter, and a `var` has none.
+  CHECK(inStart("var.perm.int64 'n' = [*1*];").code(0) == "E0203");
+
+  // A lifetime names the loan an answer is on, and a `var` is not an answer.
+  CHECK(inStart("var.ref.'life'.str 's' = [*hi*];").code(0) == "E0203");
+
+  // The kind is said once, and first.
+  CHECK(inStart("var.var.int64 'n' = [*1*];").code(0) == "E0203");
+}
+
+void oneQuestionIsAnsweredOnce() {
+  const Parsed p = inStart("var.mut.mut.int64 'n' = [*1*];");
+  CHECK(!p.parsed.ok());
+  CHECK(p.code(0) == "E0204");
+  CHECK(p.parsed.diagnostics[0].notes.size() == 1);
+}
+
+void aChainHasOneOrder() {
+  const Parsed p = inStart("var.ref.mut.str 's' = [*hi*];");
+  CHECK(!p.parsed.ok());
+  CHECK(p.code(0) == "E0205");
+  CHECK(inStart("var.mut.ref.str 's' = [*hi*];").ok());
+}
+
+void visibilityHasNowhereToGoYet() {
+  CHECK(run("fn.export.int64 f [] { give [*7*]; }\n").code(0) == "E0206");
+  CHECK(run("const.program.int64 'L' = [*1*];\n").code(0) == "E0206");
+}
+
+void aLoopSaysWhichKindItIs() {
+  const Parsed p = inStart("loop.int64 'i' = [*1*, *3*] { }");
+  CHECK(!p.parsed.ok());
+  CHECK(p.code(0) == "E0207");
+  CHECK(inStart("loop.range.int64 'i' = [*1*, *3*] { }").ok());
+  CHECK(inStart("loop.perm.range.int64 'i' = [*1*, *3*] { }").ok());
+  CHECK(inStart("loop.while *false* { }").ok());
+}
+
+void indexingIsRefusedRatherThanIgnored() {
+  // It used to parse, throw the index away, and assign to the whole name.
+  const Parsed p = inStart("var.mut.int64 'xs' = [*1*];\n    set 'xs'[*2*] = [*99*];");
+  CHECK(!p.parsed.ok());
+  CHECK(p.code(0) == "E0208");
+}
+
+void chainsThatWereAlwaysGoodStillAre() {
+  CHECK(run("fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+            "    give ['a'];\n}\n").ok());
+  CHECK(run("fn.nothing edit [refmut.str 't'] { set 't' = ['t' *!*]; }\n").ok());
+  CHECK(run("const.int64 'LIMIT' = [*10*];\n").ok());
+  CHECK(inStart("var.mut.int64 'n' = [*1*];").ok());
+  CHECK(inStart("var.refmut.str 's' = [refmut 'other'];").ok());
+}
+
 } // namespace
 
 int main() {
@@ -208,6 +280,14 @@ int main() {
   conditionsWearNoBrackets();
   aVarCannotStandAtTheTopLevel();
   readingContinuesAfterAMistake();
+  aSegmentHasToMeanSomething();
+  eachChainAsksItsOwnQuestions();
+  oneQuestionIsAnsweredOnce();
+  aChainHasOneOrder();
+  visibilityHasNowhereToGoYet();
+  aLoopSaysWhichKindItIs();
+  indexingIsRefusedRatherThanIgnored();
+  chainsThatWereAlwaysGoodStillAre();
 
   if (failures == 0)
     std::cout << "all parser tests passed\n";

@@ -22,6 +22,88 @@ bool isUnsettled(std::string_view word) {
   return word == "mod" || word == "and" || word == "or";
 }
 
+// ---- what a chain may say
+//
+// A chain is a run of answers to questions the language asks, and the questions
+// come in an order. Everything below exists so that a segment which answers no
+// question at all — `var.banana.int64`, `var.arr.int64` — is refused where it
+// stands, rather than being read past on the way to the type.
+
+enum class Slot {
+  Unknown,
+  Kind,       // var, fn, const, loop
+  Visibility, // export / program, default file
+  Mutability, // mut, default immut
+  Ownership,  // ref / refmut, default own
+  Lifetime,   // 'life' — a name for a loan
+  Counter,    // perm, default temp
+  Form,       // range / while
+};
+
+// The question a slot answers, said the way the reader would ask it.
+const char *question(Slot slot) {
+  switch (slot) {
+  case Slot::Kind:       return "what is being declared";
+  case Slot::Visibility: return "who may see it";
+  case Slot::Mutability: return "whether it changes";
+  case Slot::Ownership:  return "whether it owns or borrows";
+  case Slot::Lifetime:   return "which loan it is on";
+  case Slot::Counter:    return "whether the counter outlives the loop";
+  case Slot::Form:       return "which kind of loop this is";
+  case Slot::Unknown:    break;
+  }
+  return "nothing";
+}
+
+Slot slotOf(std::string_view word) {
+  if (word == "var" || word == "fn" || word == "const" || word == "loop")
+    return Slot::Kind;
+  if (word == "export" || word == "program" || word == "file")
+    return Slot::Visibility;
+  if (word == "mut" || word == "immut")
+    return Slot::Mutability;
+  if (word == "ref" || word == "refmut" || word == "own")
+    return Slot::Ownership;
+  if (word == "perm" || word == "temp")
+    return Slot::Counter;
+  if (word == "range" || word == "while")
+    return Slot::Form;
+  return Slot::Unknown;
+}
+
+// Which questions each kind of chain asks, in the order it asks them. A chain
+// answers a subset of these, and answers them in this order, so that one thing
+// has one spelling.
+struct Role {
+  const char *what;              // how the chain is named in a diagnostic
+  std::string_view kind;         // the word it opens with, or empty
+  bool endsInType;               // whether the last segment is the type
+  std::array<Slot, 4> slots;     // in order; Slot::Unknown pads the end
+};
+
+// A `var` takes no lifetime: only a function's answer has a choice of loans to
+// be on, and only its parameters can name one.
+const Role kVar{"a `var`", "var", true,
+                {Slot::Mutability, Slot::Ownership, Slot::Unknown, Slot::Unknown}};
+const Role kParam{"a parameter", "", true,
+                  {Slot::Mutability, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
+const Role kFn{"a `fn`", "fn", true,
+               {Slot::Visibility, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
+const Role kConst{"a `const`", "const", true,
+                  {Slot::Visibility, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
+const Role kLoopRange{"a counted `loop`", "loop", true,
+                      {Slot::Counter, Slot::Form, Slot::Unknown, Slot::Unknown}};
+const Role kLoopWhile{"a `loop.while`", "loop", false,
+                      {Slot::Form, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
+
+// Where a slot sits in this role's order, or -1 when the role never asks it.
+int placeIn(const Role &role, Slot slot) {
+  for (int i = 0; i < static_cast<int>(role.slots.size()); ++i)
+    if (role.slots[i] == slot)
+      return i;
+  return -1;
+}
+
 class Parser {
 public:
   Parser(const Source &source, const std::vector<Token> &tokens)
@@ -75,6 +157,14 @@ private:
                                              std::move(tips), {}});
   }
 
+  void complainAt(Span span, std::string code, std::string message,
+                  std::vector<std::string> rules, std::vector<std::string> tips,
+                  std::string label, std::vector<Note> notes) {
+    result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
+                                             std::move(label), std::move(rules),
+                                             std::move(tips), std::move(notes)});
+  }
+
   bool expect(TokenKind kind, const char *what) {
     if (accept(kind))
       return true;
@@ -121,15 +211,113 @@ private:
       }
     }
     c.span.end = previous().span.end;
+    return c;
+  }
 
-    for (const ChainSegment &seg : c.segments)
-      if (!seg.isName && isDefault(seg.text))
+  // Read a chain against the questions its kind actually asks. Called once the
+  // parser knows which kind it is looking at — a chain read speculatively, on
+  // the way to finding out a line was a call, is never judged.
+  void validate(const Chain &c, const Role &role) {
+    const std::size_t last = c.segments.size();
+    // The type is the segment nearest the name, and whether it is a type is a
+    // question for the checker. Everything before it has to answer something.
+    const std::size_t upTo =
+        role.endsInType ? (last > 0 ? last - 1 : 0) : last;
+
+    int furthest = -1;               // the last place filled, so order can be read
+    Span seen[8];                    // where each slot was answered
+    Slot asked[8] = {};
+    bool filled[8] = {};
+
+    for (std::size_t i = 0; i < upTo; ++i) {
+      const ChainSegment &seg = c.segments[i];
+      const Slot slot = seg.isName ? Slot::Lifetime : slotOf(seg.text);
+
+      // The kind opens the chain and is not one of its answers.
+      if (slot == Slot::Kind) {
+        if (i == 0 && !role.kind.empty() && seg.text == role.kind)
+          continue;
+        complain(seg.span, "E0203",
+                 "`" + seg.text + "` is not something " + role.what + " chain says.",
+                 {"each kind of chain asks its own questions"},
+                 {"a chain opens with the one word saying what is being declared, "
+                  "and says it once."});
+        continue;
+      }
+
+      if (slot == Slot::Unknown) {
+        complain(seg.span, "E0202", "`" + seg.text + "` answers no question a chain asks.",
+                 {"every segment of a chain answers a question the language asks"},
+                 {"a chain is read by what each word means, not by counting to the "
+                  "last one, so a word that means nothing cannot be passed over."});
+        continue;
+      }
+
+      if (!seg.isName && isDefault(seg.text)) {
         complain(seg.span, "E0201",
                  "`" + seg.text + "` is what a name is when nothing says otherwise.",
                  {"a chain says what is unusual, and says nothing else"},
                  {"a bare chain is the safest chain, so nothing risky can hide in a "
                   "word that is not there."});
-    return c;
+        continue;
+      }
+
+      const int place = placeIn(role, slot);
+      if (place < 0) {
+        complain(seg.span, "E0203",
+                 "`" + (seg.isName ? "'" + seg.text + "'" : seg.text) +
+                     "` is not something " + role.what + " chain says.",
+                 {"each kind of chain asks its own questions"},
+                 {std::string("it answers ") + question(slot) +
+                  ", and that is not a question this chain asks."});
+        continue;
+      }
+
+      if (slot == Slot::Visibility) {
+        complain(seg.span, "E0206",
+                 "`" + seg.text + "` says who may see this, and there is nowhere else "
+                 "to see it from.",
+                 {"a word is written where there is a choice"},
+                 {"a program is one file for now, so everything in it is already as "
+                  "visible as it can be."});
+        continue;
+      }
+
+      if (filled[place]) {
+        complainAt(seg.span, "E0204",
+                   "this chain answers " + std::string(question(slot)) + " twice.",
+                   {"each segment answers one question, and one question is answered once"},
+                   {}, "answered again here",
+                   {Note{seen[place], "answered here first"}});
+        continue;
+      }
+
+      if (place < furthest) {
+        complainAt(seg.span, "E0205",
+                   "this chain answers " + std::string(question(asked[furthest])) +
+                       " before " + question(slot) + ", and they are read the other "
+                       "way round.",
+                   {"there is exactly one spelling"},
+                   {"a chain asks its questions in one order, so two chains saying the "
+                    "same thing are written the same way."},
+                   "answered here", {Note{seen[furthest], "and this one before it"}});
+        continue;
+      }
+
+      filled[place] = true;
+      seen[place] = seg.span;
+      asked[place] = slot;
+      furthest = place;
+    }
+
+    // `range` and `while` have no default between them: a loop that says neither
+    // has not said what it is.
+    if ((&role == &kLoopRange || &role == &kLoopWhile) &&
+        !filled[placeIn(role, Slot::Form)])
+      complain(c.span, "E0207", "a `loop` says whether it counts or asks.",
+               {"a word is written where there is a choice"},
+               {"`range` runs between two values and `while` runs until a question "
+                "answers no, and neither is the quieter one."});
   }
 
   // ---- expressions
@@ -449,10 +637,18 @@ private:
                  std::string("found ") + describe(peek().kind));
       }
       if (check(TokenKind::LBracket) && peek(1).kind != TokenKind::RBracket) {
-        // `set 'xs'[*2*] = …` — the index, not a value list.
+        // `set 'xs'[*2*] = …` — an index, and nothing yet holds more than one
+        // value to take one out of. It is read and refused rather than left to
+        // be understood as something else further down.
+        const Span open = peek().span;
         advance();
-        s->index.push_back(item());
+        (void)item();
         expect(TokenKind::RBracket, "`]`");
+        complain(Span{open.begin, previous().span.end}, "E0208",
+                 "there is nothing here to pick a value out of.",
+                 {"a name holds one value"},
+                 {"nothing in Xag holds several values yet, so no name has a second "
+                  "one to reach past the first."});
       }
       expect(TokenKind::Equals, "`=`");
       s->value = valueList();
@@ -504,8 +700,11 @@ private:
 
     if (checkWord("loop")) {
       s->chain = chain();
-      const bool isWhile = s->chain.segments.size() > 1 &&
-                           s->chain.segments[1].text == "while";
+      bool isWhile = false;
+      for (const ChainSegment &seg : s->chain.segments)
+        if (!seg.isName && seg.text == "while")
+          isWhile = true;
+      validate(s->chain, isWhile ? kLoopWhile : kLoopRange);
       if (isWhile) {
         s->kind = StmtKind::LoopWhile;
         s->condition = item();
@@ -541,6 +740,7 @@ private:
     if (check(TokenKind::Name)) {
       const Token name = advance();
       s->kind = StmtKind::Declare;
+      validate(c, kVar);
       s->chain = std::move(c);
       s->name = name.text;
       s->nameSpan = name.span;
@@ -588,6 +788,7 @@ private:
     out.chain = chain();
     if (out.chain.startsWith("fn")) {
       out.kind = ItemKind::Function;
+      validate(out.chain, kFn);
       if (check(TokenKind::Word)) {
         const Token name = advance();
         out.name = name.text;
@@ -602,6 +803,7 @@ private:
           Param param;
           param.span.begin = peek().span.begin;
           param.chain = chain();
+          validate(param.chain, kParam);
           if (check(TokenKind::Name)) {
             const Token name = advance();
             param.name = name.text;
@@ -620,6 +822,7 @@ private:
       out.body = block();
     } else if (out.chain.startsWith("const")) {
       out.kind = ItemKind::Const;
+      validate(out.chain, kConst);
       if (check(TokenKind::Name)) {
         const Token name = advance();
         out.name = name.text;

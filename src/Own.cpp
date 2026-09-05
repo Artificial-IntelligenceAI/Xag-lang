@@ -364,8 +364,6 @@ private:
 
     case StmtKind::Set: {
       Binding *binding = lookup(s.name);
-      for (const ExprPtr &index : s.index)
-        read(*index);
       consumeInto(s.value, binding ? binding->mode : Mode::Owned,
                   binding ? binding->copies : true);
       if (binding)

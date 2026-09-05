@@ -376,8 +376,6 @@ private:
       const unsigned *local = findName(s.name);
       if (!local)
         break;
-      for (const ExprPtr &index : s.index)
-        (void)lower(*index);
       assignInto(*local, s.value, s.span);
       break;
     }

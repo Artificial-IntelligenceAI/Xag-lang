@@ -73,11 +73,6 @@ struct Printer {
       break;
     case StmtKind::Set:
       out << "set '" << s.name << "'\n";
-      for (const ExprPtr &i : s.index) {
-        indent(depth + 1);
-        out << "index\n";
-        expr(*i, depth + 2);
-      }
       values(s.value, depth + 1);
       break;
     case StmtKind::If:

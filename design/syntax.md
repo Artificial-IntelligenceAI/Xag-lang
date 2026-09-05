@@ -317,7 +317,6 @@ neither takes brackets:
 ```
 var.mut.int64 'total' = [*0*];
 set 'total' = ['total' + *1*];
-set 'xs'[*2*] = [*99*];
 loop.range.int64 'i' = [*1*, 'n'] { ... }
 if 'a' >== 'b' { ... }
 loop.while 'left' > *0* { ... }
@@ -336,7 +335,7 @@ type.
 
 ```
 var.mut.int64 'total' = [*0*];
-fn.export.int64 add [int64 'a', int64 'b'] { give ['a' + 'b']; }
+fn.ref.str longer [ref.str 'a', ref.str 'b'] { ... }
 loop.perm.range.int64 'i' = [*1*, *100*] { ... }
 ```
 
@@ -349,8 +348,12 @@ asking for something.**
 | --- | --- | --- |
 | mutability | `immut` | `mut` — asking to change it |
 | ownership | `own` | `ref` / `refmut` — asking to borrow |
-| visibility | `file` | `export` / `program` — asking for exposure |
 | loop counter | `temp` | `perm` — asking to keep it after the loop |
+
+Visibility — `export` / `program` against a default of `file` — is where it will
+go, and is refused for now (`E0206`): a program is one file, so there is nothing
+outside it for anything to be visible to. A word that cannot change the answer is
+not written.
 
 `perm` keeps the counter, and what it holds afterwards is what it last took: the
 value a `break` left behind, or one past the last when the loop simply ran out.
@@ -380,6 +383,53 @@ redundancy:
 Error code: E0201
 Rule(s) broken: a chain says what is unusual, and says nothing else
 ```
+
+### The vocabulary is closed, and so is the order
+
+A chain is a run of answers to questions, and both which questions get asked and
+the order they come in depend on what is being declared:
+
+```
+var    . [mut] . [ref|refmut]              . type
+fn     . [ref|refmut] . ['loan']           . type
+const                                      . type
+loop   . [perm] . range                    . type
+loop   . while
+param    [mut] . [ref|refmut] . ['loan']   . type
+```
+
+A word outside that list answers nothing, and is refused where it stands rather
+than passed over on the way to the type:
+
+```text
+`arr` answers no question a chain asks.
+
+  1 | var.arr.int64 'xs' = [*1*];
+    |     ^^^ here
+
+Error code: E0202
+Rule(s) broken: every segment of a chain answers a question the language asks
+```
+
+The rest follows from there. `mut` on a `fn` is a real word in a chain that never
+asks whether it changes (`E0203`); `var.mut.mut.int64` answers one question twice
+(`E0204`); and `var.ref.mut.str` says the same thing as `var.mut.ref.str`, which
+is one spelling too many (`E0205`):
+
+```text
+this chain answers whether it owns or borrows before whether it changes, and
+they are read the other way round.
+
+  1 | var.ref.mut.str 's' = [*hi*];
+    |         ^^^ answered here
+    |     ^^^ and this one before it
+
+Error code: E0205
+Rule(s) broken: there is exactly one spelling
+```
+
+`range` and `while` have no quieter one between them, so a `loop` writes one of
+them (`E0207`).
 
 A diagnostic says what happened, points at it, names the rule, and explains why
 the rule exists. It does not say what to type instead — the reader knows their
@@ -541,3 +591,8 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 - **Turning a number into text.** Pieces side by side join, and nothing converts on
   its own, so something has to do it and be named.
+- **Holding more than one value.** There are no arrays, so there is nothing to
+  index, and `set 'xs'[*2*] = […]` is refused (`E0208`). Doing it properly needs
+  places with parts in the middle layer — which is what an element borrow and a
+  partial move would be written against anyway.
+- **Visibility.** `export` and `program` wait on there being more than one file.
