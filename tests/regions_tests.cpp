@@ -137,6 +137,21 @@ void oneLoanForWritingOrAnyNumberForReading() {
           "E0410");
 }
 
+void aLoanOfAManyIsALoanOfEveryPlaceInIt() {
+  // Which place `'xs'[…]` names is not known until the program runs, so a loan
+  // of the array covers all of them and writing one goes round the loan.
+  REFUSES("var.mut.many.int64 'xs' = [*1* *2*];\n"
+          "    var.ref.many.int64 'w' = [ref 'xs'];\n"
+          "    set 'xs'[*0*] = [*9*];\n"
+          "    print.stdout[(count['w']) \n];",
+          "E0409");
+  REFUSES("var.mut.many.str 'ws' = [*a* *b*];\n"
+          "    var.ref.many.str 'w' = [ref 'ws'];\n"
+          "    var.many.str 'taken' = [move 'ws'];\n"
+          "    print.stdout[(count['w']) \n];",
+          "E0408");
+}
+
 } // namespace
 
 int main() {
@@ -146,6 +161,7 @@ int main() {
   whatIsLentStaysWhereItIs();
   whatIsLentIsNotChangedBehindTheLoansBack();
   oneLoanForWritingOrAnyNumberForReading();
+  aLoanOfAManyIsALoanOfEveryPlaceInIt();
 
   if (failures == 0)
     std::cout << "all region tests passed\n";

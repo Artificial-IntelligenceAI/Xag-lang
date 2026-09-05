@@ -296,6 +296,38 @@ void aRunawayProgramIsStopped() {
   CHECK(r.trouble.find("longer than") != std::string::npos);
 }
 
+void itHoldsSeveralValues() {
+  SAYS("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
+       "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[ref 'xs']) \\n]; }\n",
+       "10 30 of 3\n");
+  SAYS("START { var.mut.many.int64 'xs' = [*1* *2*];\n"
+       "  set 'xs'[*1*] = [*9*];\n"
+       "  print.stdout['xs'[*1*] \\n]; }\n", "9\n");
+  SAYS("START { var.many.int64 'xs' = [fill[*7*, *4*]];\n"
+       "  print.stdout['xs'[*3*] str:* of * (count[ref 'xs']) \\n]; }\n", "7 of 4\n");
+  SAYS("START { var.many.int64 'none' = [];\n"
+       "  print.stdout[(count[ref 'none']) \\n]; }\n", "0\n");
+}
+
+void itEndsEveryPlaceItHeld() {
+  // The balance is checked after every one of these, so a `many` of text that
+  // let go of only its buffer would be caught here.
+  SAYS("START { var.many.str 'ws' = [*one* *two* *three*];\n"
+       "  print.stdout['ws'[*1*] \\n]; }\n", "two\n");
+  SAYS("START { var.mut.many.str 'ws' = [*one* *two*];\n"
+       "  set 'ws'[*0*] = [*ONE*];\n"
+       "  print.stdout['ws'[*0*] str:* * 'ws'[*1*] \\n]; }\n", "ONE two\n");
+  SAYS("START { var.str 's' = [*taken*];\n"
+       "  var.many.str 'ws' = [*a* move 's'];\n"
+       "  print.stdout['ws'[*1*] \\n]; }\n", "taken\n");
+}
+
+void itCountsWhatEachPlaceHolds() {
+  SAYS("START { var.many.str 'ws' = [*café* *🧑‍🧑‍🧒‍🧒*];\n"
+       "  print.stdout[(count['ws'[*0*]]) str:* * (count['ws'[*1*]]) \\n]; }\n",
+       "4 1\n");
+}
+
 } // namespace
 
 int main() {
@@ -315,6 +347,9 @@ int main() {
   itLendsAndTakes();
   itEndsHoldingNothing();
   aRunawayProgramIsStopped();
+  itHoldsSeveralValues();
+  itEndsEveryPlaceItHeld();
+  itCountsWhatEachPlaceHolds();
 
   if (failures == 0)
     std::cout << "all interpreter tests passed\n";

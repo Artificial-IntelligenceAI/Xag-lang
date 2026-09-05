@@ -17,8 +17,11 @@ struct Slot {
   double real = 0;  // a bin16, bin32 or bin64
   XagStr text{nullptr, 0, 0};
   uint32_t loan = 0; // where in the stack the lent slot is
-  bool owns = false; // whether this slot must end the text it points at
+  bool owns = false; // whether this slot must end what it points at
   bool loaned = false;
+  // A `many`: the places, held the way text is. One owner ends them, and
+  // everything reading them holds a view with no claim.
+  std::vector<Slot> *places = nullptr;
 };
 
 enum class Op : uint8_t {
@@ -32,6 +35,7 @@ enum class Op : uint8_t {
   WideAdd, WideSub, WideMul, WideDiv, WideMod, WidePow, WideCompare,
   DeciAdd, DeciSub, DeciMul, DeciDiv, DeciMod, DeciPow, DeciCompare,
   TextCompare, TextJoin, TextCount,
+  MakeMany, FillMany, ElementAt, StoreAt,
   Not, And, Or,
   Order, // turn a -1/0/1 into a truth, by the test in `aux`
   PushArg, Call, PrintWhole, PrintReal, PrintWide, PrintDeci, PrintText, PrintBool,
@@ -220,6 +224,15 @@ private:
                              : Code{Op::Drop, s.place, 0, 0, 0});
           continue;
         }
+        if (s.kind == StatementKind::Store) {
+          const uint32_t at = into(s.at, scratch);
+          const uint32_t what = s.value.operands.empty()
+                                    ? 0
+                                    : into(s.value.operands[0], scratch);
+          emit(Code{Op::StoreAt, s.place, at, what, 0});
+          most = most > scratch ? most : scratch;
+          continue;
+        }
         statement(s, scratch);
         most = most > scratch ? most : scratch;
       }
@@ -256,6 +269,30 @@ private:
                          value.kind != RValueKind::Ref;
 
     switch (value.kind) {
+    case RValueKind::Collect: {
+      for (const Operand &operand : value.operands) {
+        const uint32_t from = into(operand, scratch);
+        emit(Code{Op::PushArg, 0, from, 0, 0});
+      }
+      emit(Code{Op::MakeMany, s.place, 0,
+                static_cast<uint32_t>(value.operands.size()), 0});
+      return;
+    }
+
+    case RValueKind::Fill: {
+      const uint32_t what = into(value.operands[0], scratch);
+      const uint32_t places = into(value.operands[1], scratch);
+      emit(Code{Op::FillMany, s.place, what, places, 0});
+      return;
+    }
+
+    case RValueKind::Element: {
+      const uint32_t of = into(value.operands[0], scratch);
+      const uint32_t at = into(value.operands[1], scratch);
+      emit(Code{Op::ElementAt, s.place, of, at, 0});
+      return;
+    }
+
     case RValueKind::Use: {
       if (value.operands.empty())
         return;
@@ -434,7 +471,8 @@ private:
 
 class Machine {
 public:
-  Machine(std::vector<Routine> routines) : routines_(std::move(routines)) {
+  Machine(std::vector<Routine> routines, Settings settings)
+      : routines_(std::move(routines)), settings_(settings) {
     stack_.resize(kStack);
   }
 
@@ -463,6 +501,7 @@ private:
   std::vector<Slot> stack_;
   std::vector<uint32_t> pending_; // arguments waiting for a call
   std::string trouble_;
+  Settings settings_;
   uint64_t steps_ = 0;
   unsigned depth_ = 0;
 
@@ -478,6 +517,14 @@ private:
   }
 
   void end(Slot &slot) {
+    if (slot.owns && slot.places) {
+      for (Slot &held : *slot.places)
+        end(held);
+      delete slot.places;
+      xag_note_given();
+      slot = Slot{};
+      return;
+    }
     if (slot.owns)
       xag_str_drop(&slot.text);
     slot = Slot{};
@@ -665,9 +712,74 @@ private:
       case Op::TextCompare:
         to.whole = xag_str_compare(&read(one.a).text, &read(one.b).text);
         break;
-      case Op::TextCount:
-        to.whole = xag_str_count(&read(one.a).text);
+      case Op::TextCount: {
+        Slot &of = read(one.a);
+        to.whole = of.places ? static_cast<XagInt>(of.places->size())
+                             : xag_str_count(&of.text);
         break;
+      }
+
+      case Op::MakeMany: {
+        auto *held = new std::vector<Slot>();
+        held->reserve(one.b);
+        for (unsigned i = 0; i < one.b; ++i) {
+          const uint32_t from = arguments[arguments.size() - one.b + i];
+          held->push_back(stack_[from]);
+          // What went in belongs to the array now, and the slot it came from
+          // must not end it a second time.
+          if (stack_[from].owns)
+            stack_[from] = Slot{};
+        }
+        arguments.resize(arguments.size() - one.b);
+        end(to);
+        to = Slot{};
+        to.places = held;
+        to.owns = true;
+        xag_note_taken();
+        break;
+      }
+
+      case Op::FillMany: {
+        Slot one_of = read(one.a);
+        const XagInt places = read(one.b).whole;
+        auto *held = new std::vector<Slot>();
+        for (XagInt i = 0; i < places && i < 100000000; ++i) {
+          Slot copy = one_of;
+          copy.owns = false;
+          held->push_back(copy);
+        }
+        end(to);
+        to = Slot{};
+        to.places = held;
+        to.owns = true;
+        xag_note_taken();
+        break;
+      }
+
+      case Op::ElementAt: {
+        Slot &of = read(one.a);
+        const uint64_t length = of.places ? of.places->size() : 0;
+        const uint64_t at = xag_many_place(static_cast<int64_t>(read(one.b).whole),
+                                           length, settings_.wrapsOutOfRange ? 1 : 0);
+        Slot seen = (*of.places)[at];
+        seen.owns = false; // a view, and no claim on what it sees
+        end(to);
+        to = seen;
+        break;
+      }
+
+      case Op::StoreAt: {
+        Slot &of = read(one.to);
+        const uint64_t length = of.places ? of.places->size() : 0;
+        const uint64_t at = xag_many_place(static_cast<int64_t>(read(one.a).whole),
+                                           length, settings_.wrapsOutOfRange ? 1 : 0);
+        Slot given = stack_[base + one.b];
+        if (stack_[base + one.b].owns)
+          stack_[base + one.b] = Slot{};
+        end((*of.places)[at]);
+        (*of.places)[at] = given;
+        break;
+      }
       case Op::TextJoin: {
         std::vector<XagStr> pieces;
         pieces.reserve(one.b);
@@ -749,7 +861,7 @@ private:
 
 FastResult runFast(const Mir &mir) {
   Builder builder(mir);
-  return Machine(builder.run()).run();
+  return Machine(builder.run(), mir.settings).run();
 }
 
 } // namespace xag

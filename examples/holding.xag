@@ -1,0 +1,33 @@
+# A `many` holds a fixed number of values of one type. Its length is settled
+# when it is made, and every place has something in it from then on.
+
+fn.int64 total [ref.many.int64 'xs'] {
+    var.mut.int64 'sum' = [*0*];
+    loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {
+        set 'sum' = ['sum' + 'xs'['i']];
+    }
+    give ['sum'];
+}
+
+START {
+    # Items side by side, kept as several rather than joined into one. Which of
+    # the two happens is the type's answer, and the only one it gives.
+    var.mut.many.int64 'scores' = [*10* *20* *30* *40*];
+    set 'scores'[*2*] = [*99*];
+
+    print.stdout[str:*there are * (count[ref 'scores']) str:*, adding to *
+                 (total[ref 'scores']) \n];
+
+    # An element is a place: read it, write it, lend it — never take it out,
+    # because that would leave a hole and nothing in Xag holds one.
+    var.many.str 'names' = [*ada* *grace* *alan*];
+    loop.range.int64 'i' = [*0*, (count[ref 'names'] - *1*)] {
+        print.stdout['names'['i'] str:* is * (count['names'['i']]) str:* long* \n];
+    }
+
+    # A length nobody knew until the program ran.
+    var.int64 'wanted' = [*3*];
+    var.many.int64 'zeroes' = [fill[*0*, 'wanted']];
+    print.stdout[str:*and * (count[ref 'zeroes']) str:* zeroes adding to *
+                 (total[ref 'zeroes']) \n];
+}

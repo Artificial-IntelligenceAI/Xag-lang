@@ -27,6 +27,44 @@ typedef struct {
 // Anything that produces a `str` writes it through a pointer rather than
 // returning it. A struct returned by value has a platform ABI to match, and
 // matching one by hand in generated IR is a bug nobody would find quickly.
+// A `many` owns every place it has. Its length is settled when it is made and
+// never changes after, so unlike a `str` there is no capacity to keep: one
+// owner, one free, and the places in between are always all there.
+typedef struct {
+  void *places;
+  uint64_t length;
+} XagMany;
+
+// Which place an index names, or a stop. `wraps` is the `out-of-range` setting,
+// handed in rather than looked up so that native code has it as a constant and
+// the branch folds away where the index provably fits.
+//
+// An empty `many` stops under both settings: wrapping needs somewhere to land,
+// and there is nowhere.
+uint64_t xag_many_place(int64_t index, uint64_t length, int32_t wraps);
+
+// The half of that which stops, on its own, so that native code can write the
+// half that does not as a compare and a branch the optimiser can see through.
+// An index inside the array never reaches here.
+void xag_many_out_of_range(int64_t index, uint64_t length);
+
+// `stride` is one place in bytes. The places arrive zeroed, because a `many`
+// that has been made holds a value everywhere and a zero is the one thing every
+// type can start as.
+void xag_many_new(XagMany *out, uint64_t length, uint64_t stride);
+void xag_many_drop(XagMany *m);     // the buffer only, for places that copy
+void xag_many_drop_str(XagMany *m); // every `str` in it, and then the buffer
+
+// The same value in every place. Only a value that copies gets here, so this is
+// a copy of `stride` bytes and nothing more.
+void xag_many_fill(XagMany *m, uint64_t stride, const void *one);
+
+// An engine that keeps a `many` in its own memory rather than in the runtime's
+// says so here, so that one balance covers all three of them and a leak in any
+// one is a leak the tally reports.
+void xag_note_taken(void);
+void xag_note_given(void);
+
 void xag_str_from(XagStr *out, const char *bytes, uint64_t length);
 void xag_str_join(XagStr *out, const XagStr *pieces, uint64_t count);
 int64_t xag_str_count(const XagStr *text);

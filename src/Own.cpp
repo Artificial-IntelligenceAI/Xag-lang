@@ -24,6 +24,17 @@ bool copyType(std::string_view type) {
   return isNumber(named);
 }
 
+// A `many` owns the places it holds, whatever sits in them, so it is handed
+// over rather than copied even when every element would be.
+bool holdsMany(const Chain &chain) {
+  const std::size_t n = chain.segments.size();
+  return n >= 2 && !chain.segments[n - 2].isName && chain.segments[n - 2].text == "many";
+}
+
+bool copyChain(const Chain &chain) {
+  return !holdsMany(chain) && copyType(chain.type().text);
+}
+
 Mode modeOfChain(const Chain &chain) {
   for (const ChainSegment &seg : chain.segments) {
     if (seg.isName)
@@ -55,6 +66,11 @@ const char *word(Mode mode) {
 struct Binding {
   Mode mode = Mode::Owned;
   bool copies = true;
+  // What one of its places holds, when it is a `many`. An array never copies,
+  // but writing `set 'xs'[*0*] = [*9*]` puts an element there, and whether that
+  // needs a word spelled is the element's question rather than the array's.
+  bool elementCopies = true;
+  bool holds = false; // whether it is a `many` at all
   bool changes = false;
   Span span;
   bool moved = false;
@@ -95,7 +111,8 @@ public:
     for (const Item &item : program_.items)
       if (item.kind == ItemKind::Const)
         scopes_.back()[item.name] =
-            Binding{Mode::Owned, copyType(item.chain.type().text), false, item.nameSpan, false, {}};
+            Binding{Mode::Owned, copyChain(item.chain), copyType(item.chain.type().text),
+                    holdsMany(item.chain), false, item.nameSpan, false, {}};
     for (const Item &item : program_.items)
       body(item);
     return std::move(result_);
@@ -152,7 +169,7 @@ private:
       std::vector<Note> lent;
       for (const Param &param : item.params) {
         const Mode mode = modeOfChain(param.chain);
-        info.params.push_back(ParamInfo{mode, copyType(param.chain.type().text)});
+        info.params.push_back(ParamInfo{mode, copyChain(param.chain)});
         if (mode != Mode::Owned) {
           ++borrowed;
           lent.push_back(Note{param.span, "lent here"});
@@ -223,13 +240,47 @@ private:
       return;
     }
 
+    case ExprKind::Index: {
+      // An element is a place inside the array, so reading one reads the array
+      // and lending one lends the whole of it: which element `'xs'['i']` names
+      // is not known until the program runs, and no loan can be narrower than
+      // what the index is read out of.
+      if (!e.children.empty())
+        read(*e.children[0]);
+      Binding *binding = lookup(e.text);
+      if (binding && binding->moved) {
+        complain(e.span, "E0403", "`'" + e.text + "'` was moved, and holds nothing now.",
+                 {"a name holds its value until it is moved, and then holds nothing"},
+                 {"what was moved is somewhere else now, and there is only ever one of it."},
+                 "used here",
+                 {Note{binding->movedAt, "but it was handed over here"}});
+        return;
+      }
+      if (how == Use::Consume && wanted == Mode::Owned && !copies)
+        complain(e.span, "E0412",
+                 "taking this out would leave a hole where it was.",
+                 {"a `many` holds a value in every place it has"},
+                 {"an element is read, written and lent where it stands; nothing in "
+                  "Xag holds a gap."});
+      return;
+    }
+
     case ExprKind::Borrow: {
       if (e.children.empty())
         return;
       const Expr &inner = *e.children[0];
-      Binding *binding = inner.kind == ExprKind::Name ? lookup(inner.text) : nullptr;
+      Binding *binding = (inner.kind == ExprKind::Name || inner.kind == ExprKind::Index)
+                             ? lookup(inner.text)
+                             : nullptr;
 
       if (e.text == "move") {
+        if (inner.kind == ExprKind::Index) {
+          complain(e.span, "E0412", "taking this out would leave a hole where it was.",
+                   {"a `many` holds a value in every place it has"},
+                   {"an element is read, written and lent where it stands; nothing in "
+                    "Xag holds a gap."});
+          return;
+        }
         if (binding && binding->mode != Mode::Owned) {
           complain(e.span, "E0404", "this is borrowed, and a borrow is not yours to give away.",
                    {"what is lent goes back to whoever lent it"},
@@ -342,13 +393,30 @@ private:
     scopes_.pop_back();
   }
 
-  void consumeInto(const ValueList &list, Mode mode, bool copies) {
+  void consumeInto(const ValueList &list, Mode mode, bool copies, bool collects = false,
+                   bool elementCopies = true) {
     for (const Value &value : list.values) {
+      // Items side by side under a `many` each end up in a place of their own,
+      // so each is handed over. Under anything else they are joined, and
+      // joining reads its pieces and builds something new out of them.
+      if (collects) {
+        if (value.items.size() == 1) {
+          const Expr &only = *value.items[0];
+          const Binding *from =
+              only.kind == ExprKind::Name ? lookup(only.text) : nullptr;
+          const bool whole = from && from->holds;
+          use(only, Use::Consume, mode, whole ? copies : elementCopies);
+          continue;
+        }
+        for (const ExprPtr &item : value.items)
+          use(*item, Use::Consume, Mode::Owned, elementCopies);
+        continue;
+      }
       if (value.items.size() == 1)
         use(*value.items[0], Use::Consume, mode, copies);
       else
         for (const ExprPtr &item : value.items)
-          read(*item); // joining reads its pieces and builds something new
+          read(*item);
     }
   }
 
@@ -356,16 +424,35 @@ private:
     switch (s.kind) {
     case StmtKind::Declare: {
       const Mode mode = modeOfChain(s.chain);
-      const bool copies = copyType(s.chain.type().text);
-      consumeInto(s.value, mode, copies);
-      scopes_.back()[s.name] = Binding{mode, copies, changeable(s.chain), s.nameSpan, false, {}};
+      const bool copies = copyChain(s.chain);
+      consumeInto(s.value, mode, copies, holdsMany(s.chain),
+                  copyType(s.chain.type().text));
+      scopes_.back()[s.name] =
+          Binding{mode, copies, copyType(s.chain.type().text), holdsMany(s.chain),
+                  changeable(s.chain), s.nameSpan, false, {}};
       break;
     }
 
     case StmtKind::Set: {
       Binding *binding = lookup(s.name);
+      if (s.index) {
+        // Writing one place reads the array to find it, and what goes in is an
+        // element rather than the array, so the array's own mode says nothing
+        // about what the value has to be.
+        read(*s.index);
+        if (binding && binding->moved)
+          complain(s.nameSpan, "E0403",
+                   "`'" + s.name + "'` was moved, and holds nothing now.",
+                   {"a name holds its value until it is moved, and then holds nothing"},
+                   {"what was moved is somewhere else now, and there is only ever one "
+                    "of it."},
+                   "used here", {Note{binding->movedAt, "but it was handed over here"}});
+        consumeInto(s.value, Mode::Owned, binding ? binding->elementCopies : true);
+        break;
+      }
       consumeInto(s.value, binding ? binding->mode : Mode::Owned,
-                  binding ? binding->copies : true);
+                  binding ? binding->copies : true, binding && binding->holds,
+                  binding ? binding->elementCopies : true);
       if (binding)
         binding->moved = false; // it holds something again
       break;
@@ -404,7 +491,8 @@ private:
       scopes_.emplace_back();
       if (s.kind == StmtKind::LoopRange)
         scopes_.back()[s.name] =
-            Binding{Mode::Owned, copyType(s.chain.type().text), false, s.nameSpan, false, {}};
+            Binding{Mode::Owned, copyChain(s.chain), copyType(s.chain.type().text),
+                    holdsMany(s.chain), false, s.nameSpan, false, {}};
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);
       scopes_.pop_back();
@@ -494,7 +582,8 @@ private:
       givingCopies_ = copyType(item.chain.type().text);
       for (const Param &param : item.params)
         scopes_.back()[param.name] =
-            Binding{modeOfChain(param.chain), copyType(param.chain.type().text),
+            Binding{modeOfChain(param.chain), copyChain(param.chain),
+                    copyType(param.chain.type().text), holdsMany(param.chain),
                     changeable(param.chain), param.nameSpan, false, {}};
     } else {
       giving_ = Mode::Owned;

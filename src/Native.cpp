@@ -36,13 +36,47 @@ bool isLoan(const std::string &type) {
   return type.rfind("ref ", 0) == 0 || type.rfind("refmut ", 0) == 0;
 }
 
+std::string withoutLoan(const std::string &type) {
+  if (type.rfind("refmut ", 0) == 0)
+    return type.substr(7);
+  if (type.rfind("ref ", 0) == 0)
+    return type.substr(4);
+  return type;
+}
+
+bool holdsMany(const std::string &type) {
+  return withoutLoan(type).rfind("many ", 0) == 0;
+}
+
+std::string elementOf(const std::string &type) {
+  const std::string bare = withoutLoan(type);
+  return bare.rfind("many ", 0) == 0 ? bare.substr(5) : std::string("?");
+}
+
 class Emitter {
 public:
   Emitter(const Mir &mir)
       : mir_(mir), module_("xag", context_), builder_(context_) {
+    // A `many` asks how wide one of its places is while the code is being
+    // written, so the layout has to be settled before any of it is — an empty
+    // one answers zero, and a buffer of that size is a heap overflow.
+    llvm::InitializeAllTargetInfos();
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    const llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
+    std::string reason;
+    if (const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, reason)) {
+      llvm::TargetOptions options;
+      std::unique_ptr<llvm::TargetMachine> machine(
+          target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_));
+      module_.setDataLayout(machine->createDataLayout());
+      module_.setTargetTriple(triple);
+    }
     str_ = llvm::StructType::create(context_, {builder_.getPtrTy(), builder_.getInt64Ty(),
                                                builder_.getInt64Ty()},
                                     "XagStr");
+    many_ = llvm::StructType::create(
+        context_, {builder_.getPtrTy(), builder_.getInt64Ty()}, "XagMany");
     declareRuntime();
   }
 
@@ -71,6 +105,7 @@ private:
   llvm::Module module_;
   llvm::IRBuilder<> builder_;
   llvm::StructType *str_ = nullptr;
+  llvm::StructType *many_ = nullptr;
 
   std::unordered_map<std::string, llvm::Function *> functions_;
   std::unordered_map<std::string, llvm::FunctionCallee> runtime_;
@@ -88,6 +123,8 @@ private:
       return str_;
     if (isLoan(spelled))
       return builder_.getPtrTy();
+    if (holdsMany(spelled))
+      return many_;
     const Type named = typeNamed(spelled);
     if (isWhole(named))
       return builder_.getIntNTy(widthOf(named));
@@ -151,6 +188,12 @@ private:
       add(op, i128, {i128, i128});
     for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
       add(op, i128, {i128, i128, i32, i32});
+    add("xag_many_place", i64, {i64, i64, i32});
+    add("xag_many_out_of_range", voidTy, {i64, i64});
+    add("xag_many_new", voidTy, {ptr, i64, i64});
+    add("xag_many_drop", voidTy, {ptr});
+    add("xag_many_drop_str", voidTy, {ptr});
+    add("xag_many_fill", voidTy, {ptr, i64, ptr});
     (void)i64;
   }
 
@@ -181,9 +224,13 @@ private:
       slots_[local.id] = builder_.CreateAlloca(typeFor(nameOf(local.type)), nullptr,
                                                "_" + std::to_string(local.id));
     // Every slot starts empty, so a drop that reaches one never sees rubbish.
-    for (const Local &local : body.locals)
-      if (nameOf(local.type) == "str")
+    for (const Local &local : body.locals) {
+      const std::string &held = nameOf(local.type);
+      if (held == "str")
         builder_.CreateStore(llvm::Constant::getNullValue(str_), slots_[local.id]);
+      else if (holdsMany(held) && !isLoan(held))
+        builder_.CreateStore(llvm::Constant::getNullValue(many_), slots_[local.id]);
+    }
 
     unsigned i = 0;
     for (llvm::Argument &argument : function->args()) {
@@ -273,6 +320,8 @@ private:
       // What was taken is gone from where it was, so a stray drop finds nothing.
       if (localType(operand.local) == "str")
         builder_.CreateStore(llvm::Constant::getNullValue(str_), slots_[operand.local]);
+      else if (holdsMany(localType(operand.local)) && !isLoan(localType(operand.local)))
+        builder_.CreateStore(llvm::Constant::getNullValue(many_), slots_[operand.local]);
       return taken;
     }
     }
@@ -281,6 +330,13 @@ private:
 
   const std::string &localType(unsigned local) const {
     return nameOf(body_->locals[local].type);
+  }
+
+  // What an operand actually holds — the local's type, since the operand's own
+  // spelling is what was asked of it rather than what is there.
+  const std::string &operandType(const Operand &operand) const {
+    static const std::string written = "?";
+    return operand.kind == OperandKind::Written ? written : localType(operand.local);
   }
 
   // A pointer to text, whether the operand names it, lends it, or wrote it.
@@ -304,11 +360,34 @@ private:
   // ---- statements
 
   void statement(const Statement &s) {
-    if (s.kind == StatementKind::Drop) {
-      if (localType(s.place) != "str")
+    if (s.kind == StatementKind::Store) {
+      const std::string held = localType(s.place);
+      const std::string element = elementOf(held);
+      auto *place = placePointer(
+          isLoan(held) ? builder_.CreateLoad(builder_.getPtrTy(), slots_[s.place])
+                       : slots_[s.place],
+          builder_.CreateSExtOrTrunc(read(s.at), builder_.getInt64Ty()), element);
+      if (element == "str") {
+        // What was in the place ends here: a `many` holds a value everywhere,
+        // and putting one in does not make room by forgetting the other.
+        builder_.CreateCall(runtime_["xag_str_drop"], {place});
+        builder_.CreateStore(
+            builder_.CreateLoad(str_, textPointer(s.value.operands[0])), place);
         return;
+      }
+      builder_.CreateStore(read(s.value.operands[0]), place);
+      return;
+    }
+
+    if (s.kind == StatementKind::Drop) {
+      const std::string held = localType(s.place);
+      if (held != "str" && !holdsMany(held))
+        return;
+      const char *how = held == "str"          ? "xag_str_drop"
+                        : elementOf(held) == "str" ? "xag_many_drop_str"
+                                                   : "xag_many_drop";
       if (!s.conditional) {
-        builder_.CreateCall(runtime_["xag_str_drop"], {slots_[s.place]});
+        builder_.CreateCall(runtime_[how], {slots_[s.place]});
         return;
       }
       llvm::Function *function = builder_.GetInsertBlock()->getParent();
@@ -317,7 +396,7 @@ private:
       auto *flag = builder_.CreateLoad(builder_.getInt1Ty(), slots_[s.flag]);
       builder_.CreateCondBr(flag, doIt, after);
       builder_.SetInsertPoint(doIt);
-      builder_.CreateCall(runtime_["xag_str_drop"], {slots_[s.place]});
+      builder_.CreateCall(runtime_[how], {slots_[s.place]});
       builder_.CreateBr(after);
       builder_.SetInsertPoint(after);
       return;
@@ -336,8 +415,110 @@ private:
     builder_.CreateStore(value, slots_[s.place]);
   }
 
+  // Where a `many` sits, whether the local holds one or a loan of one.
+  llvm::Value *manyPointer(const Operand &operand) {
+    if (operand.kind == OperandKind::Written)
+      return nullptr;
+    const std::string &held = localType(operand.local);
+    if (isLoan(held))
+      return builder_.CreateLoad(builder_.getPtrTy(), slots_[operand.local]);
+    return slots_[operand.local];
+  }
+
+  // The address of one place.
+  //
+  // The rule lives in the runtime, and every engine asks it — but the half of
+  // it that says yes is written out here as a compare and a branch, because a
+  // call the optimiser cannot see into is a call it cannot remove, and this one
+  // sits in the middle of every loop over a `many`. An unsigned compare covers
+  // a negative index and an empty array at once: both are outside.
+  llvm::Value *placePointer(llvm::Value *array, llvm::Value *index,
+                            const std::string &element) {
+    auto *whole = builder_.CreateLoad(many_, array);
+    auto *base = builder_.CreateExtractValue(whole, 0);
+    auto *length = builder_.CreateExtractValue(whole, 1);
+    llvm::Function *function = builder_.GetInsertBlock()->getParent();
+    llvm::BasicBlock *asked = builder_.GetInsertBlock();
+    auto *inside = llvm::BasicBlock::Create(context_, "inside", function);
+    auto *outside = llvm::BasicBlock::Create(context_, "outside", function);
+    builder_.CreateCondBr(builder_.CreateICmpULT(index, length), inside, outside);
+
+    builder_.SetInsertPoint(outside);
+    llvm::Value *wrapped = nullptr;
+    if (mir_.settings.wrapsOutOfRange) {
+      wrapped = builder_.CreateCall(runtime_["xag_many_place"],
+                                    {index, length, builder_.getInt32(1)});
+      builder_.CreateBr(inside);
+    } else {
+      builder_.CreateCall(runtime_["xag_many_out_of_range"], {index, length});
+      builder_.CreateUnreachable();
+    }
+    llvm::BasicBlock *wentAround = builder_.GetInsertBlock();
+
+    builder_.SetInsertPoint(inside);
+    llvm::Value *at = index;
+    if (wrapped) {
+      auto *both = builder_.CreatePHI(builder_.getInt64Ty(), 2);
+      both->addIncoming(index, asked);
+      both->addIncoming(wrapped, wentAround);
+      at = both;
+    }
+    return builder_.CreateGEP(typeFor(element), base, at);
+  }
+
+  // An index arrives as whatever width it was written at; the runtime asks in
+  // int64, which is what `count` answers with anyway.
+  llvm::Value *asIndex(const Operand &operand) {
+    auto *value = read(operand);
+    return builder_.CreateSExtOrTrunc(value, builder_.getInt64Ty());
+  }
+
   llvm::Value *evaluate(const RValue &value) {
     switch (value.kind) {
+    case RValueKind::Collect: {
+      const std::string element = elementOf(nameOf(value.type));
+      auto *made = builder_.CreateAlloca(many_, nullptr, "collected");
+      const unsigned count = static_cast<unsigned>(value.operands.size());
+      builder_.CreateCall(
+          runtime_["xag_many_new"],
+          {made, builder_.getInt64(count), builder_.getInt64(strideOf(element))});
+      if (count) {
+        auto *whole = builder_.CreateLoad(many_, made);
+        auto *base = builder_.CreateExtractValue(whole, 0);
+        for (unsigned i = 0; i < count; ++i) {
+          auto *at = builder_.CreateGEP(typeFor(element), base, builder_.getInt64(i));
+          if (element == "str")
+            builder_.CreateStore(
+                builder_.CreateLoad(str_, textPointer(value.operands[i])), at);
+          else
+            builder_.CreateStore(read(value.operands[i]), at);
+        }
+      }
+      return builder_.CreateLoad(many_, made);
+    }
+
+    case RValueKind::Fill: {
+      const std::string element = elementOf(nameOf(value.type));
+      auto *made = builder_.CreateAlloca(many_, nullptr, "filled");
+      auto *howMany = asIndex(value.operands[1]);
+      builder_.CreateCall(runtime_["xag_many_new"],
+                          {made, howMany, builder_.getInt64(strideOf(element))});
+      auto *one = builder_.CreateAlloca(typeFor(element), nullptr, "one");
+      builder_.CreateStore(read(value.operands[0]), one);
+      builder_.CreateCall(runtime_["xag_many_fill"],
+                          {made, builder_.getInt64(strideOf(element)), one});
+      return builder_.CreateLoad(many_, made);
+    }
+
+    case RValueKind::Element: {
+      const std::string element = elementOf(nameOf(value.operands[0].type));
+      auto *place = placePointer(manyPointer(value.operands[0]),
+                                 asIndex(value.operands[1]), element);
+      // What copies is read out; what does not is lent where it stands.
+      return element == "str" ? place
+                              : builder_.CreateLoad(typeFor(element), place);
+    }
+
     case RValueKind::Use:
       return value.operands.empty() ? nullptr : read(value.operands[0]);
 
@@ -368,6 +549,12 @@ private:
       return call(value);
     }
     return nullptr;
+  }
+
+  // One place, in bytes. The layout is the machine's, asked of the module's own
+  // data layout rather than guessed at.
+  uint64_t strideOf(const std::string &element) {
+    return module_.getDataLayout().getTypeAllocSize(typeFor(element));
   }
 
   llvm::Value *binary(const RValue &value) {
@@ -546,6 +733,10 @@ private:
     }
 
     if (value.callee == "count") {
+      if (!value.operands.empty() && holdsMany(operandType(value.operands[0]))) {
+        auto *whole = builder_.CreateLoad(many_, manyPointer(value.operands[0]));
+        return builder_.CreateExtractValue(whole, 1);
+      }
       auto *text = value.operands.empty() ? nullptr : textPointer(value.operands[0]);
       return text ? static_cast<llvm::Value *>(
                         builder_.CreateCall(runtime_["xag_str_count"], {text}))

@@ -43,8 +43,11 @@ enum class RValueKind {
   Binary, // two, with an operator
   Unary,  // one, with an operator
   Call,   // a callee and its arguments
-  Join,   // pieces side by side, built into one
-  Ref,    // a loan of a local, for reading or for writing
+  Join,    // pieces side by side, built into one
+  Ref,     // a loan of a local, for reading or for writing
+  Collect, // pieces side by side, kept as several — a `many`
+  Element, // two operands: a `many`, and which of its places
+  Fill,    // two operands: what to put in every place, and how many places
 };
 
 struct RValue {
@@ -59,12 +62,14 @@ struct RValue {
 enum class StatementKind {
   Assign, // place = value
   Drop,   // the local's value ends here
+  Store,  // one place of a `many`: place[at] = value
 };
 
 struct Statement {
   StatementKind kind = StatementKind::Assign;
   Span span;
   unsigned place = 0;
+  Operand at; // Store: which of the places
   RValue value;
 
   // A drop that only sometimes has anything to do — because the value was moved
@@ -107,8 +112,16 @@ struct Body {
   std::vector<std::string> types; // TypeRef indexes this
 };
 
+// What this project decided, once, for every file in it. Only the settings that
+// change what a program *answers* live here, because those are the ones every
+// engine has to agree under.
+struct Settings {
+  bool wrapsOutOfRange = false; // out-of-range = "stops" (false) or "wraps"
+};
+
 struct Mir {
   std::vector<Body> bodies;
+  Settings settings;
 };
 
 struct MirResult {
@@ -120,7 +133,8 @@ struct MirResult {
 // Lowering reads what the checker already worked out rather than working it out
 // again. Drops are placed where a scope ends; making them conditional on what
 // was moved is drop elaboration, which does not exist yet.
-MirResult build(const Source &source, const Program &program, const CheckResult &checked);
+MirResult build(const Source &source, const Program &program,
+               const CheckResult &checked, Settings settings = {});
 
 // Drops arrive from lowering placed at every scope end, whether or not anything
 // is still there to drop. Elaboration reads the graph and settles each one: gone

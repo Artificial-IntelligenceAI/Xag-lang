@@ -45,6 +45,14 @@ struct Printer {
     case RValueKind::Join:
       text = "join(";
       break;
+    case RValueKind::Collect:
+      text = "collect(";
+      break;
+    case RValueKind::Element:
+      return operand(v.operands[0]) + "[" + operand(v.operands[1]) + "]";
+    case RValueKind::Fill:
+      text = "fill(";
+      break;
     }
     for (unsigned i = 0; i < v.operands.size(); ++i)
       text += (i ? ", " : "") + operand(v.operands[i]);
@@ -66,6 +74,9 @@ struct Printer {
         if (s.kind == StatementKind::Drop)
           out << "    drop " << local(s.place)
               << (s.conditional ? " if " + local(s.flag) : "") << '\n';
+        else if (s.kind == StatementKind::Store)
+          out << "    " << local(s.place) << "[" << operand(s.at) << "] = "
+              << rvalue(s.value) << '\n';
         else
           out << "    " << local(s.place) << " = " << rvalue(s.value) << '\n';
       }

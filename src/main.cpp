@@ -36,7 +36,66 @@ void usage() {
                "    xagc build <file>   check it and write a program beside it\n"
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
                "    xagc --help         this\n\n"
+               "    --out-of-range=stops|wraps   for this run only, over what\n"
+               "                                 Xag-Config.toml decided\n\n"
                "Nothing else is built yet.\n";
+}
+
+// What this project decided, once. Only the settings that change what a program
+// answers are read here, because those are the ones an engine has to be told
+// about; the rest change what is delivered and belong to whoever delivers it.
+//
+// The file is read where the source is, and then upward, so a project decides
+// for every file under it without any of them saying so.
+xag::Settings settingsFor(const std::string &sourcePath) {
+  xag::Settings settings;
+  std::string directory = sourcePath;
+  const std::size_t slash = directory.find_last_of('/');
+  directory = slash == std::string::npos ? std::string(".") : directory.substr(0, slash);
+
+  for (unsigned up = 0; up < 32; ++up) {
+    std::ifstream in(directory + "/Xag-Config.toml");
+    if (in) {
+      std::string line;
+      while (std::getline(in, line)) {
+        const std::size_t hash = line.find('#');
+        if (hash != std::string::npos)
+          line = line.substr(0, hash);
+        const std::size_t equals = line.find('=');
+        if (equals == std::string::npos)
+          continue;
+        std::string key = line.substr(0, equals);
+        std::string said = line.substr(equals + 1);
+        auto trim = [](std::string &t) {
+          while (!t.empty() && (t.front() == ' ' || t.front() == '\t'))
+            t.erase(t.begin());
+          while (!t.empty() && (t.back() == ' ' || t.back() == '\t' || t.back() == '\r'))
+            t.pop_back();
+          if (t.size() >= 2 && t.front() == '"' && t.back() == '"')
+            t = t.substr(1, t.size() - 2);
+        };
+        trim(key);
+        trim(said);
+        if (key == "out-of-range")
+          settings.wrapsOutOfRange = said == "wraps";
+      }
+      return settings;
+    }
+    if (directory == "/" || directory == ".")
+      break;
+    const std::size_t upward = directory.find_last_of('/');
+    directory = upward == std::string::npos ? std::string(".") : directory.substr(0, upward);
+    if (directory.empty())
+      directory = "/";
+  }
+  return settings;
+}
+
+// A setting said on the command line is said about this run only, and wins.
+xag::Settings *asked = nullptr;
+
+xag::Settings settingsUsed(const std::string &path) {
+  return asked ? *asked : settingsFor(path);
 }
 
 bool readSource(const std::string &path, std::string &text) {
@@ -127,7 +186,7 @@ int runFile(const std::string &path) {
   if (!owned.ok())
     return report(source, owned.diagnostics);
 
-  xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::MirResult built = xag::build(source, parsed.program, checked, settingsUsed(path));
   if (!built.ok())
     return report(source, built.diagnostics);
   xag::elaborate(built.mir);
@@ -181,7 +240,7 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
     status = report(source, owned.diagnostics);
     return false;
   }
-  built = xag::build(source, parsed.program, checked);
+  built = xag::build(source, parsed.program, checked, settingsUsed(path));
   if (!built.ok()) {
     status = report(source, built.diagnostics);
     return false;
@@ -260,7 +319,7 @@ int mirFile(const std::string &path) {
   if (!owned.ok())
     return report(source, owned.diagnostics);
 
-  xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::MirResult built = xag::build(source, parsed.program, checked, settingsUsed(path));
   xag::elaborate(built.mir);
   if (built.ok())
     xag::print(built.mir, std::cout);
@@ -290,6 +349,24 @@ int llvmSmoke() {
 } // namespace
 
 int main(int argc, char **argv) {
+  // A setting given here is about this run and nothing else, which is what the
+  // oracle needs: both values of a knob are separate languages, and it has to
+  // be able to ask for either without editing the project's mind.
+  xag::Settings overridden;
+  std::vector<char *> args(argv, argv + argc);
+  for (unsigned i = 1; i < args.size();) {
+    const std::string one = args[i];
+    if (one.rfind("--out-of-range=", 0) == 0) {
+      overridden.wrapsOutOfRange = one.substr(15) == "wraps";
+      asked = &overridden;
+      args.erase(args.begin() + i);
+      continue;
+    }
+    ++i;
+  }
+  argv = args.data();
+  argc = static_cast<int>(args.size());
+
   const std::string command = argc > 1 ? argv[1] : "--help";
 
   if (command == "lex" && argc > 2)

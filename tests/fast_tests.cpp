@@ -154,12 +154,34 @@ void onCallsAndBorrows() {
         "START { print.stdout['GREETING' str:*!* \\n]; }\n");
 }
 
+void onHoldingSeveralValues() {
+  AGREE("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
+        "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[ref 'xs']) \\n]; }\n");
+  AGREE("START { var.mut.many.int64 'xs' = [fill[*3*, *5*]];\n"
+        "  set 'xs'[*4*] = [*9*];\n"
+        "  loop.range.int64 'i' = [*0*, *4*] { print.stdout['xs'['i'] \\n]; } }\n");
+  AGREE("START { var.mut.many.str 'ws' = [*one* *two* *three*];\n"
+        "  set 'ws'[*1*] = [*TWO*];\n"
+        "  loop.range.int64 'i' = [*0*, (count[ref 'ws'] - *1*)] {\n"
+        "    print.stdout['ws'['i'] str:* * (count['ws'['i']]) \\n]; } }\n");
+  AGREE("fn.int64 total [ref.many.int64 'xs'] {\n"
+        "  var.mut.int64 't' = [*0*];\n"
+        "  loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {\n"
+        "    set 't' = ['t' + 'xs'['i']]; }\n"
+        "  give ['t']; }\n"
+        "START { var.many.int64 'xs' = [*1* *2* *3* *4*];\n"
+        "  print.stdout[total[ref 'xs'] \\n]; }\n");
+  AGREE("START { var.many.int64 'none' = [];\n"
+        "  print.stdout[(count[ref 'none']) \\n]; }\n");
+}
+
 } // namespace
 
 int main() {
   onTheOrdinaryThings();
   onEverySizeAndFamily();
   onCallsAndBorrows();
+  onHoldingSeveralValues();
 
   if (failures == 0)
     std::cout << "the two interpreters agree everywhere asked\n";

@@ -300,6 +300,59 @@ void decimalCountsInTens() {
     }
 }
 
+void aPlaceIsFoundOrItStops() {
+  // Only the answers that come back are checked here. The ones that stop are
+  // checked where a program can be run and its exit read, because stopping is
+  // the whole process and not a value.
+  for (int64_t i = 0; i < 4; ++i)
+    CHECK(xag_many_place(i, 4, 0) == static_cast<uint64_t>(i));
+
+  // Around, in the direction that makes `*-1*` the last place.
+  CHECK(xag_many_place(-1, 4, 1) == 3);
+  CHECK(xag_many_place(-4, 4, 1) == 0);
+  CHECK(xag_many_place(-5, 4, 1) == 3);
+  CHECK(xag_many_place(4, 4, 1) == 0);
+  CHECK(xag_many_place(9, 4, 1) == 1);
+}
+
+void aManyTakesAndGivesBackItsPlaces() {
+  const int64_t before = xag_live_allocations();
+  XagMany m{nullptr, 0};
+  xag_many_new(&m, 4, sizeof(int64_t));
+  CHECK(m.length == 4);
+  CHECK(m.places != nullptr);
+  // Every place arrives as a zero, because a `many` that has been made holds a
+  // value everywhere.
+  for (unsigned i = 0; i < 4; ++i)
+    CHECK(static_cast<int64_t *>(m.places)[i] == 0);
+
+  const int64_t one = 7;
+  xag_many_fill(&m, sizeof(int64_t), &one);
+  for (unsigned i = 0; i < 4; ++i)
+    CHECK(static_cast<int64_t *>(m.places)[i] == 7);
+  xag_many_drop(&m);
+  CHECK(m.places == nullptr);
+  CHECK(m.length == 0);
+
+  // Holding nothing takes nothing, and gives nothing back.
+  XagMany empty{nullptr, 0};
+  xag_many_new(&empty, 0, sizeof(int64_t));
+  CHECK(empty.places == nullptr);
+  xag_many_drop(&empty);
+  CHECK(xag_live_allocations() == before);
+}
+
+void aManyOfTextEndsWhatEachPlaceHolds() {
+  const int64_t before = xag_live_allocations();
+  XagMany m{nullptr, 0};
+  xag_many_new(&m, 3, sizeof(XagStr));
+  XagStr *held = static_cast<XagStr *>(m.places);
+  for (unsigned i = 0; i < 3; ++i)
+    xag_str_from(&held[i], "café", 5);
+  xag_many_drop_str(&m);
+  CHECK(xag_live_allocations() == before);
+}
+
 void nothingIsLeftHolding() {
   CHECK(xag_balance_is_clear() == 1);
 }
@@ -316,6 +369,9 @@ int main() {
   decimalCountsInTens();
   arithmeticIsWrittenOnce();
   everySizeIsTheSizeItSays();
+  aPlaceIsFoundOrItStops();
+  aManyTakesAndGivesBackItsPlaces();
+  aManyOfTextEndsWhatEachPlaceHolds();
   nothingIsLeftHolding();
 
   if (failures == 0)

@@ -72,6 +72,10 @@ struct Var {
     name: String,
     ty: Ty,
     mutable: bool,
+    /// How many places it has, when it is a `many` of `ty` rather than one of
+    /// them. A `many` never stands where its element type would, so everything
+    /// that picks a name by type has to look past these.
+    many: Option<u32>,
     moved: bool,
     /// Lent out right now. Nothing may be handed over, changed or lent again
     /// while this is set, which is the whole of what the region pass checks.
@@ -140,7 +144,7 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<&Var> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == ty && !var.moved && !var.lent &&
+                if var.ty == ty && var.many.is_none() && !var.moved && !var.lent &&
                    (!want_mutable || var.mutable) {
                     seen.push(var);
                 }
@@ -148,7 +152,7 @@ impl<'a> Writer<'a> {
         }
         if !want_mutable {
             for var in &self.consts {
-                if var.ty == ty {
+                if var.ty == ty && var.many.is_none() {
                     seen.push(var);
                 }
             }
@@ -175,13 +179,13 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<Ty> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && !var.moved && !var.lent {
+                if Self::numeric(var.ty) && var.many.is_none() && !var.moved && !var.lent {
                     seen.push(var.ty);
                 }
             }
         }
         for var in &self.consts {
-            if Self::numeric(var.ty) {
+            if Self::numeric(var.ty) && var.many.is_none() {
                 seen.push(var.ty);
             }
         }
@@ -234,7 +238,7 @@ impl<'a> Writer<'a> {
             self.out.push_str("' = [");
             self.literal(ty);
             self.out.push_str("];\n");
-            self.consts.push(Var { name, ty, mutable: false, moved: false, lent: false });
+            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false });
         }
         if constants > 0 {
             self.out.push('\n');
@@ -278,7 +282,7 @@ impl<'a> Writer<'a> {
             self.out.push_str(&param);
             self.out.push('\'');
             params.push(ty);
-            self.declare(Var { name: param, ty, mutable: false, moved: false, lent: false });
+            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false });
         }
         self.out.push_str("] {\n");
         self.indent = 1;
@@ -307,7 +311,7 @@ impl<'a> Writer<'a> {
             .last()
             .unwrap()
             .iter()
-            .filter(|v| v.ty == Ty::Str && !v.moved && !v.lent)
+            .filter(|v| v.ty == Ty::Str && v.many.is_none() && !v.moved && !v.lent)
             .map(|v| v.name.clone())
             .collect();
         for name in owned {
@@ -339,13 +343,16 @@ impl<'a> Writer<'a> {
     }
 
     fn statement(&mut self) {
-        match self.rng.below(12) {
+        match self.rng.below(16) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
             5..=6 => self.print(),
             7 => self.branch(),
             8 => self.counted_loop(),
             9..=10 => self.lending(),
+            11..=12 => self.array_declaration(),
+            13 => self.array_set(),
+            14 => self.array_read(),
             _ => self.print(),
         }
     }
@@ -355,7 +362,8 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<String> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == Ty::Str && !var.moved && !var.lent && (!writable || var.mutable) {
+                if var.ty == Ty::Str && var.many.is_none() && !var.moved && !var.lent
+                    && (!writable || var.mutable) {
                     seen.push(var.name.clone());
                 }
             }
@@ -442,6 +450,110 @@ impl<'a> Writer<'a> {
         self.markLent(&borrowed, false);
     }
 
+    /// A `many` that is still whole: nothing moved out of it, nothing lent.
+    fn arrays(&mut self, want_mutable: bool) -> Vec<(String, Ty, u32)> {
+        let mut seen = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if let Some(length) = var.many {
+                    if length > 0 && !var.moved && !var.lent
+                        && (!want_mutable || var.mutable) {
+                        seen.push((var.name.clone(), var.ty, length));
+                    }
+                }
+            }
+        }
+        seen
+    }
+
+    fn pick_array(&mut self, want_mutable: bool) -> Option<(String, Ty, u32)> {
+        let seen = self.arrays(want_mutable);
+        if seen.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        Some(seen[at].clone())
+    }
+
+    /// `var.many.T 'v' = [… … …];`, or the same length asked for at once with
+    /// `fill`, which only a value that copies can answer.
+    fn array_declaration(&mut self) {
+        let ty = match self.rng.below(10) {
+            0..=5 => self.pick_whole(),
+            6..=7 => Ty::Bool,
+            _ => Ty::Str,
+        };
+        let mutable = self.rng.chance(60);
+        let length = self.rng.below(4) + 1;
+        let name = self.fresh();
+        self.pad();
+        self.out.push_str("var.");
+        if mutable {
+            self.out.push_str("mut.");
+        }
+        self.out.push_str("many.");
+        self.out.push_str(ty.written());
+        self.out.push_str(" '");
+        self.out.push_str(&name);
+        self.out.push_str("' = [");
+        if ty != Ty::Str && self.rng.chance(30) {
+            self.out.push_str("fill[");
+            self.expr(ty, 1);
+            self.out.push_str(", *");
+            let mut digits = length.to_string();
+            self.out.push_str(&digits);
+            digits.clear();
+            self.out.push_str("*]");
+        } else {
+            for i in 0..length {
+                if i > 0 {
+                    self.out.push(' ');
+                }
+                // Every item here is a place of its own, so text is written
+                // whole rather than as pieces that would join anywhere else —
+                // and a name would be handed over, which takes a word.
+                self.expr(ty, if ty == Ty::Str { 0 } else { 1 });
+            }
+        }
+        self.out.push_str("];\n");
+        self.declare(Var { name, ty, mutable, many: Some(length), moved: false, lent: false });
+    }
+
+    /// `set 'v'[*i*] = […];` — one place, and the index is written in range so
+    /// that the program runs rather than stopping.
+    fn array_set(&mut self) {
+        let Some((name, ty, length)) = self.pick_array(true) else {
+            self.print();
+            return;
+        };
+        let at = self.rng.below(length);
+        self.pad();
+        self.out.push_str("set '");
+        self.out.push_str(&name);
+        self.out.push_str("'[*");
+        self.out.push_str(&at.to_string());
+        self.out.push_str("*] = [");
+        self.expr(ty, 2);
+        self.out.push_str("];\n");
+    }
+
+    /// Reading one place, and asking how many there are.
+    fn array_read(&mut self) {
+        let Some((name, _ty, length)) = self.pick_array(false) else {
+            self.print();
+            return;
+        };
+        let at = self.rng.below(length);
+        self.pad();
+        self.out.push_str("print.stdout['");
+        self.out.push_str(&name);
+        self.out.push_str("'[*");
+        self.out.push_str(&at.to_string());
+        self.out.push_str("*] str:* of * (count[ref '");
+        self.out.push_str(&name);
+        self.out.push_str("']) \\n];\n");
+    }
+
     fn declaration(&mut self) {
         let ty = match self.rng.below(10) {
             0..=5 => self.pick_whole(),
@@ -461,7 +573,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.expr(ty, 2);
         self.out.push_str("];\n");
-        self.declare(Var { name, ty, mutable, moved: false, lent: false });
+        self.declare(Var { name, ty, mutable, many: None, moved: false, lent: false });
     }
 
     fn assignment(&mut self) {
@@ -469,7 +581,8 @@ impl<'a> Writer<'a> {
         let mut choices: Vec<(String, Ty)> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && var.mutable && !var.moved && !var.lent {
+                if Self::numeric(var.ty) && var.many.is_none() && var.mutable
+                    && !var.moved && !var.lent {
                     choices.push((var.name.clone(), var.ty));
                 }
             }
@@ -566,7 +679,7 @@ impl<'a> Writer<'a> {
         push_number(self.out, last);
         self.out.push_str("*] {\n");
         self.indent += 1;
-        let held = Var { name: counter, ty, mutable: false, moved: false, lent: false };
+        let held = Var { name: counter, ty, mutable: false, many: None, moved: false, lent: false };
         if keeps {
             self.declare(held.clone());
             self.scopes.push(Vec::new());

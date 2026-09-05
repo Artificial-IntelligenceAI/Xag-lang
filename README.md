@@ -54,7 +54,9 @@ native. Two engines can say that something is wrong; three can say which.
 
 All three engines call one runtime, so none of them can disagree about what
 joining or counting means. `Xag-Config.toml` holds what this project has decided
-once for every file in it.
+once for every file in it — including the settings that change what a program
+*answers*, each value of which is a separate language all three engines have to
+agree under. A single run may say otherwise: `xagc --out-of-range=wraps run …`.
 
 ## The oracle
 

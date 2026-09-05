@@ -248,11 +248,24 @@ void aLoopSaysWhichKindItIs() {
   CHECK(inStart("loop.while *false* { }").ok());
 }
 
-void indexingIsRefusedRatherThanIgnored() {
-  // It used to parse, throw the index away, and assign to the whole name.
-  const Parsed p = inStart("var.mut.int64 'xs' = [*1*];\n    set 'xs'[*2*] = [*99*];");
-  CHECK(!p.parsed.ok());
-  CHECK(p.code(0) == "E0208");
+void anElementIsReadAndWritten() {
+  const Parsed r = inStart("print.stdout['xs'[*0*] \\n];");
+  CHECK(r.ok());
+  CHECK(r.has("element of 'xs'"));
+
+  const Parsed w = inStart("set 'xs'[*2*] = [*99*];");
+  CHECK(w.ok());
+  CHECK(w.has("at\n"));
+
+  // A word before `[` is still a call, and a name before one is still not.
+  CHECK(inStart("var.int64 'n' = [sum-to['LIMIT']];").has("call sum-to"));
+}
+
+void manyStandsWithTheType() {
+  CHECK(inStart("var.many.int64 'xs' = [*1* *2*];").ok());
+  CHECK(run("fn.many.int64 f [ref.many.str 'ws'] { give [*1*]; }\n").ok());
+  CHECK(inStart("var.many.many.int64 'g' = [];").code(0) == "E0210");
+  CHECK(inStart("var.many.mut.int64 'xs' = [*1*];").code(0) == "E0209");
 }
 
 void chainsThatWereAlwaysGoodStillAre() {
@@ -286,7 +299,8 @@ int main() {
   aChainHasOneOrder();
   visibilityHasNowhereToGoYet();
   aLoopSaysWhichKindItIs();
-  indexingIsRefusedRatherThanIgnored();
+  anElementIsReadAndWritten();
+  manyStandsWithTheType();
   chainsThatWereAlwaysGoodStillAre();
 
   if (failures == 0)

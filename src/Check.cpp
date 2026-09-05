@@ -40,6 +40,12 @@ const char *name(Type type) {
   return "unknown";
 }
 
+std::string name(Ty type) {
+  if (!type.holds())
+    return name(type.kind);
+  return std::string("many ") + name(type.element);
+}
+
 Type typeNamed(std::string_view word) {
   for (const Named &known : kTypes)
     if (known.word == word)
@@ -107,14 +113,14 @@ bool fitsWithin(std::string_view text, Type type) {
 }
 
 struct Symbol {
-  Type type = Type::Unknown;
+  Ty type;
   bool changeable = false;
   Span span;
 };
 
 struct Signature {
-  std::vector<Type> params;
-  Type result = Type::Nothing;
+  std::vector<Ty> params;
+  Ty result = Type::Nothing;
   bool variadic = false;
   Span span;
 };
@@ -140,7 +146,7 @@ private:
   CheckResult result_;
   std::vector<std::unordered_map<std::string, Symbol>> scopes_;
   std::unordered_map<std::string, Signature> functions_;
-  Type giving_ = Type::Nothing;
+  Ty giving_ = Type::Nothing;
   bool inFunction_ = false;
   unsigned loopDepth_ = 0;
 
@@ -177,7 +183,7 @@ private:
 
   // A type that is named but has nothing behind it yet is said so plainly,
   // rather than being let through to fail somewhere further down.
-  Type typeOfChain(const Chain &chain) {
+  Ty typeOfChain(const Chain &chain) {
     if (chain.segments.empty())
       return Type::Unknown;
     const ChainSegment &last = chain.type();
@@ -187,10 +193,41 @@ private:
       return Type::Unknown;
     }
     const Type type = typeNamed(last.text);
-    if (type == Type::Unknown)
+    if (type == Type::Unknown) {
       complain(last.span, "E0503", "`" + last.text + "` is not a type.",
                {"a size is always written, and only sizes the standard defines"});
+      return Type::Unknown;
+    }
+    // `many` stands with the type and says the name holds several of it. The
+    // parser has already refused a second level, so one step back is all there is.
+    const std::size_t n = chain.segments.size();
+    if (n >= 2 && !chain.segments[n - 2].isName && chain.segments[n - 2].text == "many") {
+      if (type == Type::Nothing) {
+        complain(chain.segments[n - 2].span, "E0503",
+                 "there is no holding several of `nothing`.",
+                 {"`nothing` is an answer, and not a value to keep"});
+        return Type::Unknown;
+      }
+      return many(type);
+    }
     return type;
+  }
+
+  // An expression whose type is its own, whatever was expected of it. It is
+  // what lets `give ['xs']` hand an array over while `[*1* *2*]` builds one:
+  // the item says which it is, rather than where it sits.
+  static bool selfTyped(const Expr &e) {
+    switch (e.kind) {
+    case ExprKind::Name:
+    case ExprKind::Borrow:
+    case ExprKind::Call:
+    case ExprKind::Index:
+      return true;
+    case ExprKind::Group:
+      return !e.children.empty() && selfTyped(*e.children[0]);
+    default:
+      return false;
+    }
   }
 
   // `mut` on what a name owns, `refmut` on what it borrows. `ref` lends without
@@ -244,13 +281,13 @@ private:
 
   // ---- expressions
 
-  Type expr(const Expr &e, Type expected) {
-    const Type got = exprKind(e, expected);
+  Ty expr(const Expr &e, Ty expected) {
+    const Ty got = exprKind(e, expected);
     result_.expressions[&e] = got;
     return got;
   }
 
-  Type exprKind(const Expr &e, Type expected) {
+  Ty exprKind(const Expr &e, Ty expected) {
     switch (e.kind) {
     case ExprKind::Name: {
       const Symbol *symbol = lookup(e.text);
@@ -299,7 +336,7 @@ private:
         if (!looksLikeWholeNumber(e.text))
           complain(e.span, "E0509", "`*" + e.text + "*` is not a whole number.",
                    {"a written value has to be one of the things its type holds"});
-        else if (!fitsWithin(e.text, expected))
+        else if (!fitsWithin(e.text, expected.kind))
           complain(e.span, "E0509",
                    "`*" + e.text + "*` does not fit in a `" + name(expected) + "`.",
                    {"a written value has to be one of the things its type holds"},
@@ -315,7 +352,7 @@ private:
       return Type::Str;
 
     case ExprKind::Typed: {
-      const Type stated = typeNamed(e.text);
+      const Ty stated = typeNamed(e.text);
       if (stated == Type::Unknown) {
         complain(e.span, "E0503", "`" + e.text + "` is not a type.",
                  {"a size is always written, and only sizes the standard defines"});
@@ -335,7 +372,7 @@ private:
       return e.children.empty() ? Type::Unknown : expr(*e.children[0], expected);
 
     case ExprKind::Unary: {
-      const Type inner = e.children.empty() ? Type::Unknown : expr(*e.children[0], Type::Bool);
+      const Ty inner = e.children.empty() ? Ty{} : expr(*e.children[0], Type::Bool);
       if (inner != Type::Unknown && inner != Type::Bool)
         complain(e.span, "E0506", "`not` asks about a `bool`, and this is a `" +
                                       std::string(name(inner)) + "`.",
@@ -346,13 +383,47 @@ private:
     case ExprKind::Binary:
       return binary(e, expected);
 
+    case ExprKind::Index:
+      return element(e);
+
     case ExprKind::Call:
-      return call(e);
+      return call(e, expected);
     }
     return Type::Unknown;
   }
 
-  Type binary(const Expr &e, Type expected) {
+  // `'xs'[*2*]` — the place a value sits, and the type of what sits there.
+  Ty element(const Expr &e) {
+    if (!e.children.empty())
+      expr(*e.children[0], Type::Int64);
+    const Symbol *symbol = lookup(e.text);
+    if (!symbol) {
+      complain(e.span, "E0501", "`'" + e.text + "'` is not declared.",
+               {"a name means something only after a declaration says what it means"});
+      return Type::Unknown;
+    }
+    if (!symbol->type.holds()) {
+      if (symbol->type.kind == Type::Unknown)
+        return Type::Unknown;
+      complain(e.span, "E0514",
+               "`'" + e.text + "'` is a `" + name(symbol->type) +
+                   "`, and holds one value rather than several.",
+               {"an element is one of the values a `many` holds"},
+               {"a name holding one value is that value, and there is no first of it."});
+      return Type::Unknown;
+    }
+    if (!e.children.empty()) {
+      const Ty where = result_.of(e.children[0].get());
+      if (where != Ty{} && where != Ty{Type::Int64})
+        complain(e.children[0]->span, "E0506",
+                 "an index is an `int64`, and this is a `" + name(where) + "`.",
+                 {"nothing converts on its own"},
+                 {"`count` answers an `int64`, and two sizes never meet on their own."});
+    }
+    return Ty{symbol->type.element};
+  }
+
+  Ty binary(const Expr &e, Ty expected) {
     const std::string &op = e.text;
     const bool comparing = op == "<" || op == ">" || op == "<==" || op == ">==" ||
                            op == "==" || op == "!==";
@@ -361,11 +432,11 @@ private:
     // Arithmetic answers with what it was given, so the type wanted here is the
     // type wanted of it — and the right side takes whatever the left turned out
     // to be, which is how a written value in a sum gets a size at all.
-    const Type asked = logical ? Type::Bool
+    const Ty asked = logical ? Type::Bool
                                : (comparing ? Type::Unknown
                                             : (isNumber(expected) ? expected : Type::Unknown));
-    const Type left = expr(*e.children[0], asked);
-    const Type right =
+    const Ty left = expr(*e.children[0], asked);
+    const Ty right =
         expr(*e.children[1], comparing || (!logical && asked == Type::Unknown) ? left : asked);
 
     if (comparing) {
@@ -379,7 +450,7 @@ private:
     }
 
     if (logical) {
-      for (Type side : {left, right})
+      for (Ty side : {left, right})
         if (side != Type::Unknown && side != Type::Bool)
           complain(e.span, "E0506",
                    "`" + op + "` asks about a `bool`, and this is a `" +
@@ -388,8 +459,8 @@ private:
       return Type::Bool;
     }
 
-    const Type answered = isNumber(left) ? left : right;
-    for (Type side : {left, right}) {
+    const Ty answered = isNumber(left) ? left : right;
+    for (Ty side : {left, right}) {
       if (side == Type::Unknown)
         continue;
       if (!isNumber(side))
@@ -408,8 +479,54 @@ private:
     return answered == Type::Unknown ? Type::Unknown : answered;
   }
 
-  Type call(const Expr &e) {
+  Ty call(const Expr &e, Ty expected) {
     const std::string path = joined(e.path);
+
+    // `count` asks how many, of a `str` and of a `many` alike: the same
+    // question, and the type already says what is being counted.
+    if (path == "count" && e.args.values.size() == 1) {
+      const Ty got = value(e.args.values[0], Ty{});
+      if (got != Ty{} && got.kind != Type::Str && !got.holds())
+        complain(e.args.values[0].span, "E0506",
+                 "`count` counts a `str` or a `many`, and this is a `" + name(got) + "`.",
+                 {"nothing converts on its own"});
+      return Type::Int64;
+    }
+
+    // `fill` writes one value into every place, so it needs a value that can be
+    // copied — there is no copying a `str`, and nothing to put in each place.
+    if (path == "fill") {
+      if (!expected.holds()) {
+        complain(e.span, "E0507", "nothing here says what `fill` is filling.",
+                 {"a written value takes its type from the chain, from the parameter "
+                  "it is passed to, or from itself"},
+                 {"`fill` answers a `many`, and which `many` is a question the chain "
+                  "beside it has already answered everywhere it is allowed to stand."});
+        for (const Value &v : e.args.values)
+          (void)value(v, Ty{});
+        return Type::Unknown;
+      }
+      const Ty holds{expected.element};
+      if (e.args.values.size() != 2)
+        complain(e.span, "E0505",
+                 "`fill` is given " + std::to_string(e.args.values.size()) +
+                     " and wants 2.",
+                 {"a call gives a function what its parameters ask for"},
+                 {"one value to put everywhere, and how many places to put it in."});
+      if (!isNumber(holds) && holds.kind != Type::Bool)
+        complain(e.span, "E0515",
+                 "`fill` puts the same value in every place, and a `" + name(holds) +
+                     "` cannot be in two places.",
+                 {"a value that does not copy has one owner"},
+                 {"a number or a `bool` is handed over by being copied; text is not, "
+                  "so there is nothing to put in the second place."});
+      if (!e.args.values.empty())
+        (void)value(e.args.values[0], holds);
+      if (e.args.values.size() > 1)
+        (void)value(e.args.values[1], Type::Int64);
+      return expected;
+    }
+
     auto found = functions_.find(path);
     if (found == functions_.end()) {
       complain(e.span, "E0504", "`" + path + "` is not a function.",
@@ -424,9 +541,16 @@ private:
     const Signature &signature = found->second;
     if (signature.variadic) {
       // A print states no parameter types, so each value must say what it is.
-      for (const Value &value : e.args.values)
-        for (const ExprPtr &item : value.items)
-          expr(*item, Type::Unknown);
+      for (const Value &v : e.args.values)
+        for (const ExprPtr &item : v.items) {
+          const Ty got = expr(*item, Ty{});
+          if (got.holds())
+            complain(item->span, "E0516",
+                     "a `" + name(got) + "` holds several values, and this shows one thing.",
+                     {"showing writes one piece after another"},
+                     {"what would stand between two of them is a decision nobody has "
+                      "made, so nothing here makes it for you."});
+        }
       return signature.result;
     }
 
@@ -437,8 +561,8 @@ private:
                {"a call gives a function what its parameters ask for"});
     }
     for (unsigned i = 0; i < e.args.values.size(); ++i) {
-      const Type want = i < signature.params.size() ? signature.params[i] : Type::Unknown;
-      const Type got = value(e.args.values[i], want);
+      const Ty want = i < signature.params.size() ? signature.params[i] : Ty{};
+      const Ty got = value(e.args.values[i], want);
       if (want != Type::Unknown && got != Type::Unknown && got != want)
         complain(e.args.values[i].span, "E0506",
                  "this is a `" + std::string(name(got)) + "` and `" + path + "` wants a `" +
@@ -451,14 +575,16 @@ private:
   // A value is one item, or several joined. Joining builds text, so joined items
   // are text — except in a print, which writes them one after another and builds
   // nothing.
-  Type value(const Value &v, Type expected) {
+  Ty value(const Value &v, Ty expected) {
+    if (expected.holds())
+      return collected(v, expected);
     if (v.items.empty())
       return Type::Unknown;
     if (v.items.size() == 1)
       return expr(*v.items[0], expected);
 
     for (const ExprPtr &item : v.items) {
-      const Type got = expr(*item, Type::Str);
+      const Ty got = expr(*item, Type::Str);
       if (got != Type::Unknown && got != Type::Str)
         complain(item->span, "E0506",
                  "this is a `" + std::string(name(got)) + "`, and text is made of text.",
@@ -469,7 +595,37 @@ private:
     return Type::Str;
   }
 
-  Type onlyValue(const ValueList &list, Type expected) {
+  // Items side by side under a `many`: kept as several rather than joined into
+  // one. Which of the two happens is the type's answer, and the only one it
+  // gives — a lone item that is already the whole array is the whole array,
+  // because with one level of `many` nothing can be read both ways.
+  Ty collected(const Value &v, Ty want) {
+    const Ty holds{want.element};
+    if (v.items.empty())
+      return want;
+    if (v.items.size() == 1 && selfTyped(*v.items[0])) {
+      const Ty got = expr(*v.items[0], want);
+      if (got == want || got == Ty{})
+        return want;
+      if (got != holds)
+        complain(v.items[0]->span, "E0506",
+                 "this is a `" + name(got) + "`, and a `" + name(want) + "` holds `" +
+                     name(holds) + "`.",
+                 {"nothing converts on its own"});
+      return want;
+    }
+    for (const ExprPtr &item : v.items) {
+      const Ty got = expr(*item, holds);
+      if (got != Ty{} && got != holds)
+        complain(item->span, "E0506",
+                 "this is a `" + name(got) + "`, and a `" + name(want) + "` holds `" +
+                     name(holds) + "`.",
+                 {"nothing converts on its own"});
+    }
+    return want;
+  }
+
+  Ty onlyValue(const ValueList &list, Ty expected) {
     if (list.values.empty())
       return Type::Unknown;
     return value(list.values[0], expected);
@@ -487,7 +643,7 @@ private:
   void statement(const Stmt &s) {
     switch (s.kind) {
     case StmtKind::Declare: {
-      const Type type = typeOfChain(s.chain);
+      const Ty type = typeOfChain(s.chain);
       result_.declarations[&s] = type;
       onlyValueChecked(s.value, type, s.span);
       declare(s.name, Symbol{type, changeable(s.chain), s.nameSpan});
@@ -507,14 +663,33 @@ private:
                  {"a name holds what it was given unless its chain said `mut`"},
                  {"a bare chain is the safest chain, and not changing is the safest "
                   "thing a name can do."});
-      onlyValueChecked(s.value, symbol->type, s.span);
+      Ty want = symbol->type;
+      if (s.index) {
+        const Ty at = expr(*s.index, Type::Int64);
+        if (at != Ty{} && at != Ty{Type::Int64})
+          complain(s.index->span, "E0506",
+                   "an index is an `int64`, and this is a `" + name(at) + "`.",
+                   {"nothing converts on its own"},
+                   {"`count` answers an `int64`, and two sizes never meet on their own."});
+        if (!symbol->type.holds() && symbol->type.kind != Type::Unknown) {
+          complain(s.nameSpan, "E0514",
+                   "`'" + s.name + "'` is a `" + name(symbol->type) +
+                       "`, and holds one value rather than several.",
+                   {"an element is one of the values a `many` holds"},
+                   {"a name holding one value is that value, and there is no first of it."});
+          want = Type::Unknown;
+        } else {
+          want = Ty{symbol->type.element};
+        }
+      }
+      onlyValueChecked(s.value, want, s.span);
       break;
     }
 
     case StmtKind::If:
       for (const Branch &branch : s.branches) {
         if (branch.condition) {
-          const Type type = expr(*branch.condition, Type::Bool);
+          const Ty type = expr(*branch.condition, Type::Bool);
           if (type != Type::Unknown && type != Type::Bool)
             complain(branch.condition->span, "E0506",
                      "an `if` asks a `bool`, and this is a `" + std::string(name(type)) + "`.",
@@ -525,7 +700,7 @@ private:
       break;
 
     case StmtKind::LoopRange: {
-      const Type type = typeOfChain(s.chain);
+      const Ty type = typeOfChain(s.chain);
       result_.declarations[&s] = type;
       if (s.value.values.size() != 2)
         complain(s.value.span, "E0505", "a counted loop runs between two values.",
@@ -548,7 +723,7 @@ private:
 
     case StmtKind::LoopWhile: {
       if (s.condition) {
-        const Type type = expr(*s.condition, Type::Bool);
+        const Ty type = expr(*s.condition, Type::Bool);
         if (type != Type::Unknown && type != Type::Bool)
           complain(s.condition->span, "E0506",
                    "a `loop.while` asks a `bool`, and this is a `" +
@@ -591,13 +766,20 @@ private:
     }
   }
 
-  void onlyValueChecked(const ValueList &list, Type want, Span where) {
-    if (list.values.empty())
+  void onlyValueChecked(const ValueList &list, Ty want, Span where) {
+    if (list.values.empty()) {
+      if (!want.holds() && want.kind != Type::Unknown)
+        complain(list.span.begin ? list.span : where, "E0517",
+                 "there is no value here, and a `" + name(want) + "` was wanted.",
+                 {"a name holds what it was given"},
+                 {"a `many` may hold nothing, because holding nothing is a length; "
+                  "one value is not a length, and has to be there."});
       return;
+    }
     if (list.values.size() > 1)
       complain(list.span, "E0505", "one name takes one value.",
                {"a comma separates values, and there is one name here"});
-    const Type got = value(list.values[0], want);
+    const Ty got = value(list.values[0], want);
     if (want != Type::Unknown && got != Type::Unknown && got != want)
       complain(list.values[0].span.begin ? list.values[0].span : where, "E0506",
                "this is a `" + std::string(name(got)) + "` and a `" + std::string(name(want)) +

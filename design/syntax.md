@@ -390,13 +390,16 @@ A chain is a run of answers to questions, and both which questions get asked and
 the order they come in depend on what is being declared:
 
 ```
-var    . [mut] . [ref|refmut]              . type
-fn     . [ref|refmut] . ['loan']           . type
-const                                      . type
-loop   . [perm] . range                    . type
+var    . [mut] . [ref|refmut]              . [many] . type
+fn     . [ref|refmut] . ['loan']           . [many] . type
+const                                      . [many] . type
+loop   . [perm] . range                    .          type
 loop   . while
-param    [mut] . [ref|refmut] . ['loan']   . type
+param    [mut] . [ref|refmut] . ['loan']   . [many] . type
 ```
+
+`many` is not one of the questions: it stands with the type, because it says
+what the type is rather than something about the name holding it.
 
 A word outside that list answers nothing, and is refused where it stands rather
 than passed over on the way to the type:
@@ -434,6 +437,134 @@ them (`E0207`).
 A diagnostic says what happened, points at it, names the rule, and explains why
 the rule exists. It does not say what to type instead — the reader knows their
 intent and the compiler does not.
+
+## Holding more than one value
+
+A `many` holds a fixed number of values of one type. Its length is settled when
+it is made and never changes after; growing is a different type, and does not
+exist yet.
+
+```
+var.many.int64 'xs' = [*1* *2* *3*];
+```
+
+### The type is a chain segment
+
+`many` sits where a chain says what is unusual, and it is unusual: it says the
+name holds several of something rather than one. Everything else about a chain
+is unchanged, so it works wherever a type does.
+
+```
+var.many.int64 'xs'                     # a name
+fn.many.int64 first-few [int64 'n']     # an answer
+fn.int64 total [ref.many.int64 'xs']    # a parameter, borrowed
+```
+
+`many.many.int64` is refused for now (`E0210`). One `many` is one level, and
+the second level is a real feature rather than something to half-support.
+
+### Making one needs no new notation
+
+A value is already a list of items sitting next to each other and used in order.
+The type says what "used in order" means, and that is the only difference:
+
+```
+var.str 's' = [*a* *b*];                # two items, joined into one
+var.many.int64 'xs' = [*1* *2* *3*];    # three items, kept as three
+var.many.str 'words' = [*one* *two*];   # two items, kept as two
+var.many.int64 'none' = [];             # no items
+```
+
+A length that is not known until the program runs is `fill`:
+
+```
+var.many.int64 'zeroes' = [fill[*0*, 'n']];
+```
+
+`fill` writes one value into every place, so it asks for a value that can be
+copied — a number or a `bool`. There is no copying a `str` in Xag, so there is
+nothing for `fill` to put in each place, and it says so (`E0515`).
+
+### An element is reached with the name's own brackets
+
+```
+print.stdout['xs'[*0*] \n];
+set 'xs'[*2*] = [*99*];
+var.int64 'n' = [count['xs']];
+```
+
+A bare *word* followed by `[` is a call; a *name* followed by `[` is an element,
+and the two can never be read for each other because marks say which is which
+before the bracket is reached.
+
+`count` answers how many, for a `str` and for a `many` alike — it is the same
+question, and the type already says what is being counted. Asking a name that
+holds one value for its first is `E0514`: a name holding one value **is** that
+value, and there is no first of it.
+
+An index is an `int64`, because that is what `count` answers with and two sizes
+never meet on their own. A negative index is simply out of range.
+
+### An element is a place, not a value
+
+`'xs'[*2*]` says *where* a value is, and what happens there depends on what is
+asked of it:
+
+```
+print.stdout['xs'[*0*] \n];        # read it, and leave it where it is
+set 'xs'[*0*] = [*99*];            # write it, ending what was there
+size[ref 'xs'[*0*]];               # lend it
+move 'xs'[*0*]                     # refused — E0412
+```
+
+Taking a value out would leave a hole in the middle of the array, and nothing
+in Xag holds a hole. So a `many.str` is read, written and lent, and never
+taken apart.
+
+A loan of an element is **a loan of the whole array**. Which element `'xs'['i']`
+names is not known until the program runs, so no loan can be narrower than the
+thing the index is read out of. That means lending one element and handing the
+array over is `E0408` exactly as lending the array itself would be, and writing
+one place of a lent array is `E0409` — the same rules, read the same way, with
+nothing new to learn.
+
+### Out of range
+
+Reaching past the end changes what a program answers, so it is a setting, and
+both values are real languages every engine has to agree under:
+
+```toml
+out-of-range = "stops"   # or "wraps"
+```
+
+`stops` says which index, how long the array was, and where, and stops there in
+every engine. `wraps` takes the index around the length, so `*-1*` is the last
+place and nothing ever stops.
+
+An empty `many` stops under both, because wrapping needs somewhere to land and
+there is nowhere.
+
+### What it costs
+
+The rule lives in the runtime and every engine asks it, but native code writes
+the half of it that says *yes* as a compare and a branch, because a call the
+optimiser cannot see into is a call it cannot remove — and this one sits in the
+middle of every loop over a `many`.
+
+What that buys, in a loop counting to `count['xs']`, is that LLVM proves the
+index always fits and lifts the check out of the loop entirely. This is the
+whole body of `total` at `-O3`:
+
+```llvm
+%1 = getelementptr [8 x i8], ptr %places, i64 %i
+%2 = load i64, ptr %1, align 8
+%3 = add i64 %2, %sum
+%4 = add nuw i64 %i, 1
+%5 = icmp sgt i64 %4, %last
+```
+
+A load, an add, an increment and the loop's own test. Nothing of the check is
+left in it.
 
 ## Ownership
 
@@ -591,8 +722,13 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 - **Turning a number into text.** Pieces side by side join, and nothing converts on
   its own, so something has to do it and be named.
-- **Holding more than one value.** There are no arrays, so there is nothing to
-  index, and `set 'xs'[*2*] = […]` is refused (`E0208`). Doing it properly needs
-  places with parts in the middle layer — which is what an element borrow and a
-  partial move would be written against anyway.
+- **A `many` that grows.** `many` is a fixed length, settled when it is made.
+  Growing is a second type rather than a mode of this one, because growing may
+  move what is held and a loan of it would then point at nowhere — a rule
+  Regions would have to learn, and the first place ownership here stops being a
+  demonstration.
+- **A `many` of a `many`.** One level, and `E0210` says so. A second is where a
+  type stops fitting in a pair of words and wants a table of its own.
+- **Showing a `many`.** What stands between two of them is a decision nobody has
+  made, so `E0516` refuses rather than choosing.
 - **Visibility.** `export` and `program` wait on there being more than one file.

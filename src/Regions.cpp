@@ -93,6 +93,10 @@ private:
 
   // What a statement leaves each local holding.
   void step(const Statement &s, Holds &holds) const {
+    // Writing one place changes what the `many` holds, not what the name does,
+    // so nothing about which loans it carries is different afterwards.
+    if (s.kind == StatementKind::Store)
+      return;
     if (s.kind == StatementKind::Drop) {
       std::fill(holds[s.place].begin(), holds[s.place].end(), 0);
       return;
@@ -266,9 +270,12 @@ private:
                  {"a borrow never outlasts what it borrows from"}, "ends here",
                  {Note{loan.span, "and lent here, still in use after this"}});
 
-      // Writing to it directly, going round the loan rather than through it.
-      if (s.kind == StatementKind::Assign && s.place == loan.referent &&
-          s.value.kind != RValueKind::Ref)
+      // Writing to it directly, going round the loan rather than through it —
+      // whether that is the whole of it or one of the places it holds, because
+      // a loan of a `many` is a loan of every place in it.
+      if ((s.kind == StatementKind::Store ||
+           (s.kind == StatementKind::Assign && s.value.kind != RValueKind::Ref)) &&
+          s.place == loan.referent)
         complain(s.span, "E0409",
                  nameOf(loan.referent) + " is changed while it is lent.",
                  {"what is lent is written through the loan, or not at all"},

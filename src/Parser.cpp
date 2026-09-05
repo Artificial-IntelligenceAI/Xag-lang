@@ -220,9 +220,22 @@ private:
   void validate(const Chain &c, const Role &role) {
     const std::size_t last = c.segments.size();
     // The type is the segment nearest the name, and whether it is a type is a
-    // question for the checker. Everything before it has to answer something.
-    const std::size_t upTo =
-        role.endsInType ? (last > 0 ? last - 1 : 0) : last;
+    // question for the checker. `many` belongs to the type rather than to the
+    // chain — it says the name holds several of what comes after it — so the
+    // run of `many`s in front of the type is part of the type region too.
+    std::size_t upTo = role.endsInType ? (last > 0 ? last - 1 : 0) : last;
+    std::size_t deep = 0;
+    while (upTo > 0 && !c.segments[upTo - 1].isName &&
+           c.segments[upTo - 1].text == "many") {
+      --upTo;
+      ++deep;
+    }
+    if (deep > 1)
+      complain(Span{c.segments[upTo].span.begin, c.segments[upTo + deep - 1].span.end},
+               "E0210", "a `many` holds values, and not more `many`s.",
+               {"a `many` is one level deep"},
+               {"a second level is a real thing to build rather than something to "
+                "half-support, and it is not built yet."});
 
     int furthest = -1;               // the last place filled, so order can be read
     Span seen[8];                    // where each slot was answered
@@ -242,6 +255,14 @@ private:
                  {"each kind of chain asks its own questions"},
                  {"a chain opens with the one word saying what is being declared, "
                   "and says it once."});
+        continue;
+      }
+
+      if (!seg.isName && seg.text == "many") {
+        complain(seg.span, "E0209", "`many` says what the type holds, and stands with it.",
+                 {"the segment nearest the name is the type"},
+                 {"`var.many.int64` is many `int64`; nothing further along the chain "
+                  "is a type for it to hold."});
         continue;
       }
 
@@ -368,9 +389,22 @@ private:
   ExprPtr primary() {
     const Token &token = peek();
     switch (token.kind) {
-    case TokenKind::Name:
+    case TokenKind::Name: {
       advance();
+      // A bare word followed by `[` is a call; a name followed by one is an
+      // element of what the name holds. The marks say which before the bracket
+      // is reached, so the two can never be read for each other.
+      if (check(TokenKind::LBracket)) {
+        advance();
+        ExprPtr where = item();
+        Span span{token.span.begin, peek().span.end};
+        expect(TokenKind::RBracket, "`]`");
+        auto at = make(ExprKind::Index, span, token.text);
+        at->children.push_back(std::move(where));
+        return at;
+      }
       return make(ExprKind::Name, token.span, token.text);
+    }
     case TokenKind::Written:
       advance();
       return make(ExprKind::Written, token.span, token.text);
@@ -637,18 +671,10 @@ private:
                  std::string("found ") + describe(peek().kind));
       }
       if (check(TokenKind::LBracket) && peek(1).kind != TokenKind::RBracket) {
-        // `set 'xs'[*2*] = …` — an index, and nothing yet holds more than one
-        // value to take one out of. It is read and refused rather than left to
-        // be understood as something else further down.
-        const Span open = peek().span;
+        // `set 'xs'[*2*] = …` — which place is written, rather than the value.
         advance();
-        (void)item();
+        s->index = item();
         expect(TokenKind::RBracket, "`]`");
-        complain(Span{open.begin, previous().span.end}, "E0208",
-                 "there is nothing here to pick a value out of.",
-                 {"a name holds one value"},
-                 {"nothing in Xag holds several values yet, so no name has a second "
-                  "one to reach past the first."});
       }
       expect(TokenKind::Equals, "`=`");
       s->value = valueList();

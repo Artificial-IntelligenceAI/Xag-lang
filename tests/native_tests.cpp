@@ -95,6 +95,20 @@ void itGuardsAConditionalDrop() {
         "xag_str_drop");
 }
 
+void itEmitsAMany() {
+  // The check is written out rather than called, so what a reach past the end
+  // reaches is the half that stops — and only that half.
+  EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+        "  print.stdout['xs'[*0*] \\n]; }\n", "call void @xag_many_out_of_range");
+  EMITS("START { var.many.int64 'xs' = [*1* *2*];\n"
+        "  print.stdout[(count[ref 'xs']) \\n]; }\n", "xag_many_new");
+  // A `many` of text lets go of what sits in every place, not only the buffer.
+  EMITS("START { var.many.str 'ws' = [*a* *b*];\n"
+        "  print.stdout['ws'[*1*] \\n]; }\n", "xag_many_drop_str");
+  EMITS("START { var.many.int64 'xs' = [fill[*0*, *4*]];\n"
+        "  print.stdout['xs'[*3*] \\n]; }\n", "xag_many_fill");
+}
+
 } // namespace
 
 int main() {
@@ -102,6 +116,7 @@ int main() {
   itEmitsFunctionsAndLoans();
   itEmitsControlFlow();
   itGuardsAConditionalDrop();
+  itEmitsAMany();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";

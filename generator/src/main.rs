@@ -327,7 +327,9 @@ fn read_settings() -> Result<Settings, String> {
     let mut cases = 200u64;
     let mut first_seed = 1u64;
     let mut jobs = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let mut workspace = std::env::temp_dir().join("xag-oracle");
+    // One room per run, not one per machine: two oracles asking at once would
+    // otherwise write each other's cases and report the tear as a finding.
+    let mut workspace = std::env::temp_dir().join(format!("xag-oracle-{}", std::process::id()));
     let mut keep_going = false;
     let mut shrink = true;
     let mut size = 250u32;

@@ -18,7 +18,7 @@ namespace {
 // the same distinction the IR draws between `move` and `copy`, kept honest at
 // run time rather than assumed.
 struct Value {
-  enum class Kind { Nothing, Number, Real, Wide, Deci, Text, Loan } kind = Kind::Nothing;
+  enum class Kind { Nothing, Number, Real, Wide, Deci, Text, Loan, Many } kind = Kind::Nothing;
   XagInt number = 0;
   double real = 0;     // a `bin` up to 64 bits, cut to its width
   XagBin128 wide = 0;  // a `bin128` or a `deci`, as its bits
@@ -26,6 +26,9 @@ struct Value {
   bool owns = false;
   unsigned frame = 0; // Loan: which frame the lent slot lives in
   unsigned slot = 0;  //       and which slot it is
+  // Many: the places, held the same way text is — one owner frees them, and
+  // everything reading them holds a view with no claim.
+  std::vector<Value> *places = nullptr;
 };
 
 struct Frame {
@@ -95,7 +98,40 @@ private:
   void endValue(Value &value) {
     if (value.kind == Value::Kind::Text && value.owns)
       xag_str_drop(&value.text);
+    if (value.kind == Value::Kind::Many && value.owns && value.places) {
+      for (Value &held : *value.places)
+        endValue(held);
+      delete value.places;
+      xag_note_given();
+    }
     value = Value{};
+  }
+
+  // A `many` with a place for every value handed in, owning what sits in them.
+  Value collected(std::vector<Value> held) {
+    Value made;
+    made.kind = Value::Kind::Many;
+    made.places = new std::vector<Value>(std::move(held));
+    made.owns = true;
+    xag_note_taken();
+    return made;
+  }
+
+  // Which place an index names, asked of the runtime so that every engine
+  // answers the same way — including by stopping in the same place.
+  bool placeOf(const Value &array, const Value &index, uint64_t &at) {
+    const uint64_t length = array.places ? array.places->size() : 0;
+    if (length == 0 || (!mir_.settings.wrapsOutOfRange &&
+                        (index.number < 0 ||
+                         static_cast<uint64_t>(index.number) >= length))) {
+      // The runtime says so and stops, which is the whole point of asking it.
+      xag_many_place(static_cast<int64_t>(index.number), length,
+                     mir_.settings.wrapsOutOfRange ? 1 : 0);
+      return false;
+    }
+    at = xag_many_place(static_cast<int64_t>(index.number), length,
+                        mir_.settings.wrapsOutOfRange ? 1 : 0);
+    return true;
   }
 
   void put(unsigned slot, Value value) {
@@ -266,6 +302,52 @@ private:
       return joined;
     }
 
+    case RValueKind::Collect: {
+      std::vector<Value> held;
+      for (const Operand &operand : value.operands) {
+        Value piece = read(operand);
+        // What goes into a place belongs to the array now, and a view of
+        // somebody else's bytes is not a thing to keep.
+        if (piece.kind == Value::Kind::Text && !piece.owns) {
+          XagStr copy{nullptr, 0, 0};
+          xag_str_from(&copy, piece.text.bytes, piece.text.length);
+          piece.text = copy;
+          piece.owns = true;
+        }
+        held.push_back(piece);
+      }
+      return collected(std::move(held));
+    }
+
+    case RValueKind::Fill: {
+      Value what = read(value.operands[0]);
+      Value howMany = read(value.operands[1]);
+      Value *count = behind(howMany);
+      Value *one = behind(what);
+      const long long places = count ? static_cast<long long>(count->number) : 0;
+      std::vector<Value> held;
+      for (long long i = 0; i < places && i < 100000000LL; ++i)
+        held.push_back(one ? viewOf(*one) : Value{});
+      endValue(what);
+      endValue(howMany);
+      return collected(std::move(held));
+    }
+
+    case RValueKind::Element: {
+      Value array = read(value.operands[0]);
+      Value where = read(value.operands[1]);
+      Value *at = behind(array);
+      Value *index = behind(where);
+      Value answer;
+      uint64_t place = 0;
+      if (at && index && at->kind == Value::Kind::Many &&
+          placeOf(*at, *index, place))
+        answer = viewOf((*at->places)[place]);
+      endValue(array);
+      endValue(where);
+      return answer;
+    }
+
     case RValueKind::Call:
       return callByName(value);
     }
@@ -398,6 +480,30 @@ private:
     return answer;
   }
 
+  // `xs[at] = value` — the place keeps what it is given, and what was there
+  // before ends here rather than being left behind.
+  void store(const Statement &s) {
+    Value where = read(s.at);
+    Value produced = evaluate(s.value);
+    Value *array = behind(frames_.back().locals[s.place]);
+    Value *index = behind(where);
+    uint64_t place = 0;
+    if (array && index && array->kind == Value::Kind::Many &&
+        placeOf(*array, *index, place)) {
+      if (produced.kind == Value::Kind::Text && !produced.owns) {
+        XagStr copy{nullptr, 0, 0};
+        xag_str_from(&copy, produced.text.bytes, produced.text.length);
+        produced.text = copy;
+        produced.owns = true;
+      }
+      endValue((*array->places)[place]);
+      (*array->places)[place] = std::move(produced);
+    } else {
+      endValue(produced);
+    }
+    endValue(where);
+  }
+
   Value callByName(const RValue &value) {
     if (value.callee == "print.stdout") {
       for (const Operand &operand : value.operands) {
@@ -428,7 +534,11 @@ private:
       Value *at = behind(piece);
       Value answer;
       answer.kind = Value::Kind::Number;
-      answer.number = at && at->kind == Value::Kind::Text ? xag_str_count(&at->text) : 0;
+      answer.number = !at ? 0
+                      : at->kind == Value::Kind::Text ? xag_str_count(&at->text)
+                      : at->kind == Value::Kind::Many
+                          ? static_cast<XagInt>(at->places ? at->places->size() : 0)
+                          : 0;
       endValue(piece);
       return answer;
     }
@@ -472,6 +582,12 @@ private:
           if (s.conditional && !truthOf(frames_.back().locals[s.flag]))
             continue;
           endValue(frames_.back().locals[s.place]);
+          continue;
+        }
+        if (s.kind == StatementKind::Store) {
+          store(s);
+          if (!trouble_.empty())
+            break;
           continue;
         }
         Value produced = evaluate(s.value);

@@ -228,6 +228,67 @@ void theCounterIsInScopeOnlyInTheLoop() {
             .code(0) == "E0501");
 }
 
+void aManyHoldsSeveralOfOneType() {
+  CHECK(inStart("var.many.int64 'xs' = [*1* *2* *3*];").ok());
+  CHECK(inStart("var.many.str 'ws' = [*a* *b*];").ok());
+  CHECK(inStart("var.many.int64 'none' = [];").ok());
+
+  // Items under a `many` are its places, so each is one of what it holds.
+  CHECK(inStart("var.many.int64 'xs' = [*1* *a*];").code(0) == "E0509");
+  CHECK(inStart("var.many.int64 'xs' = [*1* *true*];").code(0) == "E0509");
+
+  // Holding nothing is a length; one value is not, and has to be there.
+  CHECK(inStart("var.int64 'n' = [];").code(0) == "E0517");
+  CHECK(inStart("var.str 's' = [];").code(0) == "E0517");
+}
+
+void anElementIsOneOfWhatItHolds() {
+  CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
+                "    var.int64 'n' = ['xs'[*0*]];").ok());
+  CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
+                "    var.str 's' = ['xs'[*0*]];").code(0) == "E0506");
+
+  // A name holding one value is that value, and there is no first of it.
+  CHECK(inStart("var.int64 'n' = [*1*];\n"
+                "    print.stdout['n'[*0*] \\n];").code(0) == "E0514");
+  CHECK(inStart("var.mut.int64 'n' = [*1*];\n"
+                "    set 'n'[*0*] = [*2*];").code(0) == "E0514");
+
+  // An index is an `int64`, because that is what `count` answers with.
+  CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
+                "    print.stdout['xs'[int32:*0*] \\n];").code(0) == "E0506");
+}
+
+void countAsksHowManyOfEither() {
+  CHECK(inStart("var.many.int64 'xs' = [*1* *2*];\n"
+                "    print.stdout[(count[ref 'xs']) \\n];").ok());
+  CHECK(inStart("var.str 's' = [*hi*];\n"
+                "    print.stdout[(count[ref 's']) \\n];").ok());
+  CHECK(inStart("var.int64 'n' = [*1*];\n"
+                "    print.stdout[(count['n']) \\n];").code(0) == "E0506");
+}
+
+void fillNeedsAValueThatCopies() {
+  CHECK(inStart("var.many.int64 'xs' = [fill[*0*, *4*]];").ok());
+  CHECK(inStart("var.many.str 'ws' = [fill[*hi*, *4*]];").code(0) == "E0515");
+  // Nothing here says what it is filling.
+  CHECK(inStart("var.int64 'n' = [fill[*0*, *4*]];").code(0) == "E0507");
+}
+
+void showingAManyIsRefused() {
+  CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
+                "    print.stdout['xs' \\n];").code(0) == "E0516");
+}
+
+void aManyTravelsWhole() {
+  // A lone item that is already the array is the array; anything else is one
+  // of its places.
+  CHECK(run("fn.many.int64 f [] {\n"
+            "    var.many.int64 'xs' = [*1* *2*];\n"
+            "    give ['xs'];\n}\n").ok());
+  CHECK(run("fn.int64 g [ref.many.int64 'xs'] { give ['xs'[*0*]]; }\n").ok());
+}
+
 } // namespace
 
 int main() {
@@ -253,6 +314,12 @@ int main() {
   conditionsAskABool();
   aPermCounterOutlivesItsLoop();
   theCounterIsInScopeOnlyInTheLoop();
+  aManyHoldsSeveralOfOneType();
+  anElementIsOneOfWhatItHolds();
+  countAsksHowManyOfEither();
+  fillNeedsAValueThatCopies();
+  showingAManyIsRefused();
+  aManyTravelsWhole();
 
   if (failures == 0)
     std::cout << "all check tests passed\n";

@@ -51,6 +51,19 @@ characters = "clusters"
 # narrower than the type you named.
 no-number = "carries-on"
 
+# Also changes what a program answers. What reaching past the end of a `many`
+# does. `stops` says which place was asked for and how many there are, and stops
+# there in every engine; `wraps` takes the index around the length, so `*-1*` is
+# the last place and nothing ever stops.
+#
+# An empty `many` stops under both, because wrapping needs somewhere to land.
+#
+# Under `stops` an access is a compare and a branch. Native code writes that
+# compare out rather than calling the runtime for it, because a call the
+# optimiser cannot see into is one it cannot remove — and in a loop counting to
+# `count[…]`, LLVM proves the index fits and lifts the check out of the loop.
+out-of-range = "stops"
+
 [build]
 # Changes what gets delivered, never what a program answers — every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`.
@@ -62,6 +75,8 @@ optimise = "speed"
 # `fast-interpreter` runs bytecode. `native` is compiled ahead of time.
 engine = "test-interpreter"
 
-# Nothing reads this file yet. The defaults above are decided so that the first
-# engine is written against a settled semantics; the other values of each knob
-# arrive with the engine that has to branch on them.
+# `out-of-range` is read; the rest are decided but not yet asked about, because
+# nothing branches on them yet. The file is looked for beside the source and
+# then upward, so a project decides for every file under it. A single run may
+# say otherwise with `xagc --out-of-range=wraps`, which is how the oracle asks
+# both languages the same questions.

@@ -405,6 +405,64 @@ void xag_print_int(XagInt value, uint32_t width, int32_t is_signed) {
 int64_t xag_live_allocations(void) { return live; }
 int xag_balance_is_clear(void) { return live == 0 ? 1 : 0; }
 
+void xag_many_out_of_range(int64_t index, uint64_t length) {
+  if (length == 0)
+    xag_stop("a place was asked for in a `many` that holds none");
+  char why[128];
+  std::snprintf(why, sizeof(why), "place %lld was asked for, and the `many` has %llu",
+                static_cast<long long>(index),
+                static_cast<unsigned long long>(length));
+  xag_stop(why);
+}
+
+uint64_t xag_many_place(int64_t index, uint64_t length, int32_t wraps) {
+  if (length == 0)
+    xag_stop("a place was asked for in a `many` that holds none");
+  if (index >= 0 && static_cast<uint64_t>(index) < length)
+    return static_cast<uint64_t>(index);
+  if (!wraps)
+    xag_many_out_of_range(index, length);
+  // Around, in the direction that makes `*-1*` the last place.
+  const int64_t span = static_cast<int64_t>(length);
+  int64_t at = index % span;
+  if (at < 0)
+    at += span;
+  return static_cast<uint64_t>(at);
+}
+
+void xag_many_new(XagMany *out, uint64_t length, uint64_t stride) {
+  out->length = length;
+  if (length == 0) {
+    out->places = nullptr;
+    return;
+  }
+  out->places = take(length * stride);
+  std::memset(out->places, 0, length * stride);
+}
+
+void xag_many_drop(XagMany *m) {
+  if (m->places)
+    release(static_cast<char *>(m->places));
+  m->places = nullptr;
+  m->length = 0;
+}
+
+void xag_many_drop_str(XagMany *m) {
+  XagStr *held = static_cast<XagStr *>(m->places);
+  for (uint64_t i = 0; i < m->length; ++i)
+    xag_str_drop(&held[i]);
+  xag_many_drop(m);
+}
+
+void xag_many_fill(XagMany *m, uint64_t stride, const void *one) {
+  char *at = static_cast<char *>(m->places);
+  for (uint64_t i = 0; i < m->length; ++i)
+    std::memcpy(at + i * stride, one, stride);
+}
+
+void xag_note_taken(void) { ++live; }
+void xag_note_given(void) { --live; }
+
 void xag_stop(const char *why) {
   std::fflush(output());
   std::fprintf(stderr, "\nthe program stopped: %s\n", why ? why : "no reason was given");

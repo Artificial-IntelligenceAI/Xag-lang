@@ -32,6 +32,7 @@ struct Printer {
     case ExprKind::Escape:  out << "escape \\" << e.text << '\n'; break;
     case ExprKind::Typed:   out << "typed " << e.text << '\n'; break;
     case ExprKind::Borrow:  out << "transfer " << e.text << '\n'; break;
+    case ExprKind::Index:   out << "element of '" << e.text << "'\n"; break;
     case ExprKind::Unary:   out << "unary " << e.text << '\n'; break;
     case ExprKind::Binary:  out << "binary " << e.text << '\n'; break;
     case ExprKind::Group:   out << "group\n"; break;
@@ -73,6 +74,11 @@ struct Printer {
       break;
     case StmtKind::Set:
       out << "set '" << s.name << "'\n";
+      if (s.index) {
+        indent(depth + 1);
+        out << "at\n";
+        expr(*s.index, depth + 2);
+      }
       values(s.value, depth + 1);
       break;
     case StmtKind::If:

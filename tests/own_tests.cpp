@@ -194,6 +194,51 @@ void joiningReadsItsPieces() {
                     "    keep[move 's'];").ok());
 }
 
+void aManyIsHandedOverRatherThanCopied() {
+  // Every place holds a value, so an array is never copied out from under
+  // itself — even one whose places would each copy.
+  CHECK(withHelpers("var.many.int64 'xs' = [*1* *2*];\n"
+                    "    var.many.int64 'ys' = ['xs'];").code(0) == "E0406");
+  CHECK(withHelpers("var.many.int64 'xs' = [*1* *2*];\n"
+                    "    var.many.int64 'ys' = [move 'xs'];").ok());
+  CHECK(withHelpers("var.many.int64 'xs' = [*1*];\n"
+                    "    var.many.int64 'ys' = [move 'xs'];\n"
+                    "    print.stdout['xs'[*0*] \\n];").code(0) == "E0403");
+}
+
+void everyPlaceIsFilledOnce() {
+  // Items under a `many` are handed over, not read: two places cannot hold the
+  // same text, and the same name cannot fill both.
+  CHECK(withHelpers("var.str 's' = [*hi*];\n"
+                    "    var.many.str 'ws' = [*a* 's'];").code(0) == "E0406");
+  CHECK(withHelpers("var.str 's' = [*hi*];\n"
+                    "    var.many.str 'ws' = [*a* move 's' *b* move 's'];").code(0) ==
+        "E0403");
+  CHECK(withHelpers("var.str 's' = [*hi*];\n"
+                    "    var.many.str 'ws' = [*a* move 's'];").ok());
+}
+
+void nothingIsTakenOutOfAMany() {
+  CHECK(withHelpers("var.many.str 'ws' = [*a* *b*];\n"
+                    "    keep[move 'ws'[*0*]];").code(0) == "E0412");
+  CHECK(withHelpers("var.many.str 'ws' = [*a* *b*];\n"
+                    "    keep['ws'[*0*]];").code(0) == "E0412");
+  // Reading one and lending one are both fine, because neither leaves a hole.
+  CHECK(withHelpers("var.many.str 'ws' = [*a* *b*];\n"
+                    "    print.stdout[(look[ref 'ws'[*0*]]) \\n];").ok());
+}
+
+void lendingAnElementLendsTheWholeArray() {
+  // Which place `'ws'['i']` names is not known until the program runs, so the
+  // loan is of the array and E0408 reads exactly as it always did.
+  CHECK(withHelpers("var.many.str 'ws' = [*a* *b*];\n"
+                    "    var.int64 'n' = [look[ref 'ws'[*0*]]];\n"
+                    "    print.stdout['n' \\n];").ok());
+  CHECK(withHelpers("var.many.str 'ws' = [*a*];\n"
+                    "    keep[move 'ws'];\n"
+                    "    print.stdout['ws'[*0*] \\n];").code(0) != "(none)");
+}
+
 } // namespace
 
 int main() {
@@ -209,6 +254,10 @@ int main() {
   aLoopWouldMoveItTwice();
   giveIsAlreadyTheWord();
   joiningReadsItsPieces();
+  aManyIsHandedOverRatherThanCopied();
+  everyPlaceIsFilledOnce();
+  nothingIsTakenOutOfAMany();
+  lendingAnElementLendsTheWholeArray();
 
   if (failures == 0)
     std::cout << "all ownership tests passed\n";
