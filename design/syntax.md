@@ -30,6 +30,30 @@ because of where it happens to sit — position is never consulted.
 There is no third mark for "text versus number", because the type already answers
 that: `*1000*` is a number under `i64` and four characters under `str`.
 
+### A written value states its type where nothing else does
+
+A written value means nothing on its own, so something has to say what it is.
+Usually something already has:
+
+```
+var.str 's' = [*a* *b*];              # the chain said it
+sum-to[*10*];                          # the parameter said it
+print.stdout[str:*x = * 'n' \n];       # nothing said it, so the value does
+```
+
+A print list has no chain and no declared parameter types, so **every** written
+value in one carries its own type — there is no inheriting it from the item
+before, because that would be guessing at what seems likely:
+
+```
+print.stdout[str:*Hello, * 'name' str:*!* \n];
+```
+
+A name needs no annotation anywhere: its declaration gave it one already.
+
+> Not yet enforced. Which context supplies a type depends on what a name
+> resolves to, so this is the checker's rule, and the checker does not exist.
+
 ### Escapes stand outside
 
 ```
