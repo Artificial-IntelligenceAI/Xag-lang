@@ -1,6 +1,6 @@
 # SafetyBolt coding language
 
-A programming language built around high performance, very helpful error messages,
+A programming language built around high performance, helpful error messages,
 and Rust-style memory management. Programs are compiled ahead of time,
 either to native code or to a form run by an AOT interpreter.
 

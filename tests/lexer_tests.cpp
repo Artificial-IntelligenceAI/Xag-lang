@@ -117,6 +117,17 @@ void arithmeticIsFiveThings() {
   // And a word merely starting with x is one word, not an operator.
   const sb::LexResult xs = lexText("xs");
   CHECK(xs.ok() && xs.tokens[0].text == "xs" && xs.tokens.size() == 2);
+
+  // The operators spelled with letters need no tokens of their own.
+  const sb::LexResult words = lexText("'a' mod 'b' and not 'c' or 'd'");
+  CHECK(words.ok());
+  for (unsigned i : {1u, 3u, 4u, 6u}) {
+    CHECK(words.tokens[i].kind == sb::TokenKind::Word);
+  }
+  CHECK(words.tokens[1].text == "mod");
+  CHECK(words.tokens[3].text == "and");
+  CHECK(words.tokens[4].text == "not");
+  CHECK(words.tokens[6].text == "or");
 }
 
 void commentsRunToEndOfLine() {

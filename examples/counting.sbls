@@ -11,6 +11,6 @@ fn.i64 sum-to [i64 'n'] {
 }
 
 START {
-    var.i64 's' = [call sum-to['LIMIT']];
+    var.i64 's' = [sum-to['LIMIT']];
     print.stdout[str:*sum to * 'LIMIT' str:* = * 's' \n];
 }

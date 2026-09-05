@@ -1,7 +1,7 @@
 # What a name owns, what it lends, and what it gives away.
 
 fn.i64 size [ref.str 'text'] {
-    give [call count['text']];
+    give [count['text']];
 }
 
 fn.nothing excite [refmut.str 'text'] {
@@ -16,12 +16,12 @@ fn.nothing keep [str 'text'] {
 START {
     var.mut.str 'greeting' = [*Hello, * *world*];
 
-    print.stdout[str:*size = * call size[ref 'greeting'] \n];
+    print.stdout[str:*size = * size[ref 'greeting'] \n];
 
-    call excite[refmut 'greeting'];
+    excite[refmut 'greeting'];
     print.stdout['greeting' \n];
 
-    call keep[move 'greeting'];
+    keep[move 'greeting'];
 
     # 'greeting' holds nothing from here on, and asking for it is an error.
 }

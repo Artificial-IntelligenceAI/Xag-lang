@@ -54,7 +54,7 @@ A **word** wears none, so it has to be plainer: letters, digits and `_`, joined 
 ```
 fn.i64 sum-to [i64 'n'] { ... }
 
-call sum-to['LIMIT'];
+sum-to['LIMIT'];
 var.str 'a name with spaces 🙂' = [*fine*];
 ```
 
@@ -67,22 +67,57 @@ so `sum-to` is one word and `count - *1*` is three tokens.
 
 Nothing outside ASCII is a word character, though it is perfectly good inside a name.
 
-## Arithmetic is five things
+## The operators
 
 ```
-'a' + 'b'    'a' - 'b'    'a' x 'b'    'a' / 'b'    'a' ^ *2*
++   -   x   /   ^   mod        and   or   not
 ```
 
 `*` is spent on written values, so **multiplication is the letter `x`**, and `^`
 raises to a power.
 
-That works for the same reason `-` in `sum-to` works: arithmetic operands are
-always marked or bracketed, so a bare `x` standing between two of them can only
-be the operator, while `xs` is a single word rather than an operator and a name.
-The lexer does not need to know — `x` arrives at the parser as a word like any
-other, and position tells it apart.
+That works for the same reason `-` in `sum-to` works: operands are always marked
+or bracketed, so a bare `x` standing between two of them can only be the
+operator, while `xs` is a single word rather than an operator and a name. The
+lexer does not need to know — `x`, `mod`, `and`, `or` and `not` all arrive at the
+parser as ordinary words, and position tells them apart.
 
-`x` is reserved. No function may be called `x`.
+Those five words are reserved. No function may be named one of them.
+
+### Precedence is kept where mathematics settled it, and invented nowhere
+
+| | |
+| --- | --- |
+| `^` | binds tightest, and leans **right** — `*2* ^ *3* ^ *2*` is `*2* ^ (*3* ^ *2*)` |
+| `x` `/` | then these, leaning left |
+| `+` `-` | then these, leaning left |
+| comparison | looser than all of it |
+
+That is the table everybody learns before they meet a keyboard, and it is what
+makes `ax² + bx + c` readable unbracketed. Mathematics' own famous ambiguity —
+`8 ÷ 2(2+2)` — comes entirely from *implicit* multiplication, which SafetyBolt
+does not have, because `x` is written.
+
+Everything programming added has no agreed order, because nothing outside
+programming ever needed one. `mod` written infix, `and` against `or`: C put `&`
+looser than `==` and Python put it tighter, and both choices produced a famous
+trap. So there is no answer to inherit, and SafetyBolt does not invent one —
+**those need brackets**, and writing them without is an error that names both
+readings rather than picking one.
+
+```text
+`mod` and `+` have no agreed order, so this could be read as
+`(*a* mod *b*) + *c*` or as `*a* mod (*b* + *c*)`.
+
+  3 | var.i64 'x' = [*a* mod *b* + *c*];
+    |                 ^^^^^^^^^^^^^^^^^ which of these first?
+
+Error code: E0301
+Rule(s) broken: precedence is kept where mathematics settled it, and invented nowhere
+```
+
+The two readings sit in the message because they *are* the message: the compiler
+is not advising, it is saying what it cannot decide.
 
 ## Comparison carries the whole of `==`
 
@@ -124,8 +159,13 @@ stops. Brackets supply the bounds, and they are load-bearing:
 [*Hello, * 'name' *!*]
 ```
 
-Parameters and call arguments are lists too, running up against a `{` or a `;` that
-is too far away to help, so they are bracketed as well.
+Parameters and arguments are lists too, running up against a `{` or a `;` that is
+too far away to help, so they are bracketed as well.
+
+A bare word followed by `[` is a call — `sum-to['LIMIT']`, `count['text']`,
+`print.stdout[…]` — so no word announces one. The single other place a word meets
+a `[` is a function being declared, and the `fn` chain opening that line has
+already said so.
 
 A declared name is not a list, and it is already bounded by its own marks. So it
 takes no brackets:
@@ -201,9 +241,9 @@ fn.nothing keep [str 'text'] { ... }           # takes it — `own` is the defau
 Declarations default; transfers never do.
 
 ```
-call size[ref 'greeting'];
-call excite[refmut 'greeting'];
-call keep[move 'greeting'];
+size[ref 'greeting'];
+excite[refmut 'greeting'];
+keep[move 'greeting'];
 ```
 
 A declaration describes a thing, but a call site *acts*, and the consequence here is
@@ -279,7 +319,5 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **Precedence.** What binds tighter than what, and which way `^` associates.
-- **Entry point.** `START` is borrowed from Quench pending a decision.
 - **Turning a number into text.** Pieces side by side join, and nothing converts on
   its own, so something has to do it and be named.
