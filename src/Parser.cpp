@@ -72,7 +72,7 @@ private:
                 std::string label = "here") {
     result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
                                              std::move(label), std::move(rules),
-                                             std::move(tips)});
+                                             std::move(tips), {}});
   }
 
   bool expect(TokenKind kind, const char *what) {

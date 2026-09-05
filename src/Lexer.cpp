@@ -75,7 +75,7 @@ private:
   void complain(Span span, std::string code, std::string message,
                 std::vector<std::string> rules, std::vector<std::string> tips) {
     result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
-                                             "here", std::move(rules), std::move(tips)});
+                                             "here", std::move(rules), std::move(tips), {}});
   }
 
   void skipTrivia() {

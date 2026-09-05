@@ -102,10 +102,10 @@ private:
 
   void complain(Span span, std::string code, std::string message,
                 std::vector<std::string> rules, std::vector<std::string> tips = {},
-                std::string label = "here") {
+                std::string label = "here", std::vector<Note> notes = {}) {
     result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
                                              std::move(label), std::move(rules),
-                                             std::move(tips)});
+                                             std::move(tips), std::move(notes)});
   }
 
   Binding *lookup(const std::string &text) {
@@ -139,11 +139,13 @@ private:
       unsigned borrowed = 0;
       const std::string resultLoan = loanOfChain(item.chain);
       bool loanIsLent = false;
+      std::vector<Note> lent;
       for (const Param &param : item.params) {
         const Mode mode = modeOfChain(param.chain);
         info.params.push_back(ParamInfo{mode, copyType(param.chain.type().text)});
         if (mode != Mode::Owned) {
           ++borrowed;
+          lent.push_back(Note{param.span, "lent here"});
           if (!resultLoan.empty() && loanOfChain(param.chain) == resultLoan)
             loanIsLent = true;
         }
@@ -164,7 +166,8 @@ private:
                            " of the parameters.",
                  {"a borrow that is given back says which loan it belongs to"},
                  {"with one borrowed parameter there is only one loan the answer could "
-                  "be on, so nothing is written; with more there is a choice."});
+                  "be on, so nothing is written; with more there is a choice."},
+                 "this answer is borrowed", lent);
       else if (!resultLoan.empty() && !loanIsLent)
         complain(item.chain.span, "E0402",
                  "the answer is on the loan `'" + resultLoan +
@@ -187,9 +190,12 @@ private:
       if (!binding)
         return; // the checker has already said so
       if (binding->moved) {
+        // Two places matter: where it is wanted, and where it went.
         complain(e.span, "E0403", "`'" + e.text + "'` was moved, and holds nothing now.",
                  {"a name holds its value until it is moved, and then holds nothing"},
-                 {"what was moved is somewhere else now, and there is only ever one of it."});
+                 {"what was moved is somewhere else now, and there is only ever one of it."},
+                 "used here",
+                 {Note{binding->movedAt, "but it was handed over here"}});
         return;
       }
       if (how == Use::Consume && !copies) {

@@ -31,6 +31,12 @@ struct Owned {
   std::string code(unsigned i) const {
     return i < owned.diagnostics.size() ? owned.diagnostics[i].code : "(none)";
   }
+  const xag::Diagnostic *find(const std::string &wanted) const {
+    for (const xag::Diagnostic &d : owned.diagnostics)
+      if (d.code == wanted)
+        return &d;
+    return nullptr;
+  }
   bool reports(const std::string &wanted) const {
     for (const xag::Diagnostic &d : owned.diagnostics)
       if (d.code == wanted)
@@ -66,6 +72,28 @@ void aMovedNameHoldsNothing() {
                                   "    keep[move 's'];\n"
                                   "    print.stdout['s' \n];");
   CHECK(after.code(0) == "E0403");
+}
+
+void aMistakeWithTwoPlacesPointsAtBoth() {
+  const Owned twice = withHelpers("var.str 's' = [*hi*];\n"
+                                  "    keep[move 's'];\n"
+                                  "    print.stdout['s' \n];");
+  const xag::Diagnostic *moved = twice.find("E0403");
+  CHECK(moved != nullptr);
+  if (moved) {
+    CHECK(moved->label == "used here");
+    CHECK(moved->notes.size() == 1);
+    // The second place is where it went, and it comes earlier in the file.
+    CHECK(moved->notes[0].span.begin < moved->span.begin);
+  }
+
+  // The loan rule points at every parameter it counted.
+  const Owned loan =
+      run("fn.ref.str longer [ref.str 'a', ref.str 'b'] { give ['a']; }\nSTART { }\n");
+  const xag::Diagnostic *named = loan.find("E0402");
+  CHECK(named != nullptr);
+  if (named)
+    CHECK(named->notes.size() == 2);
 }
 
 void aTransferIsSpelled() {
@@ -170,6 +198,7 @@ void joiningReadsItsPieces() {
 
 int main() {
   aMovedNameHoldsNothing();
+  aMistakeWithTwoPlacesPointsAtBoth();
   aTransferIsSpelled();
   smallValuesAreNotMoved();
   aBorrowIsNotYoursToGiveAway();

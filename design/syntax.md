@@ -304,11 +304,17 @@ say a name stops holding what it held, and it does not.
 `'greeting'` was moved, and holds nothing now.
 
   8 |     print.stdout['greeting' \n];
-    |                  ^^^^^^^^^^ here
+    |                  ^^^^^^^^^^ used here
+  7 |     keep[move 'greeting'];
+    |          ^^^^^^^^^^^^^^^ but it was handed over here
 
 Error code: E0403
 Rule(s) broken: a name holds its value until it is moved, and then holds nothing
 ```
+
+A mistake that happened in one place and showed up in another has two places,
+and a diagnostic points at both — otherwise the reader is left to go and find
+the half that was not shown.
 
 A name given away down **any** arm of an `if` is gone after it, because the
 compiler does not get to assume which arm ran. A name given away inside a **loop**

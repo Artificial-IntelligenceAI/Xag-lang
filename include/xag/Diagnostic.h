@@ -8,6 +8,14 @@
 
 namespace xag {
 
+// A second place worth looking at, underlined beneath the first. A mistake that
+// happened in one place and showed up in another has two, and pointing at only
+// one of them leaves the reader to go and find the other.
+struct Note {
+  Span span;
+  std::string label;
+};
+
 // A diagnostic says what happened, points at it, names the rule it broke, and
 // explains why the rule exists. It does not say what to type instead: the
 // reader knows their intent and the compiler does not.
@@ -18,6 +26,7 @@ struct Diagnostic {
   std::string label = "here";
   std::vector<std::string> rules;
   std::vector<std::string> tips;
+  std::vector<Note> notes; // shown after the first, in the order given
 };
 
 // One diagnostic, with its own file/line header and underlined source line.
