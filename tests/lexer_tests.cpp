@@ -103,6 +103,22 @@ void aWordIsPlainerThanAName() {
   CHECK(name.tokens[0].kind == sb::TokenKind::Name);
 }
 
+void arithmeticIsFiveThings() {
+  const sb::LexResult r = lexText("'a' x 'b' ^ *2* + *1* - *3* / *4*");
+  CHECK(r.ok());
+  CHECK(kinds(r) == (std::vector<sb::TokenKind>{
+                        sb::TokenKind::Name, sb::TokenKind::Word, sb::TokenKind::Name,
+                        sb::TokenKind::Caret, sb::TokenKind::Written, sb::TokenKind::Plus,
+                        sb::TokenKind::Written, sb::TokenKind::Minus, sb::TokenKind::Written,
+                        sb::TokenKind::Slash, sb::TokenKind::Written, sb::TokenKind::End}));
+  // `x` is a letter, so it reaches the parser as a word like any other.
+  CHECK(r.tokens[1].text == "x");
+
+  // And a word merely starting with x is one word, not an operator.
+  const sb::LexResult xs = lexText("xs");
+  CHECK(xs.ok() && xs.tokens[0].text == "xs" && xs.tokens.size() == 2);
+}
+
 void commentsRunToEndOfLine() {
   const sb::LexResult r = lexText("# 'not' *a* token\n'yes'");
   CHECK(r.ok());
@@ -171,6 +187,7 @@ int main() {
   chainsAreWordsAndDots();
   aHyphenJoinsAWordButDoesNotSubtract();
   aWordIsPlainerThanAName();
+  arithmeticIsFiveThings();
   commentsRunToEndOfLine();
   comparisonsGlue();
   aQuoteOffersBothMarks();

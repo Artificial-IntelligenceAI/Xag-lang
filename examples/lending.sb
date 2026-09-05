@@ -1,0 +1,29 @@
+# Lending, and the name that says how long a loan lasts.
+
+# One borrowed parameter, so there is only one thing the answer could be
+# borrowed from and nothing has to be named.
+fn.ref.str echo [ref.str 'text'] {
+    give ['text'];
+}
+
+# Two borrowed parameters. The answer comes from one of them, the compiler
+# cannot see which, so the loan is named and everything on it says so.
+fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {
+    if [call count['a'] > call count['b']] {
+        give ['a'];
+    } else {
+        give ['b'];
+    }
+}
+
+START {
+    var.str 'greeting' = [*hello there*];
+    var.str 'reply' = [*hi*];
+
+    var.ref.str 'winner' = [call longer[ref 'greeting', ref 'reply']];
+    print.stdout[str:*longer: * 'winner' \n];
+
+    var.i64 'area' = [*3* x *4*];
+    var.i64 'cube' = [*2* ^ *3*];
+    print.stdout[str:*area * 'area' str:*, cube * 'cube' \n];
+}

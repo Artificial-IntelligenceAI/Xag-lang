@@ -65,6 +65,23 @@ so `sum-to` is one word and `count - *1*` is three tokens.
 
 Nothing outside ASCII is a word character, though it is perfectly good inside a name.
 
+## Arithmetic is five things
+
+```
+'a' + 'b'    'a' - 'b'    'a' x 'b'    'a' / 'b'    'a' ^ *2*
+```
+
+`*` is spent on written values, so **multiplication is the letter `x`**, and `^`
+raises to a power.
+
+That works for the same reason `-` in `sum-to` works: arithmetic operands are
+always marked or bracketed, so a bare `x` standing between two of them can only
+be the operator, while `xs` is a single word rather than an operator and a name.
+The lexer does not need to know — `x` arrives at the parser as a word like any
+other, and position tells it apart.
+
+`x` is reserved. No function may be called `x`.
+
 ## Brackets bound a list that nothing else bounds
 
 A value is a list of **juxtaposed** items, so nothing inside it says where one item
@@ -159,22 +176,78 @@ call keep[move 'greeting'];
 A declaration describes a thing, but a call site *acts*, and the consequence here is
 that `'greeting'` stops existing. That is worth a word every time.
 
+### A borrow never outlasts what it borrows from
+
+```
+fn.ref.str broken [] {
+    var.str 'text' = [*hello*];
+    give ['text'];
+}
+```
+
+```text
+`'text'` stops existing when this function ends, and the answer would outlive it.
+
+  4 |     give ['text'];
+    |           ^^^^^^ here
+
+Error code: E0401
+Rule(s) broken: a borrow never outlasts what it borrows from
+Tip(s): the value belongs to this function, so the only thing that can leave here
+        with it is the value itself.
+```
+
 ### A lifetime is a name
 
-Names are already marked, so a lifetime needs no notation of its own:
+When one parameter is borrowed, there is only one thing the answer could be
+borrowed from, so nothing has to be said:
 
 ```
-fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] { ... }
+fn.ref.str echo [ref.str 'text'] {
+    give ['text'];
+}
 ```
 
-`'life'` is spelled like `'greeting'` because it is a name. Nothing about it is a
-special form.
+When two are, there is a choice, and the compiler does not get to make it. The
+loan is given a name, and everything on that loan is written with it:
+
+```
+fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {
+    if ['a' > 'b'] {
+        give ['a'];
+    } else {
+        give ['b'];
+    }
+}
+```
+
+`'life'` is spelled like `'greeting'` because it **is** a name — a name for the
+loan rather than for a value. Nothing about it is a special form, and it may be
+called whatever says what it is:
+
+```
+fn.ref.'as long as both inputs'.str longer [...] { ... }
+```
+
+Leaving it out where it is needed is its own error, and the compiler does not
+guess:
+
+```text
+this answer is borrowed, and so are two of the parameters.
+
+  1 | fn.ref.str longer [ref.str 'a', ref.str 'b'] {
+    |    ^^^ here
+
+Error code: E0402
+Rule(s) broken: a borrow that is given back says which loan it belongs to
+Tip(s): with one borrowed parameter there is only one loan the answer could be
+        on, so nothing is written; with two there is a choice.
+```
 
 ## Open
 
 - **File extension.** `.sb` is a placeholder.
-- **Multiplication.** `*` is spent on written values, so it cannot also mean multiply
-  without a stateful lexer. Quench answered `x`; SafetyBolt has not answered.
+- **Precedence.** What binds tighter than what, and which way `^` associates.
 - **Comparisons.** `<` `<=` `>` `>=` `==` `!=` are what the lexer reads today, chosen
   to have something to tokenise. Quench spells two of them `<==` and `!==`.
 - **Entry point.** `START` is borrowed from Quench pending a decision.

@@ -25,6 +25,7 @@ const char *describe(TokenKind kind) {
   case TokenKind::Plus:         return "`+`";
   case TokenKind::Minus:        return "`-`";
   case TokenKind::Slash:        return "`/`";
+  case TokenKind::Caret:        return "`^`";
   case TokenKind::Less:         return "`<`";
   case TokenKind::Greater:      return "`>`";
   case TokenKind::LessEqual:    return "`<=`";
@@ -177,6 +178,9 @@ private:
     case '+': ++at_; emit(TokenKind::Plus, begin); return;
     case '-': ++at_; emit(TokenKind::Minus, begin); return;
     case '/': ++at_; emit(TokenKind::Slash, begin); return;
+    // Multiplication is the letter `x`, so it arrives as a word. `*` is spent
+    // on written values and never means multiply.
+    case '^': ++at_; emit(TokenKind::Caret, begin); return;
 
     case '=':
       at_ += peek(1) == '=' ? 2 : 1;
