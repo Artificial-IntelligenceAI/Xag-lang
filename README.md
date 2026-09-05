@@ -7,6 +7,8 @@ either to native code or to a form run by an AOT interpreter.
 
 Early work in progress — nothing here is stable yet.
 
+"Why would anyone ever use Xag?" Honestly, I don't know. 😂
+
 ## Building
 
 The compiler is written in C++20 against LLVM's native C++ API.
