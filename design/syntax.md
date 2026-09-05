@@ -351,6 +351,17 @@ asking for something.**
 | ownership | `own` | `ref` / `refmut` — asking to borrow |
 | visibility | `file` | `export` / `program` — asking for exposure |
 | loop counter | `temp` | `perm` — asking to keep it after the loop |
+
+`perm` keeps the counter, and what it holds afterwards is what it last took: the
+value a `break` left behind, or one past the last when the loop simply ran out.
+Wanting it after a `break` is the only reason to keep one at all.
+
+```
+loop.perm.range.int64 'i' = [*1*, *100*] {
+    if 'i' x 'i' > *10* { break; }
+}
+print.stdout[str:*stopped at * 'i' \n];      # stopped at 4
+```
 | type | *none* | always |
 
 So `var.str 'greeting'` is immutable, owned, and visible in this file only. A bare

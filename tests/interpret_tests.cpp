@@ -220,6 +220,16 @@ void itLoops() {
        "1 2 3 ");
 }
 
+void aPermCounterKeepsWhatItHad() {
+  // What a `break` left behind, which is the only reason to keep a counter.
+  SAYS("START { loop.perm.range.int64 'i' = [*1*, *100*] {"
+       " if 'i' x 'i' > *10* { break; } }\n"
+       "  print.stdout['i' \\n]; }\n", "4\n");
+  // And one past the last, when it simply ran out.
+  SAYS("START { loop.perm.range.int64 'i' = [*1*, *3*] { }"
+       " print.stdout['i' \\n]; }\n", "4\n");
+}
+
 void itCalls() {
   SAYS("fn.int64 sum-to [int64 'n'] {\n"
        "  var.mut.int64 'total' = [*0*];\n"
@@ -299,6 +309,7 @@ int main() {
   itCountsInTensWhenAsked();
   itDecides();
   itLoops();
+  aPermCounterKeepsWhatItHad();
   itCalls();
   itKnowsItsConstants();
   itLendsAndTakes();

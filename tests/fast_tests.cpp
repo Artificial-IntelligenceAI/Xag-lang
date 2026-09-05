@@ -100,6 +100,9 @@ void onTheOrdinaryThings() {
   AGREE("START { var.int64 'n' = [*5*];\n"
         "  if 'n' > *3* { print.stdout[str:*big* \\n]; }"
         "  else { print.stdout[str:*small* \\n]; } }\n");
+  AGREE("START { loop.perm.range.int64 'i' = [*1*, *100*] {"
+        " if 'i' x 'i' > *10* { break; } }"
+        " print.stdout['i' \\n]; }\n");
   AGREE("START { loop.range.int64 'i' = [*1*, *100*] {"
         " if 'i' > *3* { break; } print.stdout['i' str:* *]; } }\n");
 }

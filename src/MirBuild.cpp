@@ -415,6 +415,14 @@ private:
     case StmtKind::LoopRange: {
       const Type type = declaredType(s);
       const unsigned counter = addLocal(s.name, typeRef(spell(type)), copies(type));
+      // `perm` keeps the counter, so the name is put where the loop is rather
+      // than inside it.
+      bool keeps = false;
+      for (const ChainSegment &seg : s.chain.segments)
+        if (!seg.isName && seg.text == "perm")
+          keeps = true;
+      if (keeps)
+        names_.back()[s.name] = counter;
       const unsigned last = temporary(typeRef(spell(type)), true);
       if (s.value.values.size() == 2) {
         assignOne(counter, s.value.values[0], s.span);
@@ -440,7 +448,8 @@ private:
       current_ = inside;
       loops_.push_back(Loop{header, after});
       openScope();
-      names_.back()[s.name] = counter;
+      if (!keeps)
+        names_.back()[s.name] = counter;
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);
       closeScope();

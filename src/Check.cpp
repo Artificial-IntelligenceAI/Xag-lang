@@ -195,6 +195,15 @@ private:
 
   // `mut` on what a name owns, `refmut` on what it borrows. `ref` lends without
   // letting go of that, and a bare chain changes nothing at all.
+  // `perm` asks to keep the counter after the loop, which is what a `break`
+  // leaves behind and the only reason to keep one at all.
+  static bool keepsCounter(const Chain &chain) {
+    for (const ChainSegment &seg : chain.segments)
+      if (!seg.isName && seg.text == "perm")
+        return true;
+    return false;
+  }
+
   static bool changeable(const Chain &chain) {
     for (const ChainSegment &seg : chain.segments)
       if (!seg.isName && (seg.text == "mut" || seg.text == "refmut"))
@@ -525,8 +534,12 @@ private:
                  {"`[first, last]` says where a count starts and stops"});
       for (const Value &v : s.value.values)
         value(v, type);
+      const bool keeps = keepsCounter(s.chain);
+      if (keeps)
+        declare(s.name, Symbol{type, false, s.nameSpan});
       scopes_.emplace_back();
-      declare(s.name, Symbol{type, false, s.nameSpan});
+      if (!keeps)
+        declare(s.name, Symbol{type, false, s.nameSpan});
       ++loopDepth_;
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);

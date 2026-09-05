@@ -211,6 +211,17 @@ void conditionsAskABool() {
   CHECK(inStart("var.int64 'n' = [*1*];\n    if 'n' > *0* { }").ok());
 }
 
+void aPermCounterOutlivesItsLoop() {
+  CHECK(inStart("loop.perm.range.int64 'i' = [*1*, *3*] { }\n"
+                "    print.stdout['i' \\n];").ok());
+  // And it is a name like any other afterwards, so it cannot be taken twice.
+  CHECK(inStart("var.int64 'i' = [*0*];\n"
+                "    loop.perm.range.int64 'i' = [*1*, *3*] { }").code(0) == "E0502");
+  // `temp` is what a counter is when nothing says otherwise, so writing it is
+  // writing a default — refused where every other default is, in the chain.
+  CHECK(!inStart("loop.temp.range.int64 'i' = [*1*, *3*] { }").ok());
+}
+
 void theCounterIsInScopeOnlyInTheLoop() {
   CHECK(inStart("loop.range.int64 'i' = [*1*, *3*] { print.stdout['i' \\n]; }").ok());
   CHECK(inStart("loop.range.int64 'i' = [*1*, *3*] { }\n    print.stdout['i' \\n];")
@@ -240,6 +251,7 @@ int main() {
   aFunctionAnswersEveryWayOut();
   breakNeedsALoop();
   conditionsAskABool();
+  aPermCounterOutlivesItsLoop();
   theCounterIsInScopeOnlyInTheLoop();
 
   if (failures == 0)

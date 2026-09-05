@@ -551,10 +551,12 @@ impl<'a> Writer<'a> {
     fn counted_loop(&mut self) {
         let counter = self.fresh();
         let ty = self.pick_whole();
+        // `perm` keeps the counter, so the name belongs where the loop is.
+        let keeps = self.rng.chance(25);
         let first = self.rng.between(1, 3);
         let last = first + self.rng.between(0, 3);
         self.pad();
-        self.out.push_str("loop.range.");
+        self.out.push_str(if keeps { "loop.perm.range." } else { "loop.range." });
         self.out.push_str(ty.written());
         self.out.push_str(" '");
         self.out.push_str(&counter);
@@ -564,13 +566,13 @@ impl<'a> Writer<'a> {
         push_number(self.out, last);
         self.out.push_str("*] {\n");
         self.indent += 1;
-        self.scopes.push(vec![Var {
-            name: counter,
-            ty,
-            mutable: false,
-            moved: false,
-            lent: false,
-        }]);
+        let held = Var { name: counter, ty, mutable: false, moved: false, lent: false };
+        if keeps {
+            self.declare(held.clone());
+            self.scopes.push(Vec::new());
+        } else {
+            self.scopes.push(vec![held]);
+        }
         let statements = self.rng.below(2) + 1;
         self.body(statements);
         self.finish_scope();
