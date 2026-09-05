@@ -6,6 +6,27 @@ either to native code or to a form run by an AOT interpreter.
 
 Early work in progress — nothing here is stable yet.
 
+## Building
+
+The compiler is written in C++20 against LLVM's native C++ API.
+
+Requirements: **LLVM 23 or newer**, CMake, Ninja.
+
+```sh
+brew install llvm cmake ninja
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+ninja -C build
+./build/sbc
+```
+
+CMake finds Homebrew's keg-only LLVM on its own. Build with Apple's `clang++`
+(the default) rather than Homebrew's — Homebrew's driver ships its own libc++
+and collides with the macOS SDK headers once LLVM's include directory is added.
+
+`sbc` is currently a toolchain smoke test: it builds a tiny module in memory,
+runs LLVM's verifier over it, and prints the IR. The language itself is not
+implemented yet.
+
 ## License
 
 Copyright 2026 Tankun Sriket
