@@ -1,0 +1,42 @@
+# Lending for reading, lending for writing, and handing over for good.
+
+fn.i64 size [ref.str 'text'] {
+    give [count['text']];
+}
+
+fn.nothing shout [refmut.str 'text'] {
+    set 'text' = ['text' *!*];
+}
+
+fn.nothing keep [str 'text'] {
+    print.stdout[str:*kept: * 'text' \n];
+}
+
+# Two things are lent and one comes back, so the loan is named.
+fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {
+    if count['a'] >== count['b'] {
+        give ['a'];
+    } else {
+        give ['b'];
+    }
+}
+
+START {
+    var.mut.str 'greeting' = [*hello*];
+    var.str 'reply' = [*hi*];
+
+    # Lent for reading. 'greeting' still holds what it held.
+    print.stdout[str:*size: * size[ref 'greeting'] \n];
+
+    # Lent for writing, which is why the chain says `mut`.
+    shout[refmut 'greeting'];
+    print.stdout[str:*after: * 'greeting' \n];
+
+    # The answer is borrowed from whichever of the two was longer.
+    var.ref.str 'winner' = [longer[ref 'greeting', ref 'reply']];
+    print.stdout[str:*longer: * 'winner' \n];
+
+    # Handed over for good. 'spare' holds nothing after this line.
+    var.str 'spare' = [*spare*];
+    keep[move 'spare'];
+}

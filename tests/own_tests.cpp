@@ -100,6 +100,9 @@ void aLoanIsLentBeforeItIsWritten() {
   CHECK(run(std::string(kEdit) +
             "fn.nothing pass [ref.str 'text'] { edit[refmut 'text']; }\nSTART { }\n")
             .code(0) == "E0407");
+  // A name that does not change cannot be lent for writing either.
+  CHECK(withHelpers("var.str 's' = [*hi*];\n    edit[refmut 's'];").code(0) == "E0407");
+  CHECK(withHelpers("var.mut.str 's' = [*hi*];\n    edit[refmut 's'];").ok());
 }
 
 void aBorrowNeverOutlastsWhatItBorrowsFrom() {

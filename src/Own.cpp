@@ -45,10 +45,20 @@ const char *word(Mode mode) {
 struct Binding {
   Mode mode = Mode::Owned;
   bool copies = true;
+  bool changes = false;
   Span span;
   bool moved = false;
   Span movedAt;
 };
+
+// `mut` on what a name owns, `refmut` on what it borrows. Either way the name
+// may be written through, and nothing else may.
+bool changeable(const Chain &chain) {
+  for (const ChainSegment &seg : chain.segments)
+    if (!seg.isName && (seg.text == "mut" || seg.text == "refmut"))
+      return true;
+  return false;
+}
 
 struct ParamInfo {
   Mode mode = Mode::Owned;
@@ -75,7 +85,7 @@ public:
     for (const Item &item : program_.items)
       if (item.kind == ItemKind::Const)
         scopes_.back()[item.name] =
-            Binding{Mode::Owned, copyType(item.chain.type().text), item.nameSpan, false, {}};
+            Binding{Mode::Owned, copyType(item.chain.type().text), false, item.nameSpan, false, {}};
     for (const Item &item : program_.items)
       body(item);
     return std::move(result_);
@@ -224,10 +234,19 @@ private:
         return;
       }
 
-      // `ref` / `refmut`
-      if (binding && e.text == "refmut" && binding->mode == Mode::Ref)
-        complain(e.span, "E0407", "this was lent for reading, and cannot be lent for writing.",
-                 {"a loan gives away no more than the lender had"});
+      // `ref` / `refmut`. A loan gives away no more than the lender had, so a
+      // name that does not change cannot be lent for writing — whether it does
+      // not change because it owns something quietly, or because what it holds
+      // was itself only lent for reading.
+      if (binding && e.text == "refmut" && !binding->changes)
+        complain(e.span, "E0407",
+                 binding->mode == Mode::Ref
+                     ? "this was lent for reading, and cannot be lent for writing."
+                     : "`'" + inner.text + "'` does not change, and cannot be lent for "
+                                           "writing.",
+                 {"a loan gives away no more than the lender had"},
+                 {"a chain says `mut` when a name may be written through, and this one "
+                  "does not."});
       read(inner);
       return;
     }
@@ -323,7 +342,7 @@ private:
       const Mode mode = modeOfChain(s.chain);
       const bool copies = copyType(s.chain.type().text);
       consumeInto(s.value, mode, copies);
-      scopes_.back()[s.name] = Binding{mode, copies, s.nameSpan, false, {}};
+      scopes_.back()[s.name] = Binding{mode, copies, changeable(s.chain), s.nameSpan, false, {}};
       break;
     }
 
@@ -371,7 +390,7 @@ private:
       scopes_.emplace_back();
       if (s.kind == StmtKind::LoopRange)
         scopes_.back()[s.name] =
-            Binding{Mode::Owned, copyType(s.chain.type().text), s.nameSpan, false, {}};
+            Binding{Mode::Owned, copyType(s.chain.type().text), false, s.nameSpan, false, {}};
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);
       scopes_.pop_back();
@@ -460,9 +479,9 @@ private:
       giving_ = modeOfChain(item.chain);
       givingCopies_ = copyType(item.chain.type().text);
       for (const Param &param : item.params)
-        scopes_.back()[param.name] = Binding{modeOfChain(param.chain),
-                                             copyType(param.chain.type().text),
-                                             param.nameSpan, false, {}};
+        scopes_.back()[param.name] =
+            Binding{modeOfChain(param.chain), copyType(param.chain.type().text),
+                    changeable(param.chain), param.nameSpan, false, {}};
     } else {
       giving_ = Mode::Owned;
       givingCopies_ = true;
