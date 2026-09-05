@@ -81,6 +81,16 @@ private:
           after_[block.id].push_back(target);
   }
 
+  bool canHold(unsigned local) const {
+    if (local >= body_.locals.size())
+      return false;
+    const TypeRef type = body_.locals[local].type;
+    if (type.index >= body_.types.size())
+      return false;
+    const std::string &spelled = body_.types[type.index];
+    return spelled.rfind("ref ", 0) == 0 || spelled.rfind("refmut ", 0) == 0;
+  }
+
   // What a statement leaves each local holding.
   void step(const Statement &s, Holds &holds) const {
     if (s.kind == StatementKind::Drop) {
@@ -88,11 +98,16 @@ private:
       return;
     }
     std::vector<char> gathered(loans_.size(), 0);
+    // Only something that *is* a loan can be holding one. A number that came
+    // out of `count[ref 'x']` is a number, and the loan it was worked out from
+    // ended at the semicolon — reading it as still open made the pass refuse
+    // programs that were perfectly good.
+    if (!canHold(s.place)) {
+      if (s.place < locals())
+        holds[s.place] = gathered;
+      return;
+    }
     if (s.value.kind == RValueKind::Ref) {
-      for (unsigned i = 0; i < loans_.size(); ++i)
-        if (loans_[i].block == 0 || true) {
-          // The loan taken by this very statement, and no other.
-        }
       for (unsigned i = 0; i < loans_.size(); ++i)
         if (loans_[i].referent == s.value.local && loans_[i].span.begin == s.span.begin &&
             loans_[i].writes == (s.value.op == "refmut"))

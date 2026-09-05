@@ -73,6 +73,9 @@ struct Var {
     ty: Ty,
     mutable: bool,
     moved: bool,
+    /// Lent out right now. Nothing may be handed over, changed or lent again
+    /// while this is set, which is the whole of what the region pass checks.
+    lent: bool,
 }
 
 struct Fun {
@@ -137,7 +140,8 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<&Var> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == ty && !var.moved && (!want_mutable || var.mutable) {
+                if var.ty == ty && !var.moved && !var.lent &&
+                   (!want_mutable || var.mutable) {
                     seen.push(var);
                 }
             }
@@ -171,7 +175,7 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<Ty> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && !var.moved {
+                if Self::numeric(var.ty) && !var.moved && !var.lent {
                     seen.push(var.ty);
                 }
             }
@@ -209,6 +213,10 @@ impl<'a> Writer<'a> {
         // written as well as read.
         self.out
             .push_str("fn.nothing consume [str 't'] {\n    print.stdout['t' \\n];\n}\n\n");
+        self.out.push_str(
+            "fn.nothing look [ref.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n");
+        self.out.push_str(
+            "fn.nothing edit [refmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n");
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
@@ -226,7 +234,7 @@ impl<'a> Writer<'a> {
             self.out.push_str("' = [");
             self.literal(ty);
             self.out.push_str("];\n");
-            self.consts.push(Var { name, ty, mutable: false, moved: false });
+            self.consts.push(Var { name, ty, mutable: false, moved: false, lent: false });
         }
         if constants > 0 {
             self.out.push('\n');
@@ -270,7 +278,7 @@ impl<'a> Writer<'a> {
             self.out.push_str(&param);
             self.out.push('\'');
             params.push(ty);
-            self.declare(Var { name: param, ty, mutable: false, moved: false });
+            self.declare(Var { name: param, ty, mutable: false, moved: false, lent: false });
         }
         self.out.push_str("] {\n");
         self.indent = 1;
@@ -299,7 +307,7 @@ impl<'a> Writer<'a> {
             .last()
             .unwrap()
             .iter()
-            .filter(|v| v.ty == Ty::Str && !v.moved)
+            .filter(|v| v.ty == Ty::Str && !v.moved && !v.lent)
             .map(|v| v.name.clone())
             .collect();
         for name in owned {
@@ -331,14 +339,107 @@ impl<'a> Writer<'a> {
     }
 
     fn statement(&mut self) {
-        match self.rng.below(10) {
+        match self.rng.below(12) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
             5..=6 => self.print(),
             7 => self.branch(),
             8 => self.counted_loop(),
+            9..=10 => self.lending(),
             _ => self.print(),
         }
+    }
+
+    /// A name holding text that nobody is using for anything else.
+    fn lendable(&mut self, writable: bool) -> Option<String> {
+        let mut seen: Vec<String> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if var.ty == Ty::Str && !var.moved && !var.lent && (!writable || var.mutable) {
+                    seen.push(var.name.clone());
+                }
+            }
+        }
+        if seen.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        Some(seen[at].clone())
+    }
+
+    fn markLent(&mut self, name: &str, lent: bool) {
+        for scope in &mut self.scopes {
+            for var in scope {
+                if var.name == name {
+                    var.lent = lent;
+                }
+            }
+        }
+    }
+
+    /// Lending, in the two shapes the language has: for the length of one call,
+    /// and held in a name across several statements.
+    ///
+    /// The loan is closed before anything else happens to what it borrows from,
+    /// because a program the region pass rightly refuses is this file's mistake
+    /// and not a finding.
+    fn lending(&mut self) {
+        let writable = self.rng.chance(40);
+        let borrowed = match self.lendable(writable) {
+            Some(name) => name,
+            None => {
+                self.print();
+                return;
+            }
+        };
+
+        if self.rng.chance(45) {
+            // For the length of one call, and done with by the semicolon.
+            self.pad();
+            if writable {
+                self.out.push_str("edit[refmut '");
+            } else {
+                self.out.push_str("look[ref '");
+            }
+            self.out.push_str(&borrowed);
+            self.out.push_str("'];\n");
+            return;
+        }
+
+        // Or held in a name, and looked at a few times before it is done.
+        let holder = self.fresh();
+        self.markLent(&borrowed, true);
+        self.pad();
+        self.out.push_str(if writable { "var.refmut.str '" } else { "var.ref.str '" });
+        self.out.push_str(&holder);
+        self.out.push_str("' = [");
+        self.out.push_str(if writable { "refmut '" } else { "ref '" });
+        self.out.push_str(&borrowed);
+        self.out.push_str("'];\n");
+
+        let looks = self.rng.below(3) + 1;
+        for _ in 0..looks {
+            self.pad();
+            if writable && self.rng.chance(50) {
+                // Written through the loan, which is what being lent for
+                // writing is for.
+                self.out.push_str("set '");
+                self.out.push_str(&holder);
+                self.out.push_str("' = ['");
+                self.out.push_str(&holder);
+                self.out.push_str("' *!*];\n");
+            } else if self.rng.chance(50) {
+                self.out.push_str("print.stdout['");
+                self.out.push_str(&holder);
+                self.out.push_str("' \\n];\n");
+            } else {
+                self.out.push_str("print.stdout[(count['");
+                self.out.push_str(&holder);
+                self.out.push_str("']) \\n];\n");
+            }
+        }
+        // Nothing looks at the holder again, so the loan is done here.
+        self.markLent(&borrowed, false);
     }
 
     fn declaration(&mut self) {
@@ -347,7 +448,7 @@ impl<'a> Writer<'a> {
             6..=7 => Ty::Bool,
             _ => Ty::Str,
         };
-        let mutable = ty != Ty::Str && self.rng.chance(50);
+        let mutable = self.rng.chance(50);
         let name = self.fresh();
         self.pad();
         self.out.push_str("var.");
@@ -360,7 +461,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.expr(ty, 2);
         self.out.push_str("];\n");
-        self.declare(Var { name, ty, mutable, moved: false });
+        self.declare(Var { name, ty, mutable, moved: false, lent: false });
     }
 
     fn assignment(&mut self) {
@@ -368,7 +469,7 @@ impl<'a> Writer<'a> {
         let mut choices: Vec<(String, Ty)> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && var.mutable && !var.moved {
+                if Self::numeric(var.ty) && var.mutable && !var.moved && !var.lent {
                     choices.push((var.name.clone(), var.ty));
                 }
             }
@@ -468,6 +569,7 @@ impl<'a> Writer<'a> {
             ty,
             mutable: false,
             moved: false,
+            lent: false,
         }]);
         let statements = self.rng.below(2) + 1;
         self.body(statements);

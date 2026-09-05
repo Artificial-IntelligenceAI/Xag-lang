@@ -78,6 +78,35 @@ void aLoanEndsWhenNobodyIsHoldingIt() {
         "    print.stdout['a' 'b' \n];");
 }
 
+void aNumberIsNotHoldingALoan() {
+  // `count[ref 'a']` answers a number, and the loan it was worked out from
+  // ended at the semicolon. Reading the number as still holding it made the
+  // pass refuse this, which the generator found within forty programs.
+  HOLDS("var.mut.str 'a' = [*hello*];\n"
+        "    var.int64 'n' = [count[ref 'a']];\n"
+        "    edit[refmut 'a'];\n"
+        "    print.stdout['n' \n];");
+  // The same, the other way round.
+  HOLDS("var.mut.str 'a' = [*hello*];\n"
+        "    edit[refmut 'a'];\n"
+        "    var.int64 'n' = [size[ref 'a']];\n"
+        "    keep[move 'a'];\n"
+        "    print.stdout['n' \n];");
+}
+
+void aLoanHeldInANameLastsWhileItIsLookedAt() {
+  // Held, looked at, done with — and what it borrowed is free again.
+  HOLDS("var.str 'a' = [*hello*];\n"
+        "    var.ref.str 'w' = [ref 'a'];\n"
+        "    print.stdout['w' \n];\n"
+        "    keep[move 'a'];");
+  // Written through the loan, which is what being lent for writing is for.
+  HOLDS("var.mut.str 'a' = [*hello*];\n"
+        "    var.refmut.str 'w' = [refmut 'a'];\n"
+        "    set 'w' = ['w' *!*];\n"
+        "    print.stdout['w' \n];");
+}
+
 void whatIsLentStaysWhereItIs() {
   // The loan is still wanted after the move, which is the whole objection.
   REFUSES("var.str 'a' = [*hello*];\n"
@@ -112,6 +141,8 @@ void oneLoanForWritingOrAnyNumberForReading() {
 
 int main() {
   aLoanEndsWhenNobodyIsHoldingIt();
+  aNumberIsNotHoldingALoan();
+  aLoanHeldInANameLastsWhileItIsLookedAt();
   whatIsLentStaysWhereItIs();
   whatIsLentIsNotChangedBehindTheLoansBack();
   oneLoanForWritingOrAnyNumberForReading();
