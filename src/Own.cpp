@@ -131,9 +131,11 @@ public:
     scopes_.emplace_back();
     for (const Item &item : program_.items)
       if (item.kind == ItemKind::Struct) {
-        std::vector<bool> fields;
+        std::vector<std::pair<std::string, std::string>> fields;
         for (const Param &field : item.params)
-          fields.push_back(copyChain(field.chain));
+          fields.emplace_back(field.name, holdsMany(field.chain)
+                                              ? std::string("many")
+                                              : field.chain.type().text);
         shapes_[item.name] = std::move(fields);
       }
     for (const Item &item : program_.items)
@@ -152,10 +154,12 @@ private:
   OwnResult result_;
   std::vector<std::unordered_map<std::string, Binding>> scopes_;
   std::unordered_map<std::string, FnInfo> functions_;
-  // Whether each of the things a struct holds copies, in the order it holds
-  // them. A struct is never itself copied, but what goes into one place of it
-  // is that place's question, the same as an element of a `many`.
-  std::unordered_map<std::string, std::vector<bool>> shapes_;
+  // What each struct holds: the name of each thing and the type word it was
+  // written with, in order. The names are needed as well as the types, because
+  // `set 'p'.x = […]` says which one it means by name and what may go in is
+  // that one's question rather than the struct's.
+  std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>>
+      shapes_;
   Mode giving_ = Mode::Owned;
   bool givingCopies_ = true;
 
@@ -500,14 +504,37 @@ private:
     scopes_.pop_back();
   }
 
-  const std::vector<bool> *shapeNamed(const std::string &type) const {
+  const std::vector<std::pair<std::string, std::string>> *
+  shapeNamed(const std::string &type) const {
     auto found = shapes_.find(type);
     return found == shapes_.end() ? nullptr : &found->second;
   }
 
+  // Whether what goes into one of the things a struct holds is copied there.
+  // Reading the struct's own answer instead said a number could not be written
+  // into a number, because a struct is never copied however little is in it.
+  bool partCopies(const std::string &fills, const std::vector<std::string> &path) const {
+    std::string here = fills;
+    for (unsigned i = 0; i < path.size(); ++i) {
+      const auto *fields = shapeNamed(here);
+      if (!fields)
+        return true; // the checker has already said so
+      bool found = false;
+      for (const auto &field : *fields)
+        if (field.first == path[i]) {
+          here = field.second;
+          found = true;
+          break;
+        }
+      if (!found)
+        return true;
+    }
+    return copyType(here);
+  }
+
   void consumeInto(const ValueList &list, Mode mode, bool copies, bool collects = false,
                    bool elementCopies = true, const std::string &fills = {}) {
-    const std::vector<bool> *fields = fills.empty() ? nullptr : shapeNamed(fills);
+    const auto *fields = fills.empty() ? nullptr : shapeNamed(fills);
     for (const Value &value : list.values) {
       // A struct's items each go into a place of their own, as a `many`'s do,
       // so each of them is handed over. Reading them as pieces of a joined
@@ -515,7 +542,7 @@ private:
       if (fields && value.items.size() != 1) {
         for (unsigned i = 0; i < value.items.size(); ++i)
           use(*value.items[i], Use::Consume, Mode::Owned,
-              i < fields->size() ? (*fields)[i] : true);
+              i < fields->size() ? copyType((*fields)[i].second) : true);
         continue;
       }
       // Items side by side under a `many` each end up in a place of their own,
@@ -574,10 +601,17 @@ private:
         consumeInto(s.value, Mode::Owned, binding ? binding->elementCopies : true);
         break;
       }
+      // Writing one of the things it holds is that one's question: which of
+      // them is meant is known where it is written, so what may go in is asked
+      // of the field rather than of the struct around it.
+      if (binding && !s.fields.empty()) {
+        consumeInto(s.value, Mode::Owned, partCopies(binding->fills, s.fields));
+        break;
+      }
       consumeInto(s.value, binding ? binding->mode : Mode::Owned,
                   binding ? binding->copies : true, binding && binding->holds,
                   binding ? binding->elementCopies : true,
-                  binding && s.fields.empty() ? binding->fills : std::string());
+                  binding ? binding->fills : std::string());
       if (binding)
         binding->moved = false; // it holds something again
       break;

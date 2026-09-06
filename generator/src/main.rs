@@ -130,9 +130,12 @@ fn main() {
                         Verdict::Refused(why) => {
                             rejected.fetch_add(1, Ordering::Relaxed);
                             if rejected.load(Ordering::Relaxed) <= 3 {
+                                // With the program, because the reason on its
+                                // own says which rule was broken and never
+                                // which line of the generator wrote it.
                                 eprintln!(
                                     "\nseed {seed}: the generator wrote something the \
-                                     compiler would not take —\n{why}"
+                                     compiler would not take —\n{why}\n{program}"
                                 );
                             }
                         }

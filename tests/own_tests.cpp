@@ -278,6 +278,38 @@ void oneOfWhatAStructHoldsGoesOnItsOwn() {
                "    print.stdout['a'.runs \\n];").code(0) == "E0403");
 }
 
+// Writing one of the things a struct holds is that one's question. Asking the
+// struct instead said a number could not be written into a number, because a
+// struct is never copied however little is in it.
+void whatGoesIntoAFieldIsTheFieldsQuestion() {
+  const char *kMixed = "struct 'mixed' [int64 'n', str 's']\n";
+  CHECK(run(std::string(kMixed) + "START {\n"
+            "    var.mut.mixed 'm' = [*1* *hi*];\n"
+            "    var.int64 'n' = [*9*];\n"
+            "    set 'm'.n = ['n'];\n"
+            "    print.stdout['n' \\n];\n}\n").ok());
+
+  // Text is still handed over, and still says so.
+  CHECK(run(std::string(kMixed) + "START {\n"
+            "    var.mut.mixed 'm' = [*1* *hi*];\n"
+            "    var.str 's' = [*bob*];\n"
+            "    set 'm'.s = ['s'];\n}\n").code(0) == "E0406");
+  CHECK(run(std::string(kMixed) + "START {\n"
+            "    var.mut.mixed 'm' = [*1* *hi*];\n"
+            "    var.str 's' = [*bob*];\n"
+            "    set 'm'.s = [move 's'];\n"
+            "    print.stdout['m'.s \\n];\n}\n").ok());
+
+  // Down a path of them, too.
+  CHECK(run("struct 'tag' [str 'name', int64 'runs']\n"
+            "struct 'pair' [tag 'one', int64 'n']\n"
+            "START {\n    var.tag 't' = [*ada* *36*];\n"
+            "    var.mut.pair 'p' = [move 't' *7*];\n"
+            "    var.int64 'r' = [*99*];\n"
+            "    set 'p'.one.runs = ['r'];\n"
+            "    print.stdout['p'.one.runs \\n];\n}\n").ok());
+}
+
 // Its items go into places of their own, so each one is handed over — reading
 // them as pieces of a joined value let an owning one be let go twice.
 void aStructIsFilledRatherThanJoined() {
@@ -322,6 +354,7 @@ int main() {
   whatHoldsLendsIsNotYoursToGiveAway();
   oneOfWhatAStructHoldsGoesOnItsOwn();
   aStructIsFilledRatherThanJoined();
+  whatGoesIntoAFieldIsTheFieldsQuestion();
 
   if (failures == 0)
     std::cout << "all ownership tests passed\n";

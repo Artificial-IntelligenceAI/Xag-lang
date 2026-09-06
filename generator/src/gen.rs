@@ -80,6 +80,19 @@ struct Var {
     /// Lent out right now. Nothing may be handed over, changed or lent again
     /// while this is set, which is the whole of what the region pass checks.
     lent: bool,
+    /// Which struct it is, when it is one. Like `many`, a struct never stands
+    /// where one of the things it holds would.
+    group: Option<usize>,
+    /// Which of the things it holds have gone on their own. A field is known
+    /// where it is written, so this is tracked one at a time — which is the
+    /// whole of what a struct's ownership has that an array's does not.
+    parts_moved: Vec<String>,
+}
+
+/// A struct the program declared, and what it holds in the order it holds it.
+struct Shape {
+    name: String,
+    fields: Vec<(String, Ty)>,
 }
 
 struct Fun {
@@ -93,6 +106,7 @@ pub struct Writer<'a> {
     out: &'a mut String,
     scopes: Vec<Vec<Var>>,
     funs: Vec<Fun>,
+    shapes: Vec<Shape>,
     consts: Vec<Var>,
     next_name: u32,
     indent: usize,
@@ -114,6 +128,7 @@ pub fn generate(seed: u64, size: u32, out: &mut String) {
         out,
         scopes: Vec::new(),
         funs: Vec::new(),
+        shapes: Vec::new(),
         consts: Vec::new(),
         next_name: 0,
         indent: 0,
@@ -144,7 +159,7 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<&Var> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == ty && var.many.is_none() && !var.moved && !var.lent &&
+                if var.ty == ty && var.many.is_none() && var.group.is_none() && !var.moved && !var.lent &&
                    (!want_mutable || var.mutable) {
                     seen.push(var);
                 }
@@ -152,7 +167,7 @@ impl<'a> Writer<'a> {
         }
         if !want_mutable {
             for var in &self.consts {
-                if var.ty == ty && var.many.is_none() {
+                if var.ty == ty && var.many.is_none() && var.group.is_none() {
                     seen.push(var);
                 }
             }
@@ -179,13 +194,13 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<Ty> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && var.many.is_none() && !var.moved && !var.lent {
+                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() && !var.moved && !var.lent {
                     seen.push(var.ty);
                 }
             }
         }
         for var in &self.consts {
-            if Self::numeric(var.ty) && var.many.is_none() {
+            if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() {
                 seen.push(var.ty);
             }
         }
@@ -238,9 +253,17 @@ impl<'a> Writer<'a> {
             self.out.push_str("' = [");
             self.literal(ty);
             self.out.push_str("];\n");
-            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false });
+            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
         }
         if constants > 0 {
+            self.out.push('\n');
+        }
+
+        let shapes = self.rng.below(3);
+        for _ in 0..shapes {
+            self.shape();
+        }
+        if shapes > 0 {
             self.out.push('\n');
         }
 
@@ -257,6 +280,196 @@ impl<'a> Writer<'a> {
         self.finish_scope();
         self.scopes.pop();
         self.out.push_str("}\n");
+    }
+
+    /// `struct 'v3' [int64 'v4', str 'v5']` — two or three things, of types the
+    /// rest of the generator already knows how to write.
+    fn shape(&mut self) {
+        let name = self.fresh();
+        let count = self.rng.below(2) + 2;
+        let mut fields: Vec<(String, Ty)> = Vec::new();
+        self.out.push_str("struct '");
+        self.out.push_str(&name);
+        self.out.push_str("' [");
+        for i in 0..count {
+            if i > 0 {
+                self.out.push_str(", ");
+            }
+            let ty = match self.rng.below(10) {
+                0..=2 => Ty::Str,
+                3 => Ty::Bool,
+                _ => self.pick_whole(),
+            };
+            let field = self.fresh();
+            self.out.push_str(ty.written());
+            self.out.push_str(" '");
+            self.out.push_str(&field);
+            self.out.push('\'');
+            fields.push((field, ty));
+        }
+        self.out.push_str("]\n");
+        self.shapes.push(Shape { name, fields });
+    }
+
+    /// Names holding a struct that nobody is using for anything else.
+    fn groups(&mut self, want_mutable: bool, whole: bool) -> Vec<(String, usize)> {
+        let mut seen = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if let Some(which) = var.group {
+                    if var.many.is_none() && !var.moved && !var.lent
+                        && (!want_mutable || var.mutable)
+                        && (!whole || var.parts_moved.is_empty())
+                    {
+                        seen.push((var.name.clone(), which));
+                    }
+                }
+            }
+        }
+        seen
+    }
+
+    fn pick_group(&mut self, want_mutable: bool, whole: bool) -> Option<(String, usize)> {
+        let seen = self.groups(want_mutable, whole);
+        if seen.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        Some(seen[at].clone())
+    }
+
+    /// One of the things a struct holds that has not gone anywhere.
+    fn pick_field(&mut self, name: &str, which: usize, want: Option<Ty>) -> Option<(String, Ty)> {
+        let gone: Vec<String> = self
+            .scopes
+            .iter()
+            .flatten()
+            .find(|v| v.name == name)
+            .map(|v| v.parts_moved.clone())
+            .unwrap_or_default();
+        let here: Vec<(String, Ty)> = self.shapes[which]
+            .fields
+            .iter()
+            .filter(|(f, ty)| !gone.contains(f) && want.map_or(true, |w| *ty == w))
+            .cloned()
+            .collect();
+        if here.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(here.len() as u32) as usize;
+        Some(here[at].clone())
+    }
+
+    fn note_part_moved(&mut self, name: &str, field: &str) {
+        for scope in self.scopes.iter_mut() {
+            if let Some(var) = scope.iter_mut().find(|v| v.name == name) {
+                var.parts_moved.push(field.to_string());
+                return;
+            }
+        }
+    }
+
+    /// `var.v3 'v9' = [*1* *hello*];`
+    fn group_declaration(&mut self) {
+        if self.shapes.is_empty() {
+            self.print();
+            return;
+        }
+        let which = self.rng.below(self.shapes.len() as u32) as usize;
+        let mutable = self.rng.chance(60);
+        let name = self.fresh();
+        let types: Vec<Ty> = self.shapes[which].fields.iter().map(|(_, t)| *t).collect();
+        let shape_name = self.shapes[which].name.clone();
+        self.pad();
+        self.out.push_str("var.");
+        if mutable {
+            self.out.push_str("mut.");
+        }
+        self.out.push_str(&shape_name);
+        self.out.push_str(" '");
+        self.out.push_str(&name);
+        self.out.push_str("' = [");
+        for (i, ty) in types.iter().enumerate() {
+            if i > 0 {
+                self.out.push(' ');
+            }
+            // Every one of them is a place of its own, so text is written whole
+            // rather than as pieces that would join anywhere else.
+            self.expr(*ty, if *ty == Ty::Str { 0 } else { 1 });
+        }
+        self.out.push_str("];\n");
+        self.declare(Var {
+            name,
+            ty: Ty::Bool, // never asked for: everything picking by type looks past a group
+            mutable,
+            many: None,
+            moved: false,
+            lent: false,
+            group: Some(which),
+            parts_moved: Vec::new(),
+        });
+    }
+
+    /// `print.stdout['v9'.v4 \n];`
+    fn group_read(&mut self) {
+        let Some((name, which)) = self.pick_group(false, false) else {
+            self.print();
+            return;
+        };
+        let Some((field, ty)) = self.pick_field(&name, which, None) else {
+            self.print();
+            return;
+        };
+        self.pad();
+        self.out.push_str("print.stdout['");
+        self.out.push_str(&name);
+        self.out.push_str("'.");
+        self.out.push_str(&field);
+        if ty == Ty::Str {
+            self.out.push_str(" \\n];\n");
+        } else {
+            self.out.push_str(" \\n];\n");
+        }
+    }
+
+    /// `set 'v9'.v4 = […];` — one of them, leaving the rest where they were.
+    fn group_set(&mut self) {
+        let Some((name, which)) = self.pick_group(true, false) else {
+            self.print();
+            return;
+        };
+        let Some((field, ty)) = self.pick_field(&name, which, None) else {
+            self.print();
+            return;
+        };
+        self.pad();
+        self.out.push_str("set '");
+        self.out.push_str(&name);
+        self.out.push_str("'.");
+        self.out.push_str(&field);
+        self.out.push_str(" = [");
+        self.expr(ty, if ty == Ty::Str { 0 } else { 1 });
+        self.out.push_str("];\n");
+    }
+
+    /// `consume[move 'v9'.v5];` — one of them handed over on its own, which is
+    /// the thing a struct has that an array does not.
+    fn group_part_moved(&mut self) {
+        let Some((name, which)) = self.pick_group(false, false) else {
+            self.print();
+            return;
+        };
+        let Some((field, _)) = self.pick_field(&name, which, Some(Ty::Str)) else {
+            self.print();
+            return;
+        };
+        self.pad();
+        self.out.push_str("consume[move '");
+        self.out.push_str(&name);
+        self.out.push_str("'.");
+        self.out.push_str(&field);
+        self.out.push_str("];\n");
+        self.note_part_moved(&name, &field);
     }
 
     fn function(&mut self) {
@@ -283,7 +496,7 @@ impl<'a> Writer<'a> {
             self.out.push_str(&param);
             self.out.push('\'');
             params.push(ty);
-            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false });
+            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
         }
         self.out.push_str("] {\n");
         self.indent = 1;
@@ -312,7 +525,7 @@ impl<'a> Writer<'a> {
             .last()
             .unwrap()
             .iter()
-            .filter(|v| v.ty == Ty::Str && v.many.is_none() && !v.moved && !v.lent)
+            .filter(|v| v.ty == Ty::Str && v.many.is_none() && v.group.is_none() && !v.moved && !v.lent)
             .map(|v| v.name.clone())
             .collect();
         for name in owned {
@@ -344,7 +557,7 @@ impl<'a> Writer<'a> {
     }
 
     fn statement(&mut self) {
-        match self.rng.below(16) {
+        match self.rng.below(20) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
             5..=6 => self.print(),
@@ -354,6 +567,10 @@ impl<'a> Writer<'a> {
             11..=12 => self.array_declaration(),
             13 => self.array_set(),
             14 => self.array_read(),
+            15..=16 => self.group_declaration(),
+            17 => self.group_read(),
+            18 => self.group_set(),
+            19 => self.group_part_moved(),
             _ => self.print(),
         }
     }
@@ -363,7 +580,7 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<String> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == Ty::Str && var.many.is_none() && !var.moved && !var.lent
+                if var.ty == Ty::Str && var.many.is_none() && var.group.is_none() && !var.moved && !var.lent
                     && (!writable || var.mutable) {
                     seen.push(var.name.clone());
                 }
@@ -517,7 +734,7 @@ impl<'a> Writer<'a> {
             }
         }
         self.out.push_str("];\n");
-        self.declare(Var { name, ty, mutable, many: Some(length), moved: false, lent: false });
+        self.declare(Var { name, ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new() });
     }
 
     /// `set 'v'[*i*] = […];` — one place, and the index is written in range so
@@ -574,7 +791,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.expr(ty, 2);
         self.out.push_str("];\n");
-        self.declare(Var { name, ty, mutable, many: None, moved: false, lent: false });
+        self.declare(Var { name, ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
     }
 
     fn assignment(&mut self) {
@@ -582,7 +799,7 @@ impl<'a> Writer<'a> {
         let mut choices: Vec<(String, Ty)> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && var.many.is_none() && var.mutable
+                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() && var.mutable
                     && !var.moved && !var.lent {
                     choices.push((var.name.clone(), var.ty));
                 }
@@ -680,7 +897,7 @@ impl<'a> Writer<'a> {
         push_number(self.out, last);
         self.out.push_str("*] {\n");
         self.indent += 1;
-        let held = Var { name: counter, ty, mutable: false, many: None, moved: false, lent: false };
+        let held = Var { name: counter, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() };
         if keeps {
             self.declare(held.clone());
             self.scopes.push(Vec::new());
