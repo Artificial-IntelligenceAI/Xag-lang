@@ -1,4 +1,6 @@
 #include "xag/Check.h"
+#include "xag/Fold.h"
+#include "xag/Mir.h"
 #include "xag/Lexer.h"
 #include "xag/Parser.h"
 
@@ -38,6 +40,21 @@ Checked run(const std::string &text) {
 }
 
 Checked inStart(const std::string &body) { return run("START {\n" + body + "\n}\n"); }
+
+// The first code from the pass that runs once the middle layer is built, or ""
+// when it had nothing to say.
+std::string built(const std::string &text) {
+  const xag::Source source("test.xag", text);
+  const xag::LexResult lexed = xag::lex(source);
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  if (!lexed.ok() || !parsed.ok() || !checked.ok())
+    return "(did not reach it)";
+  xag::MirResult made = xag::build(source, parsed.program, checked);
+  xag::elaborate(made.mir);
+  const xag::FoldResult folded = xag::fold(source, made.mir);
+  return folded.diagnostics.empty() ? "" : folded.diagnostics.front().code;
+}
 
 void aNameMustBeDeclared() {
   CHECK(inStart("print.stdout['nope' \\n];").code(0) == "E0501");
@@ -230,6 +247,36 @@ void aCountedLoopCountsInItsOwnType() {
 // A counted loop adds one past where it stops to know it is done. When the last
 // value is the most the counter can hold, that one more does not fit, so the
 // loop cannot finish — and this is certain rather than suspected.
+// What is written down is worked out at build time, and what is written down
+// and certainly wrong is refused rather than left to stop when it is reached.
+// These come from the pass after the middle layer is built, so they arrive
+// through `xagc check` rather than from the checker itself.
+void whatIsWrittenDownIsWorkedOut() {
+  CHECK(built("START {\n    var.int64 'n' = [*5* / *0*];\n"
+              "    print.stdout['n' \\n];\n}\n") == "E0533");
+  CHECK(built("START {\n    var.int64 'n' = [*5* mod *0*];\n"
+              "    print.stdout['n' \\n];\n}\n") == "E0533");
+  CHECK(built("START {\n    var.many.int64 'xs' = [*10* *20* *30*];\n"
+              "    print.stdout['xs'[*7*] \\n];\n}\n") == "E0532");
+
+  // A place that is there, and a divisor that is not zero, are left alone.
+  CHECK(built("START {\n    var.many.int64 'xs' = [*10* *20* *30*];\n"
+              "    print.stdout['xs'[*2*] \\n];\n}\n") == "");
+  CHECK(built("START {\n    var.int64 'n' = [*5* / *2*];\n"
+              "    print.stdout['n' \\n];\n}\n") == "");
+
+  // A name holding something written down is that thing, so this is caught too.
+  CHECK(built("START {\n    var.many.int64 'xs' = [*10* *20*];\n"
+              "    var.int64 'i' = [*9*];\n"
+              "    print.stdout['xs'['i'] \\n];\n}\n") == "E0532");
+
+  // Nothing is claimed about a place that is not known until it runs.
+  CHECK(built("fn.nothing 'at' [ref.many.int64 'xs', int64 'i'] {\n"
+              "    print.stdout['xs'['i'] \\n];\n}\n"
+              "START {\n    var.many.int64 'ns' = [*10* *20*];\n"
+              "    at[ref 'ns', *1*];\n}\n") == "");
+}
+
 void aLoopThatCannotFinishIsRefused() {
   CHECK(inStart("loop.range.int8 'i' = [*0*, *127*] { }").code(0) == "E0531");
   CHECK(inStart("loop.range.uint8 'i' = [*0*, *255*] { }").code(0) == "E0531");
@@ -521,6 +568,7 @@ int main() {
   breakNeedsALoop();
   conditionsAskABool();
   aCountedLoopCountsInItsOwnType();
+  whatIsWrittenDownIsWorkedOut();
   aLoopThatCannotFinishIsRefused();
   aNameMaySayItWraps();
   aPermCounterOutlivesItsLoop();

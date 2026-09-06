@@ -1,5 +1,6 @@
 #include "xag/Lexer.h"
 #include "xag/Check.h"
+#include "xag/Fold.h"
 #include "xag/Fast.h"
 #include "xag/Interpret.h"
 #include "xag/Native.h"
@@ -220,28 +221,15 @@ int checkFile(const std::string &path) {
 int runFile(const std::string &path) {
   if (!decimalIsThere(path))
     return 1;
+  // The same road every other engine takes. Running had a pipeline of its own,
+  // which had drifted: it never asked the region pass anything, so `xagc run`
+  // ran programs that `xagc check` and `xagc build` both refused — and it is
+  // the engine that is meant to be believed.
   std::string text;
-  if (!readSource(path, text))
-    return 1;
-
-  const xag::Source source(path, text);
-  const xag::LexResult lexed = xag::lex(source);
-  if (!lexed.ok())
-    return report(source, lexed.diagnostics);
-  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
-  if (!parsed.ok())
-    return report(source, parsed.diagnostics);
-  const xag::CheckResult checked = xag::check(source, parsed.program);
-  if (!checked.ok())
-    return report(source, checked.diagnostics);
-  const xag::OwnResult owned = xag::own(source, parsed.program);
-  if (!owned.ok())
-    return report(source, owned.diagnostics);
-
-  xag::MirResult built = xag::build(source, parsed.program, checked, settingsUsed(path));
-  if (!built.ok())
-    return report(source, built.diagnostics);
-  xag::elaborate(built.mir);
+  xag::MirResult built;
+  int status = 0;
+  if (!ready(path, text, built, status))
+    return status;
 
   const xag::InterpretResult ran = xag::interpret(built.mir);
   if (!ran.ran) {
@@ -300,6 +288,15 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
     return false;
   }
   xag::elaborate(built.mir);
+
+  // What is already written down is worked out here, once, rather than by every
+  // engine on every run — and what is written down and certainly wrong is
+  // refused rather than left to stop when it is reached.
+  const xag::FoldResult folded = xag::fold(source, built.mir);
+  if (!folded.ok()) {
+    status = report(source, folded.diagnostics);
+    return false;
+  }
 
   // How long a loan lasts is a question the graph answers, so it is asked here
   // rather than of the tree.
@@ -379,9 +376,15 @@ int mirFile(const std::string &path) {
 
   xag::MirResult built = xag::build(source, parsed.program, checked, settingsUsed(path));
   xag::elaborate(built.mir);
-  if (built.ok())
-    xag::print(built.mir, std::cout);
-  return report(source, built.diagnostics);
+  if (!built.ok())
+    return report(source, built.diagnostics);
+  // Folded before it is shown, because what is printed here should be what the
+  // engines are handed rather than what they were nearly handed.
+  const xag::FoldResult folded = xag::fold(source, built.mir);
+  if (!folded.ok())
+    return report(source, folded.diagnostics);
+  xag::print(built.mir, std::cout);
+  return 0;
 }
 
 int llvmSmoke() {

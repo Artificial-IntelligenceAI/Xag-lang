@@ -92,6 +92,7 @@ add_library(xagfront STATIC
   src/MirPrinter.cpp
   src/MirElaborate.cpp
   src/Interpret.cpp
+  src/Fold.cpp
   src/Regions.cpp
   src/Fast.cpp)
 target_include_directories(xagfront PUBLIC include)
