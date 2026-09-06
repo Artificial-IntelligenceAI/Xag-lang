@@ -58,7 +58,11 @@ enum class Op : uint8_t {
   ReadLine, Arguments, NumberOf,
   Not, And, Or,
   Order, // turn a -1/0/1 into a truth, by the test in `aux`
-  PushArg, Call, PrintWhole, PrintReal, PrintWide, PrintDeci, PrintText, PrintBool,
+  // One argument to the step before it — a Call, a MakeMany or a TextJoin —
+  // which reads as many of these as it was told to and steps over them. An
+  // Argument is data laid out as code, never a step of its own.
+  Argument,
+  Call, PrintWhole, PrintReal, PrintWide, PrintDeci, PrintText, PrintBool,
   Jump, JumpUnless, Return, ReturnValue,
 };
 
@@ -223,6 +227,22 @@ private:
     return into(operand, scratch, borrowed);
   }
 
+  // Every operand into a slot, in the order written, before the step that
+  // takes them all.
+  std::vector<uint32_t> gather(const std::vector<Operand> &operands, unsigned &scratch) {
+    std::vector<uint32_t> froms;
+    froms.reserve(operands.size());
+    for (const Operand &operand : operands)
+      froms.push_back(into(operand, scratch));
+    return froms;
+  }
+
+  // The slots a step takes, laid out after it as Arguments for it to read.
+  void arguments(const std::vector<uint32_t> &froms) {
+    for (const uint32_t from : froms)
+      emit(Code{Op::Argument, 0, from, 0, 0});
+  }
+
   Routine compile(const Body &body) {
     body_ = &body;
     Routine routine;
@@ -348,12 +368,9 @@ private:
 
     switch (value.kind) {
     case RValueKind::Collect: {
-      for (const Operand &operand : value.operands) {
-        const uint32_t from = into(operand, scratch);
-        emit(Code{Op::PushArg, 0, from, 0, 0});
-      }
-      emit(Code{Op::MakeMany, s.place, 0,
-                static_cast<uint32_t>(value.operands.size()), 0});
+      const std::vector<uint32_t> froms = gather(value.operands, scratch);
+      emit(Code{Op::MakeMany, s.place, 0, static_cast<uint32_t>(froms.size()), 0});
+      arguments(froms);
       return;
     }
 
@@ -420,12 +437,9 @@ private:
       binary(s, scratch, through);
       return;
     case RValueKind::Join: {
-      for (const Operand &piece : value.operands) {
-        const uint32_t from = into(piece, scratch);
-        emit(Code{Op::PushArg, 0, from, 0, 0});
-      }
-      emit(Code{Op::TextJoin, s.place, 0,
-                static_cast<uint32_t>(value.operands.size()), 0});
+      const std::vector<uint32_t> froms = gather(value.operands, scratch);
+      emit(Code{Op::TextJoin, s.place, 0, static_cast<uint32_t>(froms.size()), 0});
+      arguments(froms);
       return;
     }
     case RValueKind::Call:
@@ -594,13 +608,11 @@ private:
       emit(Code{Op::TextCount, s.place, from, 0, 0});
       return;
     }
-    for (const Operand &operand : value.operands) {
-      const uint32_t from = into(operand, scratch);
-      emit(Code{Op::PushArg, 0, from, 0, 0});
-    }
+    const std::vector<uint32_t> froms = gather(value.operands, scratch);
     const uint32_t place = through ? scratch++ : s.place;
     emit(Code{Op::Call, place, findRoutine(value.callee),
-              static_cast<uint32_t>(value.operands.size()), 0});
+              static_cast<uint32_t>(froms.size()), 0});
+    arguments(froms);
     if (through)
       emit(Code{Op::StoreThrough, s.place, place, 0, 0});
   }
@@ -624,7 +636,7 @@ public:
       return FastResult{false, "there is no START to run"};
 
     Slot answer;
-    call(start, 0, answer, 0);
+    call(start, 0, answer, nullptr, nullptr, 0);
     end(answer);
     if (trouble_.empty() && !xag_balance_is_clear())
       trouble_ = "the program ended still holding " +
@@ -638,10 +650,6 @@ private:
 
   std::vector<Routine> routines_;
   std::vector<Slot> stack_;
-  // Where in the stack the arguments pushed so far are. One list for the whole
-  // machine rather than one per frame: a call takes its arguments off the top
-  // before it pushes any of its own, so the frames never see each other's.
-  std::vector<uint32_t> arguments_;
   std::vector<XagStr> pieces_; // the texts a join is putting side by side
   std::string trouble_;
   Settings settings_;
@@ -711,18 +719,17 @@ private:
   // competes with the code pointer and the frame for a register, and once
   // those spill to the stack every step pays to fetch them back.
 
-  [[gnu::noinline]] void makeMany(Slot &to, unsigned count) {
+  [[gnu::noinline]] void makeMany(Slot &to, Slot *slots, const Code *given, unsigned count) {
     auto *held = new std::vector<Slot>();
     held->reserve(count);
     for (unsigned i = 0; i < count; ++i) {
-      const uint32_t from = arguments_[arguments_.size() - count + i];
-      held->push_back(stack_[from]);
+      Slot &from = slots[given[i].a];
+      held->push_back(from);
       // What went in belongs to the array now, and the slot it came from
       // must not end it a second time.
-      if (stack_[from].owns)
-        stack_[from] = Slot{};
+      if (from.owns)
+        from = Slot{};
     }
-    arguments_.resize(arguments_.size() - count);
     end(to);
     to = Slot{};
     to.places = held;
@@ -765,14 +772,13 @@ private:
     (*of.places)[at] = kept;
   }
 
-  [[gnu::noinline]] void joinText(Slot &to, unsigned count) {
+  [[gnu::noinline]] void joinText(Slot &to, Slot *slots, const Code *given, unsigned count) {
     // The pieces are gathered into a list kept from one join to the next, so
     // that joining does not take and give back a list's worth of memory every
     // time on top of the text's.
     pieces_.clear();
     for (unsigned i = 0; i < count; ++i)
-      pieces_.push_back(behind(stack_[arguments_[arguments_.size() - count + i]]).text);
-    arguments_.resize(arguments_.size() - count);
+      pieces_.push_back(behind(slots[given[i].a]).text);
     XagStr joined{nullptr, 0, 0};
     xag_str_join(&joined, pieces_.data(), pieces_.size());
     end(to);
@@ -780,30 +786,26 @@ private:
     to.owns = true;
   }
 
-  // Runs a routine with the last `given` pushed arguments, which it takes off
-  // the list whether or not it can run.
-  void call(unsigned which, uint32_t base, Slot &answer, unsigned given) {
-    const uint32_t *pushed = arguments_.data() + (arguments_.size() - given);
-    if (which >= routines_.size()) {
-      arguments_.resize(arguments_.size() - given);
+  // Runs a routine on `given` arguments, each naming a slot in the caller's
+  // frame at `from`.
+  void call(unsigned which, uint32_t base, Slot &answer, Slot *from, const Code *given,
+            unsigned count) {
+    if (which >= routines_.size())
       return;
-    }
     if (++depth_ > 400 || base + routines_[which].slots + 8 >= kStack) {
       trouble_ = "a function called itself further than this engine will follow";
       --depth_;
-      arguments_.resize(arguments_.size() - given);
       return;
     }
     const Routine &routine = routines_[which];
     for (unsigned i = 0; i < routine.slots; ++i)
       stack_[base + i] = Slot{};
-    for (unsigned i = 0; i < given && i + 1 < routine.slots; ++i)
-      stack_[base + i + 1] = stack_[pushed[i]];
+    for (unsigned i = 0; i < count && i + 1 < routine.slots; ++i)
+      stack_[base + i + 1] = from[given[i].a];
     // What was handed over is gone from where it was.
-    for (unsigned i = 0; i < given; ++i)
-      if (stack_[pushed[i]].owns)
-        stack_[pushed[i]] = Slot{};
-    arguments_.resize(arguments_.size() - given);
+    for (unsigned i = 0; i < count; ++i)
+      if (from[given[i].a].owns)
+        from[given[i].a] = Slot{};
 
     const Code *code = routine.code.data();
     const Constant *pool = routine.pool.data();
@@ -1158,11 +1160,17 @@ private:
         break;
       }
 
-      case Op::MakeMany: makeMany(to, one.b); break;
+      case Op::MakeMany:
+        makeMany(to, slots, code + at + 1, one.b);
+        at += one.b;
+        break;
       case Op::FillMany: fillMany(to, read(one.a), read(one.b).whole); break;
       case Op::ElementAt: elementAt(to, read(one.a), read(one.b).whole); break;
       case Op::StoreAt: storeAt(read(one.to), read(one.a).whole, slots[one.b]); break;
-      case Op::TextJoin: joinText(to, one.b); break;
+      case Op::TextJoin:
+        joinText(to, slots, code + at + 1, one.b);
+        at += one.b;
+        break;
 
       case Op::Not: to.whole = read(one.a).whole == 0; break;
       case Op::And: to.whole = read(one.a).whole != 0 && read(one.b).whole != 0; break;
@@ -1181,7 +1189,10 @@ private:
         break;
       }
 
-      case Op::PushArg: arguments_.push_back(base + one.a); break;
+      case Op::Argument:
+        // Never a step of its own: the step before it read it and stepped over
+        // it. Only a routine that began with one could arrive here.
+        break;
       case Op::Call: {
         // The answer lands where it is wanted rather than passing through a
         // slot of its own. What was there is ended first: it cannot be one of
@@ -1190,10 +1201,11 @@ private:
         end(to);
         to = Slot{};
         steps_ = steps;
-        call(one.a, base + routine.slots, to, one.b);
+        call(one.a, base + routine.slots, to, slots, code + at + 1, one.b);
         steps = steps_;
         if (!trouble_.empty())
           goto finished;
+        at += one.b;
         break;
       }
       case Op::PrintWhole: xag_print_int(read(one.a).whole, one.aux >> 1, one.aux & 1); break;
