@@ -900,6 +900,74 @@ private:
     to.owns = true;
   }
 
+  [[gnu::noinline]] void readLine(Slot &to) {
+    XagStr line{nullptr, 0, 0};
+    const int got = xag_read_line(&line);
+    end(to);
+    to = Slot{};
+    if (got) {
+      to.text = line;
+      to.owns = true;
+    } else {
+      to.empty = true; // nothing left, which is not an empty line
+    }
+  }
+
+  [[gnu::noinline]] void takeArguments(Slot &to) {
+    XagMany given{nullptr, 0};
+    xag_arguments(&given);
+    auto *held = new std::vector<Slot>();
+    const XagStr *from = static_cast<const XagStr *>(given.places);
+    for (uint64_t i = 0; i < given.length; ++i) {
+      Slot one;
+      one.text = from[i];
+      one.owns = true; // taken out of the runtime's array, which goes below
+      held->push_back(one);
+    }
+    xag_many_drop(&given);
+    end(to);
+    to = Slot{};
+    to.places = held;
+    to.owns = true;
+    xag_note_taken();
+  }
+
+  [[gnu::noinline]] void numberOf(Slot &to, const Slot &text, uint32_t aux) {
+    const uint32_t width = aux >> 3;
+    const uint32_t family = (aux >> 1) & 0x3;
+    const int32_t isSignedOne = aux & 1;
+    const char *bytes = text.text.bytes ? text.text.bytes : "";
+    Slot answer;
+    answer.empty = true;
+    if (family == 0) {
+      XagInt got = 0;
+      if (xag_int_reads(width, isSignedOne, bytes, text.text.length, &got)) {
+        answer = Slot{};
+        answer.whole = got;
+      }
+    } else if (family == 2) {
+      XagDeci got = 0;
+      if (xag_deci_reads(width, bytes, text.text.length, &got)) {
+        answer = Slot{};
+        answer.whole = static_cast<XagInt>(got);
+      }
+    } else if (width == 128) {
+      XagBin128 got = 0;
+      if (xag_bin128_reads(bytes, text.text.length, &got)) {
+        answer = Slot{};
+        answer.whole = static_cast<XagInt>(got);
+      }
+    } else {
+      double got = 0;
+      if (xag_bin_reads(bytes, text.text.length, width, &got)) {
+        answer = Slot{};
+        answer.real = got;
+      }
+    }
+    end(to);
+    to = answer;
+  }
+
   // Runs a routine on `given` arguments, each naming a slot in the caller's
   // frame at `from`.
   void call(unsigned which, uint32_t base, Slot &answer, Slot *from, const Code *given,
@@ -1180,77 +1248,9 @@ private:
       case Op::TextCompare:
         to.whole = xag_str_compare(&read(one.a).text, &read(one.b).text);
         break;
-      case Op::ReadLine: {
-        XagStr line{nullptr, 0, 0};
-        const int got = xag_read_line(&line);
-        end(to);
-        to = Slot{};
-        if (got) {
-          to.text = line;
-          to.owns = true;
-        } else {
-          to.empty = true; // nothing left, which is not an empty line
-        }
-        break;
-      }
-
-      case Op::Arguments: {
-        XagMany given{nullptr, 0};
-        xag_arguments(&given);
-        auto *held = new std::vector<Slot>();
-        const XagStr *from = static_cast<const XagStr *>(given.places);
-        for (uint64_t i = 0; i < given.length; ++i) {
-          Slot one;
-          one.text = from[i];
-          one.owns = true; // taken out of the runtime's array, which goes below
-          held->push_back(one);
-        }
-        xag_many_drop(&given);
-        end(to);
-        to = Slot{};
-        to.places = held;
-        to.owns = true;
-        xag_note_taken();
-        break;
-      }
-
-      case Op::NumberOf: {
-        Slot &text = read(one.a);
-        const uint32_t width = one.aux >> 3;
-        const uint32_t family = (one.aux >> 1) & 0x3;
-        const int32_t isSignedOne = one.aux & 1;
-        const char *bytes = text.text.bytes ? text.text.bytes : "";
-        Slot answer;
-        answer.empty = true;
-        if (family == 0) {
-          XagInt got = 0;
-          if (xag_int_reads(width, isSignedOne, bytes, text.text.length, &got)) {
-            answer = Slot{};
-            answer.whole = got;
-          }
-        } else if (family == 2) {
-          XagDeci got = 0;
-          if (xag_deci_reads(width, bytes, text.text.length, &got)) {
-            answer = Slot{};
-            answer.whole = static_cast<XagInt>(got);
-          }
-        } else if (width == 128) {
-          XagBin128 got = 0;
-          if (xag_bin128_reads(bytes, text.text.length, &got)) {
-            answer = Slot{};
-            answer.whole = static_cast<XagInt>(got);
-          }
-        } else {
-          double got = 0;
-          if (xag_bin_reads(bytes, text.text.length, width, &got)) {
-            answer = Slot{};
-            answer.real = got;
-          }
-        }
-        end(to);
-        to = answer;
-        break;
-      }
+      case Op::ReadLine: readLine(to); break;
+      case Op::Arguments: takeArguments(to); break;
+      case Op::NumberOf: numberOf(to, read(one.a), one.aux); break;
 
       case Op::LoadNone:
         end(to);
