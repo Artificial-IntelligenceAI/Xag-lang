@@ -198,3 +198,11 @@ add_test(NAME decimal_hardware_says_why
                  ${CMAKE_CURRENT_SOURCE_DIR}/examples/counting.xag)
 set_tests_properties(decimal_hardware_says_why PROPERTIES
   PASS_REGULAR_EXPRESSION "this build has software decimal")
+
+# A prefix a tarball, `cmake --install` and a Homebrew formula all agree on.
+# `xagc` looks for the runtime relative to itself, so these four places are the
+# whole of what an install is.
+install(TARGETS xagc RUNTIME DESTINATION bin)
+install(TARGETS xagrt ARCHIVE DESTINATION lib/xag)
+install(FILES runtime/xag_runtime.h DESTINATION include/xag)
+install(DIRECTORY examples/ DESTINATION share/xag/examples FILES_MATCHING PATTERN "*.xag")

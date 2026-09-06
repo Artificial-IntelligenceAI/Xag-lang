@@ -35,6 +35,17 @@ prints its tree, `xagc check <file>` checks it, `xagc mir <file>` prints the
 mid-level IR, and `xagc llvm-smoke` proves the LLVM backend is reachable. Run the
 tests with `ctest --test-dir build`.
 
+## Installing
+
+```sh
+cmake --install build --prefix /usr/local
+```
+
+That lays out `bin/xagc`, `lib/xag/libxagrt.a`, `include/xag/xag_runtime.h` and
+`share/xag/examples`. `xagc` finds the runtime relative to its own executable
+— following symlinks first, so a link in a `bin` somewhere else still works —
+and `XAG_RUNTIME` overrides it if you keep the runtime elsewhere.
+
 `xagc run <file>` runs a program on the test interpreter — the engine built to be
 obviously correct rather than fast, which walks the IR as written and does nothing
 clever anywhere. It is the one to believe when the engines disagree.

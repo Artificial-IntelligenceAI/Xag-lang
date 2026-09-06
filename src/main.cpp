@@ -12,6 +12,13 @@
 
 #include "xag_runtime.h"
 
+#include <climits>
+#include <cstdlib>
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -169,6 +176,59 @@ int report(const xag::Source &source, const std::vector<xag::Diagnostic> &diagno
     xag::render(source, one, std::cerr);
   xag::renderTally(errors.size(), std::cerr);
   return 1;
+}
+
+// Where this very program is, with every symlink followed. Homebrew puts a
+// link in `bin` pointing into the cellar, and an unfollowed link would send
+// `../lib` somewhere there is no runtime.
+std::string ownPath() {
+  char resolved[PATH_MAX] = {};
+#if defined(__APPLE__)
+  char raw[PATH_MAX] = {};
+  uint32_t room = sizeof(raw);
+  if (_NSGetExecutablePath(raw, &room) != 0)
+    return {};
+  if (!realpath(raw, resolved))
+    return raw;
+#else
+  const ssize_t length = readlink("/proc/self/exe", resolved, sizeof(resolved) - 1);
+  if (length <= 0)
+    return {};
+  resolved[length] = '\0';
+#endif
+  return resolved;
+}
+
+std::string directoryOf(const std::string &path) {
+  const std::size_t slash = path.rfind('/');
+  return slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+}
+
+bool isThere(const std::string &path) {
+  return !path.empty() && access(path.c_str(), R_OK) == 0;
+}
+
+// The runtime a built program is linked against, looked for rather than baked
+// in. It used to be the absolute path of whatever build directory compiled the
+// compiler, so `xagc build` worked on one machine, in one directory, until
+// somebody renamed it.
+std::string runtimeLibrary() {
+  if (const char *said = std::getenv("XAG_RUNTIME"); said && *said)
+    return said;
+  const std::string beside = directoryOf(ownPath());
+  if (!beside.empty()) {
+    // Installed: `<prefix>/bin/xagc` and `<prefix>/lib/xag/libxagrt.a`.
+    const std::string under = beside + "/../lib/xag/libxagrt.a";
+    if (isThere(under))
+      return under;
+    // A build directory, wherever it has been moved to since.
+    const std::string here = beside + "/libxagrt.a";
+    if (isThere(here))
+      return here;
+  }
+  // The build directory this compiler was built in, which is right until it
+  // is not.
+  return XAG_RUNTIME_LIB;
 }
 
 bool ready(const std::string &path, std::string &text, xag::MirResult &built,
@@ -331,9 +391,19 @@ int buildFile(const std::string &path) {
     return 1;
   }
 
+  const std::string runtime = runtimeLibrary();
+  if (!isThere(runtime)) {
+    std::cerr << "xagc: cannot find the runtime to link against.\n"
+              << "  looked for: " << runtime << '\n'
+              << "  set XAG_RUNTIME to it, or install xagc so that\n"
+              << "  `<prefix>/lib/xag/libxagrt.a` sits beside `<prefix>/bin/xagc`.\n";
+    std::remove(object.c_str());
+    return 1;
+  }
+
   // Every path here can hold a space, so every path here is quoted.
-  const std::string command = "cc \"" + object + "\" \"" XAG_RUNTIME_LIB "\" -o \"" +
-                              stem + "\"";
+  const std::string command =
+      "cc \"" + object + "\" \"" + runtime + "\" -o \"" + stem + "\"";
   if (std::system(command.c_str()) != 0) {
     std::cerr << "xagc: the linker would not put it together\n";
     return 1;
