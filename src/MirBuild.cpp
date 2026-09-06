@@ -391,7 +391,9 @@ private:
                           : operandOf(*e.children[0]));
       emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Element, {}, {}, 0, std::move(parts),
-                            typeRef(spelled)}});
+                            typeRef(spelled),
+                            // Already answered where the program was read.
+                            checked_.settled.count(&e) != 0}});
       return into;
     }
 

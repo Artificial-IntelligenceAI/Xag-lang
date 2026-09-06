@@ -448,6 +448,98 @@ private:
     return false;
   }
 
+  // The name a loop counts the places of: `[*0*, (count['xs'] - *1*)]`, however
+  // the counting is bracketed and whether it borrows or not.
+  static std::string countedOver(const Stmt &s) {
+    if (s.value.values.size() != 2)
+      return {};
+    __int128 from = 0;
+    if (!wholeItemOf1(s.value.values[0], from) || from != 0)
+      return {};
+    if (s.value.values[1].items.size() != 1)
+      return {};
+    const Expr &last = inside(*s.value.values[1].items[0]);
+    if (last.kind != ExprKind::Binary || last.text != "-" || last.children.size() != 2)
+      return {};
+    const Expr &one = inside(*last.children[1]);
+    if (one.kind != ExprKind::Written || one.text != "1")
+      return {};
+    const Expr &counting = inside(*last.children[0]);
+    if (counting.kind != ExprKind::Call || counting.path.size() != 1 ||
+        counting.path[0] != "count" || counting.args.values.size() != 1 ||
+        counting.args.values[0].items.size() != 1)
+      return {};
+    const Expr &of = inside(*counting.args.values[0].items[0]);
+    if (of.kind == ExprKind::Name)
+      return of.text;
+    // `count[ref 'xs']` counts the same places `'xs'` has.
+    if (of.kind == ExprKind::Borrow && of.children.size() == 1 &&
+        of.children[0]->kind == ExprKind::Name)
+      return of.children[0]->text;
+    return {};
+  }
+
+  // Whether anything in here is set into that name. A `many` never changes
+  // length, but a name can be given a different one.
+  static bool setsInto(const Block &body, const std::string &name) {
+    for (const StmtPtr &s : body.stmts) {
+      if (s->kind == StmtKind::Set && s->name == name && !s->index)
+        return true;
+      if (setsInto(s->body, name))
+        return true;
+      for (const Branch &branch : s->branches)
+        if (setsInto(branch.body, name))
+          return true;
+    }
+    return false;
+  }
+
+  // A loop counting the places a `many` has, reaching into it with its own
+  // counter, reaches a place it has every time round. A `many` is a fixed
+  // length once made, so `count[…]` does not move under it — which is what
+  // makes this answerable here rather than only guessable.
+  void reachingInto(const Stmt &s) {
+    const std::string over = countedOver(s);
+    if (over.empty() || setsInto(s.body, over))
+      return;
+    markReaches(s.body, over, s.name);
+  }
+
+  void markReaches(const Block &body, const std::string &over,
+                   const std::string &counter) {
+    for (const StmtPtr &one : body.stmts) {
+      for (const Value &v : one->value.values)
+        for (const ExprPtr &item : v.items)
+          markReaches(*item, over, counter);
+      if (one->index)
+        markReaches(*one->index, over, counter);
+      if (one->condition)
+        markReaches(*one->condition, over, counter);
+      if (one->call)
+        markReaches(*one->call, over, counter);
+      markReaches(one->body, over, counter);
+      for (const Branch &branch : one->branches) {
+        if (branch.condition)
+          markReaches(*branch.condition, over, counter);
+        markReaches(branch.body, over, counter);
+      }
+    }
+  }
+
+  void markReaches(const Expr &e, const std::string &over,
+                   const std::string &counter) {
+    if (e.kind == ExprKind::Index && e.text == over && e.children.size() == 1) {
+      const Expr &at = inside(*e.children[0]);
+      if (at.kind == ExprKind::Name && at.text == counter)
+        result_.settled.insert(&e);
+    }
+    for (const ExprPtr &child : e.children)
+      markReaches(*child, over, counter);
+    for (const Value &v : e.args.values)
+      for (const ExprPtr &item : v.items)
+        markReaches(*item, over, counter);
+  }
+
   // A counted loop with both ends written down runs a known number of times, so
   // what it adds up is a number rather than a guess.
   void countingUp(const Stmt &s, Ty counted) {
@@ -1408,6 +1500,7 @@ private:
       // name no longer holds what it was given, and this is asking where it
       // started from.
       countingUp(s, type);
+      reachingInto(s);
       ++loopDepth_;
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);

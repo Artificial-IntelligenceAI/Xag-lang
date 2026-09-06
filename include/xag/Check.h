@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace xag {
@@ -137,6 +138,10 @@ struct CheckResult {
   // The structs a file declared, so nothing after the checker has to read them
   // out of the tree again. A `Ty` naming one is an index into this.
   std::vector<Shape> shapes;
+  // Reaches into a `many` that were shown to be places it has, so that nothing
+  // asks again while the program runs. A `many` is a fixed length once it is
+  // made, which is what makes a loop counting to `count[…]` answerable here.
+  std::unordered_set<const Expr *> settled;
 
   Ty of(const Expr *e) const {
     auto found = expressions.find(e);

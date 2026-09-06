@@ -300,6 +300,36 @@ void aSettledPlaceIsNotAskedAgain() {
         "START { var.many.int64 'ns' = [*10* *20*];\n"
         "  at[ref 'ns', *1*]; }\n",
         "xag_many_out_of_range");
+
+  // A loop counting the places a `many` has reaches one it has every time
+  // round, because a `many` is a fixed length once it is made. This is the
+  // shape every program that walks an array writes.
+  REJECTS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+          "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+          "    print.stdout['xs'['i'] \\n]; } }\n",
+          "call void @xag_many_out_of_range");
+
+  // Counting one and reaching into another says nothing about the other.
+  EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+        "  var.many.int64 'ys' = [*1* *2*];\n"
+        "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+        "    print.stdout['ys'['i'] \\n]; } }\n",
+        "call void @xag_many_out_of_range");
+
+  // Nor does reaching with anything but the counter.
+  EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+        "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+        "    var.int64 'j' = ['i' + *5*];\n"
+        "    print.stdout['xs'['j'] \\n]; } }\n",
+        "call void @xag_many_out_of_range");
+
+  // A `many` never changes length, but a name can be given a different one —
+  // and then how many places it has is no longer what was counted.
+  EMITS("START { var.mut.many.int64 'xs' = [*1* *2* *3*];\n"
+        "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+        "    set 'xs' = [*9*];\n"
+        "    print.stdout['xs'['i'] \\n]; } }\n",
+        "call void @xag_many_out_of_range");
 }
 
 } // namespace
