@@ -242,16 +242,6 @@ int fastFile(const std::string &path) {
   if (!ready(path, text, built, status))
     return status;
 
-  // The fast engine does not know structs yet, and what it does not know it
-  // passes over without a word — which reads as a program that ran and said
-  // nothing. Three engines are only worth having while they agree, so it says
-  // so instead.
-  if (!built.mir.shapes.empty()) {
-    std::cerr << "the fast engine cannot run a program with a `struct` in it yet.\n"
-              << "`xagc run` and `xagc build` both can.\n";
-    return 1;
-  }
-
   const xag::FastResult ran = xag::runFast(built.mir);
   if (!ran.ran) {
     std::cerr << "\nthe program stopped: " << ran.trouble << '\n';

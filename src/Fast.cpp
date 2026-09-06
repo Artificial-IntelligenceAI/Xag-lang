@@ -65,6 +65,14 @@ enum class Op : uint8_t {
   Argument,
   Call, PrintWhole, PrintReal, PrintWide, PrintDeci, PrintText, PrintBool,
   Jump, JumpUnless, Return, ReturnValue,
+  // A struct is a fixed run of places, held exactly as a `many` is; only the
+  // type tells them apart, and the type was settled before anything ran. What
+  // it has that a `many` does not is that a field is known where it is
+  // written, so one can be lent, taken or written on its own.
+  MakeGroup, // `b` fields, each an Argument after it (`b` set when it is text)
+  ViewPart,  // `to` = a view of field `b` of the struct in `a`, lent where it stands
+  TakePart,  // `to` = field `b` of the struct in `a`, which is left holding nothing
+  StorePart, // field path of `b` Arguments into `to`, given what is in `a`
 };
 
 struct Code {
@@ -126,11 +134,11 @@ private:
     };
     for (const BasicBlock &block : body.blocks) {
       for (const Statement &s : block.statements) {
-        if (s.kind == StatementKind::Assign) {
+        if (s.kind == StatementKind::Assign && s.parts.empty()) {
           if (s.place < writes_.size())
             ++writes_[s.place];
         } else if (s.place < reads_.size()) {
-          ++reads_[s.place]; // a drop ends it, a store reaches into it
+          ++reads_[s.place]; // a drop ends it, a store or a field write reaches into it
         }
         if (s.kind == StatementKind::Store)
           read(s.at);
@@ -357,6 +365,11 @@ private:
           most = most > scratch ? most : scratch;
           continue;
         }
+        if (!s.parts.empty()) {
+          partStore(s, scratch);
+          most = most > scratch ? most : scratch;
+          continue;
+        }
         statement(s, scratch);
         most = most > scratch ? most : scratch;
       }
@@ -493,6 +506,31 @@ private:
     case RValueKind::Inside: {
       const uint32_t of = into(value.operands[0], scratch);
       emit(Code{Op::TakeInside, s.place, of, 0, 0});
+      return;
+    }
+
+    case RValueKind::Group: {
+      const std::vector<uint32_t> froms = gather(value.operands, scratch);
+      const uint32_t place = through ? scratch++ : s.place;
+      emit(Code{Op::MakeGroup, place, 0, static_cast<uint32_t>(froms.size()), 0});
+      // Text going in must be the struct's own, so a field that is text is
+      // marked for the machine to copy if what arrives is only a view.
+      for (size_t i = 0; i < froms.size(); ++i)
+        emit(Code{Op::Argument, 0, froms[i],
+                  behind(spelled(value.operands[i].type)) == "str" ? 1u : 0u, 0});
+      if (through)
+        emit(Code{Op::StoreThrough, s.place, place, 0, 0});
+      return;
+    }
+
+    case RValueKind::Part:
+    case RValueKind::Taken: {
+      const uint32_t of = into(value.operands[0], scratch);
+      const uint32_t place = through ? scratch++ : s.place;
+      emit(Code{value.kind == RValueKind::Part ? Op::ViewPart : Op::TakePart, place, of,
+                value.local, 0});
+      if (through)
+        emit(Code{Op::StoreThrough, s.place, place, 0, 0});
       return;
     }
 
@@ -671,6 +709,19 @@ private:
     }
     if (through)
       emit(Code{Op::StoreThrough, s.place, place, 0, 0});
+  }
+
+  // `place.f.g = value`: the value into a slot, then the path of fields laid
+  // out after the step as Arguments, for it to follow down to the one place
+  // being written. The graph only ever writes a field from one operand.
+  void partStore(const Statement &s, unsigned &scratch) {
+    const Operand &what = s.value.operands.empty() ? Operand{} : s.value.operands[0];
+    const uint32_t from = into(what, scratch);
+    const bool textual = behind(spelled(what.type)) == "str";
+    emit(Code{Op::StorePart, s.place, from, static_cast<uint32_t>(s.parts.size()),
+              textual ? 1u : 0u});
+    for (const unsigned part : s.parts)
+      emit(Code{Op::Argument, 0, part, 0, 0});
   }
 
   void call(const Statement &s, unsigned &scratch, bool through) {
@@ -968,6 +1019,84 @@ private:
     to = answer;
   }
 
+  // Text that a struct is to hold must be the struct's own, so that it lives
+  // exactly as long as the struct and can be lent from where it stands. What
+  // arrives as only a view — a written text is one — is copied.
+  static void own(Slot &piece) {
+    if (piece.owns)
+      return;
+    XagStr copy{nullptr, 0, 0};
+    xag_str_from(&copy, piece.text.bytes, piece.text.length);
+    piece.text = copy;
+    piece.owns = true;
+  }
+
+  [[gnu::noinline]] void makeGroup(Slot &to, Slot *slots, const Code *given, unsigned count) {
+    auto *held = new std::vector<Slot>();
+    held->reserve(count);
+    for (unsigned i = 0; i < count; ++i) {
+      Slot &from = slots[given[i].a];
+      Slot piece = from;
+      if (from.owns)
+        from = Slot{}; // handed over, so the slot it came from must not end it
+      else if (given[i].b)
+        own(piece);
+      held->push_back(piece);
+    }
+    end(to);
+    to = Slot{};
+    to.places = held;
+    to.owns = true;
+    xag_note_taken();
+  }
+
+  // These three follow a loan to the struct themselves, so that the loop's
+  // step is nothing but the call.
+  [[gnu::noinline]] void viewPart(Slot &to, Slot &holder, uint32_t field) {
+    const Slot &of = behind(holder);
+    Slot seen;
+    if (of.places && field < of.places->size()) {
+      seen = (*of.places)[field];
+      seen.owns = false; // lent where it stands, and no claim on it
+    }
+    end(to);
+    to = seen;
+  }
+
+  [[gnu::noinline]] void takePart(Slot &to, Slot &holder, uint32_t field) {
+    Slot &of = behind(holder);
+    Slot taken;
+    if (of.places && field < of.places->size()) {
+      taken = (*of.places)[field];
+      (*of.places)[field] = Slot{}; // gone from here, so the later drop finds nothing
+    }
+    end(to);
+    to = taken;
+  }
+
+  // Down the path to the one place being written, leaving everything beside
+  // it exactly as it was. Written through a loan when the place holds one, as
+  // a whole value written to a loan is.
+  [[gnu::noinline]] void storePart(Slot &holder, const Code *path, unsigned depth, Slot &given,
+                                   bool textual) {
+    Slot kept = given;
+    if (given.owns)
+      given = Slot{};
+    Slot *target = &behind(holder);
+    for (unsigned i = 0; i < depth; ++i) {
+      Slot &at = behind(*target);
+      if (!at.places || path[i].a >= at.places->size()) {
+        end(kept);
+        return;
+      }
+      target = &(*at.places)[path[i].a];
+    }
+    if (textual)
+      own(kept);
+    end(*target);
+    *target = kept;
+  }
+
   // Runs a routine on `given` arguments, each naming a slot in the caller's
   // frame at `from`.
   void call(unsigned which, uint32_t base, Slot &answer, Slot *from, const Code *given,
@@ -1002,7 +1131,7 @@ private:
     // Nothing here can go wrong except a call, which is asked on its way back;
     // and every routine ends in a Halt, so there is no end to run off.
     for (;;) {
-      if (++steps > kBudget) {
+      if (++steps > kBudget) [[unlikely]] {
         trouble_ = "the program ran longer than this engine will wait";
         break;
       }
@@ -1248,9 +1377,9 @@ private:
       case Op::TextCompare:
         to.whole = xag_str_compare(&read(one.a).text, &read(one.b).text);
         break;
-      case Op::ReadLine: readLine(to); break;
-      case Op::Arguments: takeArguments(to); break;
-      case Op::NumberOf: numberOf(to, read(one.a), one.aux); break;
+      [[unlikely]] case Op::ReadLine: readLine(to); break;
+      [[unlikely]] case Op::Arguments: takeArguments(to); break;
+      [[unlikely]] case Op::NumberOf: numberOf(to, read(one.a), one.aux); break;
 
       case Op::LoadNone:
         end(to);
@@ -1275,14 +1404,30 @@ private:
         break;
       }
 
-      case Op::MakeMany:
+      // The steps that call out are marked as the rare ones, so that the
+      // compiler keeps the loop's own state in registers across the common
+      // ones and does its saving and restoring here instead. Without the
+      // mark it weighs every step alike, and adding a few more of these once
+      // moved the frame pointer to a register that had to be fetched back
+      // from the stack on every step.
+      [[unlikely]] case Op::MakeMany:
         makeMany(to, slots, code + at + 1, one.b);
         at += one.b;
         break;
-      case Op::FillMany: fillMany(to, read(one.a), read(one.b).whole); break;
+      [[unlikely]] case Op::MakeGroup:
+        makeGroup(to, slots, code + at + 1, one.b);
+        at += one.b;
+        break;
+      [[unlikely]] case Op::ViewPart: viewPart(to, slots[one.a], one.b); break;
+      [[unlikely]] case Op::TakePart: takePart(to, slots[one.a], one.b); break;
+      [[unlikely]] case Op::StorePart:
+        storePart(to, code + at + 1, one.b, slots[one.a], one.aux != 0);
+        at += one.b;
+        break;
+      [[unlikely]] case Op::FillMany: fillMany(to, read(one.a), read(one.b).whole); break;
       case Op::ElementAt: elementAt(to, read(one.a), read(one.b).whole); break;
       case Op::StoreAt: storeAt(read(one.to), read(one.a).whole, slots[one.b]); break;
-      case Op::TextJoin:
+      [[unlikely]] case Op::TextJoin:
         joinText(to, slots, code + at + 1, one.b);
         at += one.b;
         break;

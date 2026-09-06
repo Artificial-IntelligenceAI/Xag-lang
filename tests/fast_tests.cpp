@@ -202,6 +202,57 @@ void onChoosingBetweenCases() {
         "    is 't'     { print.stdout['t' str:* * (count['t']) \\n]; } } }\n");
 }
 
+void onGroupingNamedThings() {
+  // A field read and a field written, with the rest left as it was.
+  AGREE("struct point [int64 'x', int64 'y']\n"
+        "START { var.mut.point 'p' = [*3* *4*];\n"
+        "  print.stdout['p'.x str:* * 'p'.y \\n];\n"
+        "  set 'p'.y = [*9*];\n"
+        "  print.stdout['p'.x str:* * 'p'.y \\n]; }\n");
+  // Text held by a struct is the struct's own, and let go with it.
+  AGREE("struct tag [str 'name', int64 'runs']\n"
+        "START { var.mut.tag 't' = [*ada* *36*];\n"
+        "  print.stdout['t'.name str:* * 't'.runs \\n];\n"
+        "  set 't'.name = [*bob*];\n"
+        "  print.stdout['t'.name str:* * (count['t'.name]) \\n]; }\n");
+  // A struct of structs, read and written down a path.
+  AGREE("struct point [int64 'x', int64 'y']\n"
+        "struct runner [str 'name', point 'at']\n"
+        "fn.nothing bump [refmut.runner 'r'] { set 'r'.at.x = ['r'.at.x + *1*]; }\n"
+        "START { var.mut.point 'a' = [*1* *2*];\n"
+        "  var.mut.runner 'r' = [*ada* move 'a'];\n"
+        "  bump[refmut 'r'];\n"
+        "  print.stdout['r'.name str:* * 'r'.at.x str:* * 'r'.at.y \\n]; }\n");
+  // One field handed over on its own, with the rest still there to read.
+  AGREE("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
+        "struct tag [str 'name', int64 'runs']\n"
+        "START { var.tag 't' = [*ada* *36*];\n"
+        "  keep[move 't'.name];\n"
+        "  print.stdout['t'.runs \\n]; }\n");
+  // Structs in a `many`, one of them replaced.
+  AGREE("struct tag [str 'name']\n"
+        "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
+        "  var.mut.many.tag 'ts' = [move 'a' move 'b'];\n"
+        "  var.tag 'c' = [*cy*];\n"
+        "  set 'ts'[*0*] = [move 'c'];\n"
+        "  print.stdout['ts'[*0*].name str:* * 'ts'[*1*].name \\n]; }\n");
+  // A struct behind a loan, through a function.
+  AGREE("struct point [int64 'x', int64 'y']\n"
+        "fn.int64 across [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
+        "START { var.point 'p' = [*20* *22*];\n"
+        "  print.stdout[(across[ref 'p']) \\n]; }\n");
+  // A struct behind `or-nothing`, both ways, under `when`.
+  AGREE("struct tag [str 'name']\n"
+        "START { var.or-nothing.tag 't' = [*ada*];\n"
+        "  when 't' {\n"
+        "    is 'one'   { print.stdout['one'.name \\n]; }\n"
+        "    is nothing { print.stdout[str:*none* \\n]; } }\n"
+        "  var.or-nothing.tag 'u' = [nothing];\n"
+        "  when 'u' {\n"
+        "    is 'one'   { print.stdout['one'.name \\n]; }\n"
+        "    is nothing { print.stdout[str:*none* \\n]; } } }\n");
+}
+
 } // namespace
 
 int main() {
@@ -211,6 +262,7 @@ int main() {
   onHoldingSeveralValues();
   onHoldingNothing();
   onChoosingBetweenCases();
+  onGroupingNamedThings();
 
   if (failures == 0)
     std::cout << "the two interpreters agree everywhere asked\n";
