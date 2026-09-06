@@ -274,6 +274,17 @@ void onTurningNumbersIntoText() {
         "  loop.range.int64 'i' = [*1*, *3*] {\n"
         "    var.str 's' = [spell['n']];\n"
         "    print.stdout['s' str:* * (count[ref 's']) \\n]; } }\n");
+  // Behind a loan, which is the shape that once answered 0 from the test
+  // interpreter and would not build natively; and printing a borrowed number,
+  // which had been wrong the same way for as long as printing has existed.
+  AGREE("fn.str 'spell' [ref.int64 'n'] { give [convert-to-str['n']]; }\n"
+        "START { var.int64 'n' = [*7*];\n"
+        "  var.str 's' = [spell[ref 'n']];\n"
+        "  print.stdout['s' str:* * (count[ref 's']) \\n]; }\n");
+  AGREE("fn.nothing 'show' [ref.int64 'a', ref.deci64 'c'] {\n"
+        "  print.stdout['a' str:* * 'c' str:* * convert-to-str['c'] \\n]; }\n"
+        "START { var.int64 'a' = [*300*]; var.deci64 'c' = [*1.10*];\n"
+        "  show[ref 'a', ref 'c']; }\n");
   // And the other way, under its new name.
   AGREE("START { var.str 't' = [*250*];\n"
         "  var.or-nothing.uint8 'n' = [convert-to-number[ref 't']];\n"
