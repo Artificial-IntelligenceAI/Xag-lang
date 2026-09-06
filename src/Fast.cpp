@@ -37,6 +37,14 @@ enum class Op : uint8_t {
   CopySlot, MoveSlot, MakeLoan, StoreThrough, Drop, DropIf,
   IntAdd, IntSub, IntMul, IntDiv, IntMod, IntPow,
   IntLt, IntGt, IntLe, IntGe, IntEq, IntNe,
+  // The same, with the right-hand side a written number read straight from
+  // the pool rather than loaded into a slot first: `b` names the constant.
+  IntAddK, IntSubK, IntMulK,
+  IntLtK, IntGtK, IntLeK, IntGeK, IntEqK, IntNeK,
+  // A comparison and the JumpUnless that reads it, as one step: the truth is
+  // still written to `to`, and `jump` is taken when it is false. A loop asks
+  // one of these on every turn.
+  IntLtJ, IntGtJ, IntLeJ, IntGeJ, IntEqJ, IntNeJ,
   RealAdd, RealSub, RealMul, RealDiv, RealMod, RealPow,
   RealLt, RealGt, RealLe, RealGe, RealEq, RealNe,
   WideAdd, WideSub, WideMul, WideDiv, WideMod, WidePow, WideCompare,
@@ -57,6 +65,7 @@ struct Code {
   uint32_t a = 0;
   uint32_t b = 0;
   uint32_t aux = 0;  // a width, a signedness, a constant, a comparison
+  uint32_t jump = 0; // where a fused comparison goes when it is false
 };
 
 struct Constant {
@@ -224,7 +233,12 @@ private:
     unsigned most = scratch;
 
     std::vector<unsigned> starts(body.blocks.size(), 0);
-    std::vector<std::pair<unsigned, unsigned>> patches; // instruction, block
+    struct Patch {
+      unsigned at;    // which instruction
+      unsigned block; // where it should go
+      bool fused;     // whether the target belongs in `jump` rather than `to`
+    };
+    std::vector<Patch> patches;
 
     for (size_t which = 0; which < body.blocks.size(); ++which) {
       const BasicBlock &block = body.blocks[which];
@@ -238,7 +252,12 @@ private:
         return nextIs && body.blocks[which + 1].id == target;
       };
 
+      // Where the code of the block's last statement begins, so that the
+      // terminator can tell whether the instruction before it is that
+      // statement's, and fuse with it if it is.
+      unsigned lastStart = static_cast<unsigned>(routine.code.size());
       for (const Statement &s : block.statements) {
+        lastStart = static_cast<unsigned>(routine.code.size());
         if (s.kind == StatementKind::Drop) {
           emit(s.conditional ? Code{Op::DropIf, s.place, s.flag, 0, 0}
                              : Code{Op::Drop, s.place, 0, 0, 0});
@@ -261,17 +280,29 @@ private:
       if (end.kind == TerminatorKind::Goto) {
         const unsigned target = end.targets.empty() ? 0 : end.targets[0];
         if (!follows(target)) {
-          patches.emplace_back(routine.code.size(), target);
+          patches.push_back({static_cast<unsigned>(routine.code.size()), target, false});
           emit(Code{Op::Jump, 0, 0, 0, 0});
         }
       } else if (end.kind == TerminatorKind::Switch) {
-        const uint32_t asked = into(end.condition, scratch);
         const unsigned taken = end.targets.empty() ? 0 : end.targets[0];
         const unsigned otherwise = end.targets.size() > 1 ? end.targets.back() : taken;
-        patches.emplace_back(routine.code.size(), otherwise);
-        emit(Code{Op::JumpUnless, 0, asked, 0, 0});
+        // When the block's last statement compared two whole numbers into the
+        // very truth the switch reads, the compare does the switch's work too.
+        const Op fused = !block.statements.empty() && routine.code.size() > lastStart &&
+                                 end.condition.kind == OperandKind::Copy &&
+                                 routine.code.back().to == end.condition.local
+                             ? fusedWithJump(routine.code.back().op)
+                             : Op::Halt;
+        if (fused != Op::Halt) {
+          routine.code.back().op = fused;
+          patches.push_back({static_cast<unsigned>(routine.code.size() - 1), otherwise, true});
+        } else {
+          const uint32_t asked = into(end.condition, scratch);
+          patches.push_back({static_cast<unsigned>(routine.code.size()), otherwise, false});
+          emit(Code{Op::JumpUnless, 0, asked, 0, 0});
+        }
         if (!follows(taken)) {
-          patches.emplace_back(routine.code.size(), taken);
+          patches.push_back({static_cast<unsigned>(routine.code.size()), taken, false});
           emit(Code{Op::Jump, 0, 0, 0, 0});
         }
       } else {
@@ -285,10 +316,25 @@ private:
     // whether it has run off the end.
     emit(Code{Op::Halt, 0, 0, 0, 0});
 
-    for (const auto &[at, block] : patches)
-      routine.code[at].to = starts[block < starts.size() ? block : 0];
+    for (const Patch &patch : patches) {
+      const unsigned start = starts[patch.block < starts.size() ? patch.block : 0];
+      (patch.fused ? routine.code[patch.at].jump : routine.code[patch.at].to) = start;
+    }
     routine.slots = most;
     return routine;
+  }
+
+  // The comparison that also jumps when false, or Halt for anything else.
+  static Op fusedWithJump(Op op) {
+    switch (op) {
+    case Op::IntLt: return Op::IntLtJ;
+    case Op::IntGt: return Op::IntGtJ;
+    case Op::IntLe: return Op::IntLeJ;
+    case Op::IntGe: return Op::IntGeJ;
+    case Op::IntEq: return Op::IntEqJ;
+    case Op::IntNe: return Op::IntNeJ;
+    default: return Op::Halt;
+    }
   }
 
   void statement(const Statement &s, unsigned &scratch) {
@@ -385,9 +431,28 @@ private:
     const Type answered = typeNamed(made);
     const Type working = isNumber(answered) ? answered : given;
 
-    const uint32_t x = into(value.operands[0], scratch);
-    const uint32_t y = into(value.operands[1], scratch);
     const std::string &op = value.op;
+    const unsigned test = op == "<" ? 0 : op == ">" ? 1 : op == "<==" ? 2
+                          : op == ">==" ? 3 : op == "==" ? 4 : 5;
+    const bool comparing = op == "<" || op == ">" || op == "<==" || op == ">==" ||
+                           op == "==" || op == "!==";
+    const bool wholes = isWhole(given) || given == Type::Bool;
+    const bool logical = op == "and" || op == "or";
+    const bool textual = left == "str" || isLoan(spelled(value.operands[0].type));
+
+    // A whole number written on the right is read from the pool by the step
+    // that uses it, rather than loaded into a slot by a step of its own.
+    const uint32_t x = into(value.operands[0], scratch);
+    uint32_t constant = 0;
+    bool fromPool = false;
+    if (wholes && !logical && !textual &&
+        value.operands[1].kind == OperandKind::Written &&
+        (comparing || op == "+" || op == "-" || op == "x")) {
+      Op how = Op::LoadWhole;
+      constant = constantFor(value.operands[1], how);
+      fromPool = how == Op::LoadWhole;
+    }
+    const uint32_t y = fromPool ? constant : into(value.operands[1], scratch);
     const uint32_t place = through ? scratch++ : s.place;
 
     auto compare = [&](Op family, unsigned test) {
@@ -395,22 +460,24 @@ private:
       emit(Code{family, order, x, y, widthOf(given)});
       emit(Code{Op::Order, place, order, 0, test});
     };
-    const unsigned test = op == "<" ? 0 : op == ">" ? 1 : op == "<==" ? 2
-                          : op == ">==" ? 3 : op == "==" ? 4 : 5;
-    const bool comparing = op == "<" || op == ">" || op == "<==" || op == ">==" ||
-                           op == "==" || op == "!==";
 
-    if (op == "and" || op == "or") {
+    if (logical) {
       emit(Code{op == "and" ? Op::And : Op::Or, place, x, y, 0});
-    } else if (left == "str" || isLoan(spelled(value.operands[0].type))) {
+    } else if (textual) {
       if (comparing)
         compare(Op::TextCompare, test);
-    } else if (isWhole(given) || given == Type::Bool) {
+    } else if (wholes) {
       const uint32_t aux = (widthOf(working) << 1) | (isSigned(working) ? 1 : 0);
       if (comparing) {
         static const Op kOps[] = {Op::IntLt, Op::IntGt, Op::IntLe,
                                   Op::IntGe, Op::IntEq, Op::IntNe};
-        emit(Code{kOps[test], place, x, y, (isWhole(given) && !isSigned(given)) ? 0u : 1u});
+        static const Op kPooled[] = {Op::IntLtK, Op::IntGtK, Op::IntLeK,
+                                     Op::IntGeK, Op::IntEqK, Op::IntNeK};
+        emit(Code{fromPool ? kPooled[test] : kOps[test], place, x, y,
+                  (isWhole(given) && !isSigned(given)) ? 0u : 1u});
+      } else if (fromPool) {
+        const Op which = op == "+" ? Op::IntAddK : op == "-" ? Op::IntSubK : Op::IntMulK;
+        emit(Code{which, place, x, y, aux});
       } else {
         const Op which = op == "+"     ? Op::IntAdd
                          : op == "-"   ? Op::IntSub
@@ -734,6 +801,7 @@ private:
     arguments_.resize(arguments_.size() - given);
 
     const Code *code = routine.code.data();
+    const Constant *pool = routine.pool.data();
     unsigned at = 0;
     // The stack never grows, so the frame is where it was found. The step count
     // lives in a register while the loop runs and is put back whenever another
@@ -861,6 +929,79 @@ private:
         break;
       case Op::IntEq: to.whole = read(one.a).whole == read(one.b).whole; break;
       case Op::IntNe: to.whole = read(one.a).whole != read(one.b).whole; break;
+
+      case Op::IntAddK:
+        to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) +
+                                              static_cast<__uint128_t>(pool[one.b].whole)),
+                          one.aux);
+        break;
+      case Op::IntSubK:
+        to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) -
+                                              static_cast<__uint128_t>(pool[one.b].whole)),
+                          one.aux);
+        break;
+      case Op::IntMulK:
+        to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) *
+                                              static_cast<__uint128_t>(pool[one.b].whole)),
+                          one.aux);
+        break;
+      case Op::IntLtK:
+        to.whole = one.aux ? read(one.a).whole < pool[one.b].whole
+                           : static_cast<__uint128_t>(read(one.a).whole) <
+                                 static_cast<__uint128_t>(pool[one.b].whole);
+        break;
+      case Op::IntGtK:
+        to.whole = one.aux ? read(one.a).whole > pool[one.b].whole
+                           : static_cast<__uint128_t>(read(one.a).whole) >
+                                 static_cast<__uint128_t>(pool[one.b].whole);
+        break;
+      case Op::IntLeK:
+        to.whole = one.aux ? read(one.a).whole <= pool[one.b].whole
+                           : static_cast<__uint128_t>(read(one.a).whole) <=
+                                 static_cast<__uint128_t>(pool[one.b].whole);
+        break;
+      case Op::IntGeK:
+        to.whole = one.aux ? read(one.a).whole >= pool[one.b].whole
+                           : static_cast<__uint128_t>(read(one.a).whole) >=
+                                 static_cast<__uint128_t>(pool[one.b].whole);
+        break;
+      case Op::IntEqK: to.whole = read(one.a).whole == pool[one.b].whole; break;
+      case Op::IntNeK: to.whole = read(one.a).whole != pool[one.b].whole; break;
+
+      // The truth is written as the plain comparison writes it, and then the
+      // jump is taken or not, as JumpUnless would have.
+      case Op::IntLtJ:
+        to.whole = one.aux ? read(one.a).whole < read(one.b).whole
+                           : static_cast<__uint128_t>(read(one.a).whole) <
+                                 static_cast<__uint128_t>(read(one.b).whole);
+        if (to.whole == 0) { at = one.jump; continue; }
+        break;
+      case Op::IntGtJ:
+        to.whole = one.aux ? read(one.a).whole > read(one.b).whole
+                           : static_cast<__uint128_t>(read(one.a).whole) >
+                                 static_cast<__uint128_t>(read(one.b).whole);
+        if (to.whole == 0) { at = one.jump; continue; }
+        break;
+      case Op::IntLeJ:
+        to.whole = one.aux ? read(one.a).whole <= read(one.b).whole
+                           : static_cast<__uint128_t>(read(one.a).whole) <=
+                                 static_cast<__uint128_t>(read(one.b).whole);
+        if (to.whole == 0) { at = one.jump; continue; }
+        break;
+      case Op::IntGeJ:
+        to.whole = one.aux ? read(one.a).whole >= read(one.b).whole
+                           : static_cast<__uint128_t>(read(one.a).whole) >=
+                                 static_cast<__uint128_t>(read(one.b).whole);
+        if (to.whole == 0) { at = one.jump; continue; }
+        break;
+      case Op::IntEqJ:
+        to.whole = read(one.a).whole == read(one.b).whole;
+        if (to.whole == 0) { at = one.jump; continue; }
+        break;
+      case Op::IntNeJ:
+        to.whole = read(one.a).whole != read(one.b).whole;
+        if (to.whole == 0) { at = one.jump; continue; }
+        break;
 
       case Op::RealAdd: to.real = xag_bin_fit(read(one.a).real + read(one.b).real, one.aux); break;
       case Op::RealSub: to.real = xag_bin_fit(read(one.a).real - read(one.b).real, one.aux); break;
