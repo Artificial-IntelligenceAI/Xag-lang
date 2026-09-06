@@ -26,6 +26,12 @@ START {
     var.runner 'r' = [move 'who' move 'p'];
     print.stdout['r'.name str:* is at * 'r'.at.x \n];
 
+    # One inside another is named where it is made. A word before a bracket is a
+    # call and a name before one is an index, so naming the struct is what keeps
+    # `[…]` from being read as reaching into the name beside it.
+    var.runner 'other' = [*grace* point[*3* *4*]];
+    print.stdout['other'.name str:* is at * 'other'.at.y \n];
+
     # This is what a struct has that a `many` does not: which field is written is
     # known where it is written, so one may go on its own and the rest stay.
     var.str 'taken' = [move 'r'.name];

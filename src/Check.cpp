@@ -673,6 +673,22 @@ private:
   Ty call(const Expr &e, Ty expected) {
     const std::string path = joined(e.path);
 
+    // A struct named where an item goes makes one there: `point[*0* *0*]`. It
+    // is written as a call because that is what a word before a bracket is,
+    // and a word can never be mistaken for an index the way a name could.
+    for (unsigned which = 0; which < result_.shapes.size(); ++which)
+      if (result_.shapes[which].name == path) {
+        if (e.args.values.size() != 1) {
+          complain(e.span, "E0529",
+                   "`" + path + "` holds " +
+                       std::to_string(result_.shapes[which].fields.size()) +
+                       ", and this is " + std::to_string(e.args.values.size()) + ".",
+                   {"a struct is made with one value for each of the things it holds"});
+          return structNamed(which);
+        }
+        return filled(e.args.values[0].items, e.args.values[0].span, structNamed(which));
+      }
+
     // `count` asks how many, of a `str` and of a `many` alike: the same
     // question, and the type already says what is being counted.
     if (path == "count" && e.args.values.size() == 1) {
@@ -888,25 +904,33 @@ private:
   // the order it holds them. The same rule as everywhere — a value is a list of
   // items and the type says what they are — and a lone item that is already the
   // whole struct is the whole struct.
-  Ty grouped(const Value &v, Ty want) {
+  Ty grouped(const Value &v, Ty want) { return filled(v.items, v.span, want); }
+
+  Ty filled(const std::vector<ExprPtr> &items, Span where, Ty want) {
+    const Value v{where, {}};
+    (void)v;
     const Shape &shape = result_.shapes[want.named];
-    if (v.items.size() == 1 && selfTyped(*v.items[0])) {
-      const Ty got = expr(*v.items[0], want);
+    if (items.size() == 1 && selfTyped(*items[0])) {
+      const Ty got = expr(*items[0], want);
       if (got == want || got == Ty{})
         return want;
-    } else if (v.items.size() != shape.fields.size()) {
-      complain(v.span, "E0529",
+    } else if (items.size() != shape.fields.size()) {
+      complain(where, "E0529",
                "`" + shape.name + "` holds " + std::to_string(shape.fields.size()) +
-                   ", and this is " + std::to_string(v.items.size()) + ".",
+                   ", and this is " + std::to_string(items.size()) + ".",
                {"a struct is made with one value for each of the things it holds"},
                {"they go in the order the struct was written in, so leaving one out "
                 "would silently move every one after it."});
+      // Which item was meant for which of them is not knowable once the count
+      // is wrong, so pairing them off and complaining about each is guessing —
+      // and it said the same span was wrong twice for the one mistake.
+      return want;
     }
-    for (unsigned i = 0; i < v.items.size(); ++i) {
+    for (unsigned i = 0; i < items.size(); ++i) {
       const Ty wanted = i < shape.fields.size() ? shape.fields[i].type : Ty{};
-      const Ty got = expr(*v.items[i], wanted);
+      const Ty got = expr(*items[i], wanted);
       if (wanted != Ty{} && got != Ty{} && got != wanted)
-        complain(v.items[i]->span, "E0506",
+        complain(items[i]->span, "E0506",
                  "`'" + shape.fields[i].name + "'` is a `" + name(wanted) +
                      "`, and this is a `" + name(got) + "`.",
                  {"nothing converts on its own"});

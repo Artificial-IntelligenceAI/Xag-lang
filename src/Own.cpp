@@ -532,6 +532,30 @@ private:
     return copyType(here);
   }
 
+  // One item for each of the things a struct holds. An item that is itself a
+  // group is a struct made there, so it fills that field's own shape the same
+  // way — the brackets nest, and so does this.
+  void fillWith(const std::vector<ExprPtr> &items, const std::string &fills) {
+    const auto *fields = shapeNamed(fills);
+    if (!fields) {
+      for (const ExprPtr &one : items)
+        read(*one);
+      return;
+    }
+    for (unsigned i = 0; i < items.size(); ++i) {
+      const std::string inner =
+          i < fields->size() ? (*fields)[i].second : std::string();
+      if (items[i]->kind == ExprKind::Call && items[i]->path.size() == 1 &&
+          items[i]->path[0] == inner && shapeNamed(inner)) {
+        if (!items[i]->args.values.empty())
+          fillWith(items[i]->args.values[0].items, inner);
+        continue;
+      }
+      use(*items[i], Use::Consume, Mode::Owned,
+          i < fields->size() ? copyType(inner) : true);
+    }
+  }
+
   void consumeInto(const ValueList &list, Mode mode, bool copies, bool collects = false,
                    bool elementCopies = true, const std::string &fills = {}) {
     const auto *fields = fills.empty() ? nullptr : shapeNamed(fills);
@@ -540,9 +564,7 @@ private:
       // so each of them is handed over. Reading them as pieces of a joined
       // value let an owning one be put in and let go twice.
       if (fields && value.items.size() != 1) {
-        for (unsigned i = 0; i < value.items.size(); ++i)
-          use(*value.items[i], Use::Consume, Mode::Owned,
-              i < fields->size() ? copyType((*fields)[i].second) : true);
+        fillWith(value.items, fills);
         continue;
       }
       // Items side by side under a `many` each end up in a place of their own,

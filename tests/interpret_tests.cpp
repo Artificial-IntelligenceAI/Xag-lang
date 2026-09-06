@@ -413,6 +413,27 @@ void itHoldsAGroupOfNamedThings() {
        "  var.pair 'p' = [move 'a' *7*];\n"
        "  print.stdout['p'.one.name \\n]; }\n", "ada\n");
 
+  // A struct answered by a function was read straight off as one operand and
+  // joined, so a `point` of two numbers came back as the text "09".
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
+       "fn.point 'origin' [] { give [*0* *9*]; }\n"
+       "START { var.point 'o' = [origin[]];\n"
+       "  print.stdout['o'.x str:*,* 'o'.y \\n]; }\n", "0,9\n");
+
+  // A struct named where an item goes makes one there.
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
+       "struct 'line' [point 'from', point 'to']\n"
+       "START { var.line 'l' = [point[*0* *0*] point[*1* *2*]];\n"
+       "  print.stdout['l'.to.y \\n]; }\n", "2\n");
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
+       "START { var.many.point 'ps' = [point[*1* *2*] point[*3* *4*]];\n"
+       "  print.stdout['ps'[*1*].x \\n]; }\n", "3\n");
+  SAYS("struct 'tag' [str 'name', int64 'runs']\n"
+       "struct 'pair' [tag 'one', tag 'two']\n"
+       "START { var.str 's' = [*taken*];\n"
+       "  var.pair 'q' = [tag[move 's' *1*] tag[*z* *2*]];\n"
+       "  print.stdout['q'.one.name \\n]; }\n", "taken\n");
+
   // In a `many`, behind `or-nothing`, and in and out of a function.
   SAYS("struct 'point' [int64 'x', int64 'y']\n"
        "START { var.point 'a' = [*1* *2*];\n  var.point 'b' = [*3* *4*];\n"

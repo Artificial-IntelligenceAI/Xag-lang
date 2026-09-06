@@ -340,6 +340,17 @@ void aDeclarationMarksWhatItNames() {
             "    give ['a'];\n}\n").ok());
 }
 
+void aStructIsNamedWhereItIsMade() {
+  CHECK(inStart("var.line 'l' = [point[*0* *0*] point[*1* *1*]];").ok());
+  CHECK(inStart("var.many.point 'ps' = [point[*1* *2*] point[*3* *4*]];").ok());
+  CHECK(inStart("var.deep 'd' = [pair[one[*1*] *2*] *3*];").ok());
+
+  // A word before a bracket is a call and can never be an index, which is why
+  // the struct is named rather than the brackets standing alone: `'ns' [*0*]`
+  // would be read as `'ns'[*0*]` and mean something else in silence.
+  CHECK(inStart("var.two 't' = ['ns'[*0*] one[*3*]];").ok());
+}
+
 void aStructNamesWhatItHolds() {
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n").ok());
   // The same shape as a function's parameters, because it is the same question:
@@ -389,6 +400,7 @@ int main() {
   whenIsMadeOfIs();
   aDeclarationMarksWhatItNames();
   aStructNamesWhatItHolds();
+  aStructIsNamedWhereItIsMade();
 
   if (failures == 0)
     std::cout << "all parser tests passed\n";

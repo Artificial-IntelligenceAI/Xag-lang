@@ -439,6 +439,21 @@ private:
       std::string callee;
       for (const std::string &part : e.path)
         callee += (callee.empty() ? "" : ".") + part;
+      // A struct named where an item goes makes one there, into a place of its
+      // own that it is then handed over from.
+      if (const Shape *shape = shapeOf(callee)) {
+        (void)shape;
+        const std::string spelled = callee;
+        std::vector<Operand> parts;
+        if (!e.args.values.empty())
+          for (const ExprPtr &one : e.args.values[0].items)
+            parts.push_back(operandOf(*one));
+        const unsigned into = owningTemporary(typeRef(spelled));
+        emit(Statement{StatementKind::Assign, e.span, into, {}, {},
+                       RValue{RValueKind::Group, {}, {}, 0, std::move(parts),
+                              typeRef(spelled)}});
+        return into;
+      }
       if (callee == "fill") {
         const std::string spelled = spell(type);
         std::vector<Operand> parts;
@@ -498,7 +513,10 @@ private:
     return Operand{OperandKind::Move, into, {}, typeRef("str")};
   }
 
-  void assignInto(unsigned place, const ValueList &list, Span span) {
+  // `taking` is for `give`, which needs no `move` written but takes all the
+  // same, so what it answers with leaves rather than being read in place.
+  void assignInto(unsigned place, const ValueList &list, Span span,
+                  bool taking = false) {
     const std::string spelled = body_.types[body_.locals[place].type.index];
     // Past the `or-nothing` as well as the loan: a name that may hold nothing
     // may hold a `many`, and the items still belong in its places rather than
@@ -519,6 +537,9 @@ private:
     if (list.values.empty())
       return;
     Operand operand = valueOperand(list.values[0]);
+    if (taking && operand.kind == OperandKind::Copy &&
+        operand.local < body_.locals.size() && !body_.locals[operand.local].copies)
+      operand.kind = OperandKind::Move;
     const TypeRef type = operand.type;
     emit(Statement{StatementKind::Assign, span, place, {}, {},
                    RValue{RValueKind::Use, {}, {}, 0, {std::move(operand)}, type}});
@@ -831,14 +852,11 @@ private:
 
     case StmtKind::Give: {
       if (!s.value.values.empty()) {
-        Operand answer = valueOperand(s.value.values[0]);
-        // `give` is the word: it needs no `move` written, but it takes all the
-        // same, so the answer leaves rather than being read in place.
-        if (answer.kind == OperandKind::Copy && answer.local < body_.locals.size() &&
-            !body_.locals[answer.local].copies)
-          answer.kind = OperandKind::Move;
-        emit(Statement{StatementKind::Assign, s.span, 0, {}, {},
-                       RValue{RValueKind::Use, {}, {}, 0, {answer}, answer.type}});
+        // The same road a declaration takes, so that answering with a struct
+        // fills it and answering with a `many` collects it. Reading the items
+        // straight off as one operand joined them instead: a function answering
+        // a struct built its two numbers into text and handed that back.
+        assignInto(0, s.value, s.span, true);
         finish(Terminator{TerminatorKind::Return, s.span, {}, {}, {}, true,
                           Operand{OperandKind::Move, 0, {}, body_.result}});
       } else {

@@ -415,6 +415,33 @@ void aStructIsAGroupOfNamedThings() {
   CHECK(run("struct 'point' [int64 'x', int64 'x']\n").code(0) == "E0502");
 }
 
+// A group of items where one item goes is a struct made there, and what it is
+// comes from the thing it fills — there is no telling one group of two numbers
+// from another by looking at it.
+void aStructIsNamedWhereItIsMade() {
+  const char *kShapes = "struct 'point' [int64 'x', int64 'y']\n"
+                        "struct 'line' [point 'from', point 'to']\n";
+  CHECK(run(std::string(kShapes) + "START {\n"
+            "    var.line 'l' = [point[*0* *0*] point[*1* *2*]];\n"
+            "    print.stdout['l'.to.y \\n];\n}\n").ok());
+  CHECK(run(std::string(kShapes) + "START {\n"
+            "    var.many.point 'ps' = [point[*1* *2*] point[*3* *4*]];\n"
+            "    print.stdout['ps'[*1*].x \\n];\n}\n").ok());
+
+  // The count is still one for each, one level down as well.
+  CHECK(run(std::string(kShapes) + "START {\n"
+            "    var.line 'l' = [point[*0*] point[*1* *2*]];\n}\n").code(0) == "E0529");
+
+  // What it makes is what it is named, whatever was wanted of it.
+  CHECK(run(std::string(kShapes) + "START {\n"
+            "    var.int64 'n' = [point[*1* *2*]];\n}\n").code(0) == "E0506");
+
+  // One mistake is reported once: pairing items off after the count is wrong
+  // is guessing, and it said the same span was wrong twice.
+  CHECK(run(std::string(kShapes) + "START {\n"
+            "    var.line 'l' = [point[*0* *0*]];\n}\n").code(1) == "(none)");
+}
+
 void aStructTravelsWithTheRest() {
   // It stands where a type stands: in a `many`, behind `or-nothing`, in a
   // function's parameters and in what it answers.
@@ -473,6 +500,7 @@ int main() {
   aWhenCoversEveryCase();
   aWhenArmLendsWhatWasThere();
   aStructIsAGroupOfNamedThings();
+  aStructIsNamedWhereItIsMade();
   aStructTravelsWithTheRest();
   aStructIsHandedOverRatherThanCopied();
 

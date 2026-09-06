@@ -718,6 +718,29 @@ The mark stays on the name, because the name is the variable and `x` is not one
 that the struct does not hold is `E0528`; asking a type that has no fields at
 all for one is `E0527`.
 
+### One inside another is named where it is made
+
+```
+struct 'point' [int64 'x', int64 'y']
+struct 'line' [point 'from', point 'to']
+
+var.line 'l' = [point[*0* *0*] point[*1* *1*]];
+```
+
+The obvious spelling would have been the same brackets one level down —
+`[[*0* *0*] [*1* *1*]]` — and it cannot be had. A name before a bracket is
+already indexing, so `['ns' [*0*]]` reads as `'ns'[*0*]`: one item where two
+were written, silently and with no error anywhere. Juxtaposition leaves the
+parser nothing to tell them apart by.
+
+A *word* before a bracket is a call, and a word is never a name. So naming the
+struct settles it with the two marks that were already there, rather than with
+whitespace or a lookahead. It also says which struct is being made without the
+reader having to know the field order of the one around it.
+
+Answering with a struct needs no name, because the chain already said what the
+answer is: `give [*0* *9*]`.
+
 ### It is handed over, never copied
 
 Like a `many`, and for the same reason: the places it holds are its own, and
@@ -962,10 +985,6 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 - **Turning a number into text, and text into a number.** Pieces side by side
   join, and nothing converts on its own, so something has to do it and be named.
   Now that a type can say it holds nothing, the failing half has somewhere to go.
-- **Writing one struct inside another where it stands.** A struct goes into a
-  struct by name, because a bracketed group is not an item — `[[*0* *0*] …]` has
-  nowhere to be read. The same brackets one level down is the obvious spelling,
-  and obvious is not the same as decided.
 - **A type with more than two shapes.** `when` covers every case a value could
   be, and today a value can be two things. A type that could be several — with
   its own names and its own contents — is what would make the construct earn

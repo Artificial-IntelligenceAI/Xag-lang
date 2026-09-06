@@ -89,10 +89,18 @@ struct Var {
     parts_moved: Vec<String>,
 }
 
+/// One of the things a struct holds: a plain value, or another struct, which is
+/// what makes a group of items nest.
+#[derive(Clone, Copy)]
+enum Held {
+    Plain(Ty),
+    Group(usize),
+}
+
 /// A struct the program declared, and what it holds in the order it holds it.
 struct Shape {
     name: String,
-    fields: Vec<(String, Ty)>,
+    fields: Vec<(String, Held)>,
 }
 
 struct Fun {
@@ -259,7 +267,10 @@ impl<'a> Writer<'a> {
             self.out.push('\n');
         }
 
-        let shapes = self.rng.below(3);
+        // At least two, most of the time: one struct is the program that cannot
+        // tell a right answer from a wrong one, and two is what lets a group of
+        // items nest.
+        let shapes = self.rng.below(3) + 1;
         for _ in 0..shapes {
             self.shape();
         }
@@ -287,7 +298,7 @@ impl<'a> Writer<'a> {
     fn shape(&mut self) {
         let name = self.fresh();
         let count = self.rng.below(2) + 2;
-        let mut fields: Vec<(String, Ty)> = Vec::new();
+        let mut fields: Vec<(String, Held)> = Vec::new();
         self.out.push_str("struct '");
         self.out.push_str(&name);
         self.out.push_str("' [");
@@ -295,17 +306,30 @@ impl<'a> Writer<'a> {
             if i > 0 {
                 self.out.push_str(", ");
             }
-            let ty = match self.rng.below(10) {
-                0..=2 => Ty::Str,
-                3 => Ty::Bool,
-                _ => self.pick_whole(),
+            // One of the ones already declared, sometimes, so that a group of
+            // items has somewhere to nest. Only an earlier one: a struct that
+            // holds itself has no size.
+            let held = if !self.shapes.is_empty() && self.rng.chance(25) {
+                Held::Group(self.rng.below(self.shapes.len() as u32) as usize)
+            } else {
+                Held::Plain(match self.rng.below(10) {
+                    0..=2 => Ty::Str,
+                    3 => Ty::Bool,
+                    _ => self.pick_whole(),
+                })
             };
             let field = self.fresh();
-            self.out.push_str(ty.written());
+            match held {
+                Held::Plain(ty) => self.out.push_str(ty.written()),
+                Held::Group(which) => {
+                    let name = self.shapes[which].name.clone();
+                    self.out.push_str(&name);
+                }
+            }
             self.out.push_str(" '");
             self.out.push_str(&field);
             self.out.push('\'');
-            fields.push((field, ty));
+            fields.push((field, held));
         }
         self.out.push_str("]\n");
         self.shapes.push(Shape { name, fields });
@@ -338,6 +362,27 @@ impl<'a> Writer<'a> {
         Some(seen[at].clone())
     }
 
+    /// Every way into a struct that ends at a plain value, written as the path
+    /// it takes: `v4`, or `v4.v7` where one of them holds another struct.
+    fn paths(&self, which: usize, gone: &[String], depth: u32) -> Vec<(String, Ty)> {
+        let mut out = Vec::new();
+        for (field, held) in &self.shapes[which].fields {
+            if depth == 0 && gone.contains(field) {
+                continue;
+            }
+            match held {
+                Held::Plain(ty) => out.push((field.clone(), *ty)),
+                Held::Group(inner) if depth < 2 => {
+                    for (rest, ty) in self.paths(*inner, gone, depth + 1) {
+                        out.push((format!("{field}.{rest}"), ty));
+                    }
+                }
+                Held::Group(_) => {}
+            }
+        }
+        out
+    }
+
     /// One of the things a struct holds that has not gone anywhere.
     fn pick_field(&mut self, name: &str, which: usize, want: Option<Ty>) -> Option<(String, Ty)> {
         let gone: Vec<String> = self
@@ -347,11 +392,10 @@ impl<'a> Writer<'a> {
             .find(|v| v.name == name)
             .map(|v| v.parts_moved.clone())
             .unwrap_or_default();
-        let here: Vec<(String, Ty)> = self.shapes[which]
-            .fields
-            .iter()
-            .filter(|(f, ty)| !gone.contains(f) && want.map_or(true, |w| *ty == w))
-            .cloned()
+        let here: Vec<(String, Ty)> = self
+            .paths(which, &gone, 0)
+            .into_iter()
+            .filter(|(_, ty)| want.map_or(true, |w| *ty == w))
             .collect();
         if here.is_empty() {
             return None;
@@ -378,7 +422,6 @@ impl<'a> Writer<'a> {
         let which = self.rng.below(self.shapes.len() as u32) as usize;
         let mutable = self.rng.chance(60);
         let name = self.fresh();
-        let types: Vec<Ty> = self.shapes[which].fields.iter().map(|(_, t)| *t).collect();
         let shape_name = self.shapes[which].name.clone();
         self.pad();
         self.out.push_str("var.");
@@ -389,14 +432,7 @@ impl<'a> Writer<'a> {
         self.out.push_str(" '");
         self.out.push_str(&name);
         self.out.push_str("' = [");
-        for (i, ty) in types.iter().enumerate() {
-            if i > 0 {
-                self.out.push(' ');
-            }
-            // Every one of them is a place of its own, so text is written whole
-            // rather than as pieces that would join anywhere else.
-            self.expr(*ty, if *ty == Ty::Str { 0 } else { 1 });
-        }
+        self.group_items(which);
         self.out.push_str("];\n");
         self.declare(Var {
             name,
@@ -408,6 +444,31 @@ impl<'a> Writer<'a> {
             group: Some(which),
             parts_moved: Vec::new(),
         });
+    }
+
+    /// One item for each of the things it holds, in order — and a group of
+    /// items where one of them is itself a struct.
+    fn group_items(&mut self, which: usize) {
+        let held: Vec<Held> = self.shapes[which].fields.iter().map(|(_, h)| *h).collect();
+        for (i, one) in held.iter().enumerate() {
+            if i > 0 {
+                self.out.push(' ');
+            }
+            match one {
+                // Every one of them is a place of its own, so text is written
+                // whole rather than as pieces that would join anywhere else.
+                Held::Plain(ty) => self.expr(*ty, if *ty == Ty::Str { 0 } else { 1 }),
+                Held::Group(inner) => {
+                    // Named where it is made: a word before a bracket is a
+                    // call, where a name before one is an index.
+                    let name = self.shapes[*inner].name.clone();
+                    self.out.push_str(&name);
+                    self.out.push('[');
+                    self.group_items(*inner);
+                    self.out.push(']');
+                }
+            }
+        }
     }
 
     /// `print.stdout['v9'.v4 \n];`
@@ -463,6 +524,12 @@ impl<'a> Writer<'a> {
             self.print();
             return;
         };
+        // Only one written at the top, because what is tracked here is which of
+        // this struct's own things have gone.
+        if field.contains('.') {
+            self.print();
+            return;
+        }
         self.pad();
         self.out.push_str("consume[move '");
         self.out.push_str(&name);
