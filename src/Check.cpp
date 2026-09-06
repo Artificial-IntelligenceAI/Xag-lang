@@ -1097,8 +1097,20 @@ private:
       if (s.value.values.size() != 2)
         complain(s.value.span, "E0505", "a counted loop runs between two values.",
                  {"`[first, last]` says where a count starts and stops"});
-      for (const Value &v : s.value.values)
-        value(v, type);
+      // Where a count starts and stops is counted in, so both are the
+      // counter's own type. Asking and throwing the answer away let a `bin64`
+      // or a `str` stand as a bound, which the engines then disagreed about:
+      // the interpreters counted no times and the native code counted three.
+      for (const Value &v : s.value.values) {
+        const Ty got = value(v, type);
+        if (type != Type::Unknown && got != Type::Unknown && got != type)
+          complain(v.span, "E0506",
+                   "this is a `" + std::string(name(got)) + "` and a `" +
+                       std::string(name(type)) + "` was wanted.",
+                   {"nothing converts on its own"},
+                   {"a counted loop counts in its own type, so where it starts and "
+                    "stops are that type too."});
+      }
       const bool keeps = keepsCounter(s.chain);
       if (keeps)
         declare(s.name, Symbol{type, false, s.nameSpan});

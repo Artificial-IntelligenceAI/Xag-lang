@@ -211,6 +211,22 @@ void conditionsAskABool() {
   CHECK(inStart("var.int64 'n' = [*1*];\n    if 'n' > *0* { }").ok());
 }
 
+// Where a count starts and stops is counted in, so both are the counter's own
+// type. Asking and throwing the answer away let anything at all stand as a
+// bound, and the engines then disagreed about what it meant.
+void aCountedLoopCountsInItsOwnType() {
+  CHECK(inStart("loop.range.int64 'i' = [*0*, *5*] { }").ok());
+  CHECK(inStart("var.int64 'n' = [*5*];\n"
+                "    loop.range.int64 'i' = [*0*, 'n'] { }").ok());
+
+  CHECK(inStart("var.int8 'a' = [*3*];\n"
+                "    loop.range.int64 'i' = ['a', *5*] { }").code(0) == "E0506");
+  CHECK(inStart("var.bin64 'f' = [*2.5*];\n"
+                "    loop.range.int64 'i' = [*0*, 'f'] { }").code(0) == "E0506");
+  CHECK(inStart("var.str 's' = [*hi*];\n"
+                "    loop.range.int64 'i' = [*0*, 's'] { }").code(0) == "E0506");
+}
+
 void aPermCounterOutlivesItsLoop() {
   CHECK(inStart("loop.perm.range.int64 'i' = [*1*, *3*] { }\n"
                 "    print.stdout['i' \\n];").ok());
@@ -485,6 +501,7 @@ int main() {
   aFunctionAnswersEveryWayOut();
   breakNeedsALoop();
   conditionsAskABool();
+  aCountedLoopCountsInItsOwnType();
   aPermCounterOutlivesItsLoop();
   theCounterIsInScopeOnlyInTheLoop();
   aManyHoldsSeveralOfOneType();
