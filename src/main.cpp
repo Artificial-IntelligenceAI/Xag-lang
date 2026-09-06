@@ -308,20 +308,6 @@ int fastFile(const std::string &path) {
   if (!ready(path, text, built, status))
     return status;
 
-  // What the fast engine does not know, it passes over without a word — which
-  // reads as a program that ran and said nothing. Three engines are only worth
-  // having while they agree, so it says so instead.
-  for (const xag::Body &body : built.mir.bodies)
-    for (const xag::BasicBlock &block : body.blocks)
-      for (const xag::Statement &one : block.statements)
-        if (one.value.kind == xag::RValueKind::Call &&
-            (one.value.callee == "convert-to-str" ||
-             one.value.callee == "convert-to-number")) {
-          std::cerr << "the fast engine cannot run `" << one.value.callee
-                    << "` yet.\n`xagc run` and `xagc build` both can.\n";
-          return 1;
-        }
-
   const xag::FastResult ran = xag::runFast(built.mir);
   if (!ran.ran) {
     std::cerr << "\nthe program stopped: " << ran.trouble << '\n';

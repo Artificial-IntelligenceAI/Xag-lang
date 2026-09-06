@@ -253,6 +253,35 @@ void onGroupingNamedThings() {
         "    is nothing { print.stdout[str:*none* \\n]; } } }\n");
 }
 
+void onTurningNumbersIntoText() {
+  AGREE("START { var.int64 'n' = [*42*];\n"
+        "  var.str 's' = [str:*x = * convert-to-str['n']];\n"
+        "  print.stdout['s' \\n]; }\n");
+  // Every family, each exactly as print writes it: the trailing zero of a
+  // decimal kept, a binary read back as it was written, all thirty-nine digits
+  // of a uint128.
+  AGREE("START { var.bin64 'a' = [*0.1*]; print.stdout[convert-to-str['a'] \\n]; }\n");
+  AGREE("START { var.deci64 'b' = [*1.10*]; print.stdout[convert-to-str['b'] \\n]; }\n");
+  AGREE("START { var.int8 'c' = [*-5*]; print.stdout[convert-to-str['c'] \\n]; }\n");
+  AGREE("START { var.bool 'd' = [*true*]; print.stdout[convert-to-str['d'] \\n]; }\n");
+  AGREE("START { var.uint128 'e' = [*340282366920938463463374607431768211455*];\n"
+        "  print.stdout[convert-to-str['e'] \\n]; }\n");
+  AGREE("START { var.bin128 'f' = [*0.5*]; print.stdout[convert-to-str['f'] \\n]; }\n");
+  // Made in a function and afresh on every turn of a loop; the balance is
+  // checked after, so text not let go of would be caught here.
+  AGREE("fn.str 'spell' [int64 'n'] { give [convert-to-str['n']]; }\n"
+        "START { var.int64 'n' = [*7*];\n"
+        "  loop.range.int64 'i' = [*1*, *3*] {\n"
+        "    var.str 's' = [spell['n']];\n"
+        "    print.stdout['s' str:* * (count[ref 's']) \\n]; } }\n");
+  // And the other way, under its new name.
+  AGREE("START { var.str 't' = [*250*];\n"
+        "  var.or-nothing.uint8 'n' = [convert-to-number[ref 't']];\n"
+        "  when 'n' {\n"
+        "    is 'v'     { print.stdout['v' \\n]; }\n"
+        "    is nothing { print.stdout[str:*none* \\n]; } } }\n");
+}
+
 } // namespace
 
 int main() {
@@ -263,6 +292,7 @@ int main() {
   onHoldingNothing();
   onChoosingBetweenCases();
   onGroupingNamedThings();
+  onTurningNumbersIntoText();
 
   if (failures == 0)
     std::cout << "the two interpreters agree everywhere asked\n";

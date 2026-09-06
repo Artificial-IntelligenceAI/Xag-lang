@@ -73,6 +73,7 @@ enum class Op : uint8_t {
   ViewPart,  // `to` = a view of field `b` of the struct in `a`, lent where it stands
   TakePart,  // `to` = field `b` of the struct in `a`, which is left holding nothing
   StorePart, // field path of `b` Arguments into `to`, given what is in `a`
+  TextOf,    // `to` = the number in `a` as text, exactly as print would write it
 };
 
 struct Code {
@@ -756,7 +757,19 @@ private:
       emit(Code{Op::Arguments, s.place, 0, 0, 0});
       return;
     }
-    if (value.callee == "number") {
+    if (value.callee == "convert-to-str") {
+      // The operand's own type says which family writes it, exactly as it does
+      // for print, and the same one word carries that to the machine.
+      const uint32_t from = value.operands.empty() ? 0 : into(value.operands[0], scratch);
+      const std::string type =
+          value.operands.empty() ? std::string() : behind(spelled(value.operands[0].type));
+      const Type given = typeNamed(type);
+      const uint32_t family = type == "bool" ? 3u : isDecimal(given) ? 2u : isBinary(given) ? 1u : 0u;
+      emit(Code{Op::TextOf, s.place, from, 0,
+                (widthOf(given) << 3) | (family << 1) | (isSigned(given) ? 1u : 0u)});
+      return;
+    }
+    if (value.callee == "convert-to-number") {
       const uint32_t from = value.operands.empty() ? 0 : into(value.operands[0], scratch);
       const Type wanted = typeNamed(behind(spelled(value.type)).rfind("or-nothing ", 0) == 0
                                         ? behind(spelled(value.type)).substr(11)
@@ -1097,6 +1110,29 @@ private:
     *target = kept;
   }
 
+  // A number as text, by the same runtime functions print writes through, so
+  // that what this answers and what print writes cannot drift apart. What is
+  // made here is the slot's own, and is let go of like any other text.
+  [[gnu::noinline]] void textOf(Slot &to, const Slot &of, uint32_t aux) {
+    const uint32_t width = aux >> 3;
+    const uint32_t family = (aux >> 1) & 0x3;
+    XagStr made{nullptr, 0, 0};
+    if (family == 3)
+      xag_str_of_bool(&made, of.whole != 0);
+    else if (family == 2)
+      xag_str_of_deci(&made, width, static_cast<XagDeci>(of.whole));
+    else if (family == 1 && width == 128)
+      xag_str_of_bin128(&made, static_cast<XagBin128>(of.whole));
+    else if (family == 1)
+      xag_str_of_bin(&made, of.real, width);
+    else
+      xag_str_of_int(&made, of.whole, width, aux & 1);
+    end(to);
+    to = Slot{};
+    to.text = made;
+    to.owns = true;
+  }
+
   // Runs a routine on `given` arguments, each naming a slot in the caller's
   // frame at `from`.
   void call(unsigned which, uint32_t base, Slot &answer, Slot *from, const Code *given,
@@ -1380,6 +1416,7 @@ private:
       [[unlikely]] case Op::ReadLine: readLine(to); break;
       [[unlikely]] case Op::Arguments: takeArguments(to); break;
       [[unlikely]] case Op::NumberOf: numberOf(to, read(one.a), one.aux); break;
+      [[unlikely]] case Op::TextOf: textOf(to, read(one.a), one.aux); break;
 
       case Op::LoadNone:
         end(to);
