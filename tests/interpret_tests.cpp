@@ -244,15 +244,15 @@ void aPermCounterKeepsWhatItHad() {
 }
 
 void itCalls() {
-  SAYS("fn.int64 sum-to [int64 'n'] {\n"
+  SAYS("fn.int64 'sum-to' [int64 'n'] {\n"
        "  var.mut.int64 'total' = [*0*];\n"
        "  loop.range.int64 'i' = [*1*, 'n'] { set 'total' = ['total' + 'i']; }\n"
        "  give ['total'];\n}\n"
        "START { print.stdout[sum-to[*10*] \\n]; }\n",
        "55\n");
   // Two functions may call each other, since every signature is read first.
-  SAYS("fn.int64 down [int64 'n'] { if 'n' <== *0* { give [*0*]; } give [up['n' - *1*]]; }\n"
-       "fn.int64 up [int64 'n'] { give [down['n']]; }\n"
+  SAYS("fn.int64 'down' [int64 'n'] { if 'n' <== *0* { give [*0*]; } give [up['n' - *1*]]; }\n"
+       "fn.int64 'up' [int64 'n'] { give [down['n']]; }\n"
        "START { print.stdout[down[*3*] \\n]; }\n",
        "0\n");
 }
@@ -264,7 +264,7 @@ void itKnowsItsConstants() {
   SAYS("const.str 'GREETING' = [*Hello*];\n"
        "START { print.stdout['GREETING' str:*!* \\n]; }\n", "Hello!\n");
   // Used above where it stands, and used as an argument.
-  SAYS("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  SAYS("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
        "const.int64 'LIMIT' = [*21*];\n"
        "START { print.stdout[twice['LIMIT'] \\n]; }\n", "42\n");
   // And written as an expression rather than only as a literal.
@@ -273,21 +273,21 @@ void itKnowsItsConstants() {
 }
 
 void itLendsAndTakes() {
-  SAYS("fn.int64 size [ref.str 'text'] { give [count['text']]; }\n"
+  SAYS("fn.int64 'size' [ref.str 'text'] { give [count['text']]; }\n"
        "START { var.str 's' = [*café*]; print.stdout[size[ref 's'] \\n]; }\n",
        "4\n");
-  SAYS("fn.nothing shout [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
+  SAYS("fn.nothing 'shout' [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
        "START { var.mut.str 's' = [*hi*]; shout[refmut 's'];"
        " print.stdout['s' \\n]; }\n",
        "hi!\n");
-  SAYS("fn.nothing keep [str 'text'] { print.stdout['text' \\n]; }\n"
+  SAYS("fn.nothing 'keep' [str 'text'] { print.stdout['text' \\n]; }\n"
        "START { var.str 's' = [*taken*]; keep[move 's']; }\n",
        "taken\n");
 }
 
 void itEndsHoldingNothing() {
   // Every one of the above also asserts the balance; this one says so out loud.
-  const Ran r = run("fn.nothing keep [str 'text'] { print.stdout['text' \\n]; }\n"
+  const Ran r = run("fn.nothing 'keep' [str 'text'] { print.stdout['text' \\n]; }\n"
                     "START {\n"
                     "  var.str 'a' = [*one*];\n"
                     "  var.str 'b' = [*two*];\n"
@@ -342,7 +342,7 @@ void itCountsWhatEachPlaceHolds() {
 }
 
 void itHoldsSomethingOrNothing() {
-  SAYS("fn.or-nothing.str pick [int64 'n'] {\n"
+  SAYS("fn.or-nothing.str 'pick' [int64 'n'] {\n"
        "  if 'n' > *0* { give [*yes*]; }\n"
        "  give [nothing]; }\n"
        "START {\n"
@@ -362,69 +362,69 @@ void itHoldsSomethingOrNothing() {
 }
 
 void itHoldsAGroupOfNamedThings() {
-  SAYS("struct point [int64 'x', int64 'y']\n"
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
        "START { var.point 'p' = [*3* *4*];\n"
        "  print.stdout['p'.x str:* * 'p'.y \\n]; }\n", "3 4\n");
 
   // Writing one of them leaves the rest where they were.
-  SAYS("struct point [int64 'x', int64 'y']\n"
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
        "START { var.mut.point 'p' = [*3* *4*];\n"
        "  set 'p'.y = [*9*];\n"
        "  print.stdout['p'.x str:* * 'p'.y \\n]; }\n", "3 9\n");
 
   // The balance is checked after every one of these, so a struct that let go of
   // only some of what it held would be caught here.
-  SAYS("struct tag [str 'name', int64 'runs']\n"
+  SAYS("struct 'tag' [str 'name', int64 'runs']\n"
        "START { var.tag 't' = [*ada* *36*];\n"
        "  print.stdout['t'.name str:* * 't'.runs \\n]; }\n", "ada 36\n");
-  SAYS("struct tag [str 'name']\nstruct pair [tag 'one', tag 'two']\n"
+  SAYS("struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', tag 'two']\n"
        "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
        "  var.pair 'p' = [move 'a' move 'b'];\n"
        "  print.stdout['p'.one.name str:* * 'p'.two.name \\n]; }\n", "ada bob\n");
 
   // One of them handed over on its own: what went is gone, and the rest is let
   // go as it always was.
-  SAYS("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
-       "struct tag [str 'name', int64 'runs']\n"
+  SAYS("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
+       "struct 'tag' [str 'name', int64 'runs']\n"
        "START { var.tag 't' = [*ada* *36*];\n"
        "  keep[move 't'.name];\n"
        "  print.stdout['t'.runs \\n]; }\n", "ada\n36\n");
 
   // A struct inside a `many`, and one behind `or-nothing`, still let go of
   // what they hold — the balance after each of these says whether they did.
-  SAYS("struct tag [str 'name']\n"
+  SAYS("struct 'tag' [str 'name']\n"
        "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
        "  var.many.tag 'ts' = [move 'a' move 'b'];\n"
        "  print.stdout['ts'[*1*].name \\n]; }\n", "bob\n");
-  SAYS("struct tag [str 'name']\n"
+  SAYS("struct 'tag' [str 'name']\n"
        "START { var.or-nothing.tag 't' = [*ada*];\n"
        "  when 't' {\n"
        "    is 'one'   { print.stdout['one'.name \\n]; }\n"
        "    is nothing { print.stdout[str:*none* \\n]; } } }\n", "ada\n");
   // With more than one struct declared, a `many` still holds the one it says.
-  SAYS("struct point [int64 'x', int64 'y']\nstruct tag [str 'name']\n"
+  SAYS("struct 'point' [int64 'x', int64 'y']\nstruct 'tag' [str 'name']\n"
        "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
        "  var.many.tag 'ts' = [move 'a' move 'b'];\n"
        "  print.stdout['ts'[*1*].name \\n]; }\n", "bob\n");
 
   // A struct that holds a struct that holds text.
-  SAYS("struct tag [str 'name']\nstruct pair [tag 'one', int64 'n']\n"
+  SAYS("struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', int64 'n']\n"
        "START { var.tag 'a' = [*ada*];\n"
        "  var.pair 'p' = [move 'a' *7*];\n"
        "  print.stdout['p'.one.name \\n]; }\n", "ada\n");
 
   // In a `many`, behind `or-nothing`, and in and out of a function.
-  SAYS("struct point [int64 'x', int64 'y']\n"
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
        "START { var.point 'a' = [*1* *2*];\n  var.point 'b' = [*3* *4*];\n"
        "  var.many.point 'ps' = [move 'a' move 'b'];\n"
        "  print.stdout['ps'[*1*].x \\n]; }\n", "3\n");
-  SAYS("struct tag [str 'name']\n"
+  SAYS("struct 'tag' [str 'name']\n"
        "START { var.or-nothing.tag 't' = [nothing];\n"
        "  when 't' {\n"
        "    is 'one'   { print.stdout['one'.name \\n]; }\n"
        "    is nothing { print.stdout[str:*none* \\n]; } } }\n", "none\n");
-  SAYS("struct point [int64 'x', int64 'y']\n"
-       "fn.int64 across [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
+       "fn.int64 'across' [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
        "START { var.point 'p' = [*20* *22*];\n"
        "  print.stdout[(across[ref 'p']) \\n]; }\n", "42\n");
 }

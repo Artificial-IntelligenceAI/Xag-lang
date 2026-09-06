@@ -25,8 +25,16 @@ struct Parsed {
 
   bool ok() const { return lexed.ok() && parsed.ok(); }
   bool has(const std::string &needle) const { return tree.find(needle) != std::string::npos; }
-  const std::string &code(unsigned i) const { return parsed.diagnostics[i].code; }
-  const std::string &message(unsigned i) const { return parsed.diagnostics[i].message; }
+  // Asking for a mistake that is not there is how a test says it is out of
+  // date, and it should read as a failure rather than walking off the end of
+  // the list — which is what it did when a program this file expected to be
+  // refused became a good one.
+  std::string code(unsigned i) const {
+    return i < parsed.diagnostics.size() ? parsed.diagnostics[i].code : "(none)";
+  }
+  std::string message(unsigned i) const {
+    return i < parsed.diagnostics.size() ? parsed.diagnostics[i].message : "(none)";
+  }
 };
 
 Parsed run(const std::string &text) {
@@ -45,7 +53,7 @@ void wholeProgramParses() {
   const Parsed p = run(R"(
 const.int64 'LIMIT' = [*10*];
 
-fn.int64 sum-to [int64 'n'] {
+fn.int64 'sum-to' [int64 'n'] {
     var.mut.int64 'total' = [*0*];
     loop.range.int64 'i' = [*1*, 'n'] {
         set 'total' = ['total' + 'i'];
@@ -200,13 +208,13 @@ void aSegmentHasToMeanSomething() {
     CHECK(!p.parsed.ok());
     CHECK(p.code(0) == "E0202");
   }
-  CHECK(!run("fn.mut.wat.int64 f [] { give [*7*]; }\n").parsed.ok());
+  CHECK(!run("fn.mut.wat.int64 'f' [] { give [*7*]; }\n").parsed.ok());
 }
 
 void eachChainAsksItsOwnQuestions() {
   // `mut` is a real word in the wrong chain: a function's answer is a value,
   // and a value does not change.
-  const Parsed f = run("fn.mut.int64 f [] { give [*7*]; }\n");
+  const Parsed f = run("fn.mut.int64 'f' [] { give [*7*]; }\n");
   CHECK(!f.parsed.ok());
   CHECK(f.code(0) == "E0203");
 
@@ -235,7 +243,7 @@ void aChainHasOneOrder() {
 }
 
 void visibilityHasNowhereToGoYet() {
-  CHECK(run("fn.export.int64 f [] { give [*7*]; }\n").code(0) == "E0206");
+  CHECK(run("fn.export.int64 'f' [] { give [*7*]; }\n").code(0) == "E0206");
   CHECK(run("const.program.int64 'L' = [*1*];\n").code(0) == "E0206");
 }
 
@@ -263,15 +271,15 @@ void anElementIsReadAndWritten() {
 
 void manyStandsWithTheType() {
   CHECK(inStart("var.many.int64 'xs' = [*1* *2*];").ok());
-  CHECK(run("fn.many.int64 f [ref.many.str 'ws'] { give [*1*]; }\n").ok());
+  CHECK(run("fn.many.int64 'f' [ref.many.str 'ws'] { give [*1*]; }\n").ok());
   CHECK(inStart("var.many.many.int64 'g' = [];").code(0) == "E0210");
   CHECK(inStart("var.many.mut.int64 'xs' = [*1*];").code(0) == "E0209");
 }
 
 void chainsThatWereAlwaysGoodStillAre() {
-  CHECK(run("fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+  CHECK(run("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
             "    give ['a'];\n}\n").ok());
-  CHECK(run("fn.nothing edit [refmut.str 't'] { set 't' = ['t' *!*]; }\n").ok());
+  CHECK(run("fn.nothing 'edit' [refmut.str 't'] { set 't' = ['t' *!*]; }\n").ok());
   CHECK(run("const.int64 'LIMIT' = [*10*];\n").ok());
   CHECK(inStart("var.mut.int64 'n' = [*1*];").ok());
   CHECK(inStart("var.refmut.str 's' = [refmut 'other'];").ok());
@@ -280,7 +288,7 @@ void chainsThatWereAlwaysGoodStillAre() {
 void aTypeMaySayItHoldsNothing() {
   CHECK(inStart("var.or-nothing.str 's' = [*hi*];").ok());
   CHECK(inStart("var.or-nothing.many.int64 'xs' = [*1*];").ok());
-  CHECK(run("fn.or-nothing.int64 f [] { give [nothing]; }\n").ok());
+  CHECK(run("fn.or-nothing.int64 'f' [] { give [nothing]; }\n").ok());
 
   // One absence is every absence.
   CHECK(inStart("var.or-nothing.or-nothing.str 's' = [*hi*];").code(0) == "E0211");
@@ -314,15 +322,33 @@ void whenIsMadeOfIs() {
   CHECK(inStart("when 'x' { is value { } }").code(0) == "E0108");
 }
 
+void aDeclarationMarksWhatItNames() {
+  // Marked where it is named, bare where it is called.
+  CHECK(run("fn.int64 'longer' [int64 'n'] { give ['n']; }\n").ok());
+  CHECK(run("fn.int64 longer [int64 'n'] { give ['n']; }\n").code(0) == "E0101");
+  CHECK(run("struct 'point' [int64 'x']\n").ok());
+  CHECK(run("struct point [int64 'x']\n").code(0) == "E0101");
+
+  // The call site is unchanged, and so is naming a type.
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { print.stdout[(twice[*2*]) \\n]; }\n").ok());
+  CHECK(run("struct 'point' [int64 'x']\n"
+            "START { var.point 'p' = [*1*]; }\n").ok());
+
+  // The loan name in a chain was already marked, and still is.
+  CHECK(run("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+            "    give ['a'];\n}\n").ok());
+}
+
 void aStructNamesWhatItHolds() {
-  CHECK(run("struct point [int64 'x', int64 'y']\n").ok());
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n").ok());
   // The same shape as a function's parameters, because it is the same question:
   // what is in here, in what order, and called what.
-  CHECK(run("struct pair [str 'name', many.int64 'runs']\n").ok());
+  CHECK(run("struct 'pair' [str 'name', many.int64 'runs']\n").ok());
 
-  // A word names it, and words name the things in it.
-  CHECK(run("struct 'point' [int64 'x']\n").code(0) == "E0101");
-  CHECK(run("struct point [int64 x]\n").code(0) == "E0101");
+  // A declaration marks what it names, and so do the things it holds.
+  CHECK(run("struct point [int64 'x']\n").code(0) == "E0101");
+  CHECK(run("struct 'point' [int64 x]\n").code(0) == "E0101");
 
   // Nothing else goes in the chain.
   CHECK(run("struct.mut point [int64 'x']\n").code(0) == "E0203");
@@ -361,6 +387,7 @@ int main() {
   aTypeMaySayItHoldsNothing();
   holdsLendsWhatIsThere();
   whenIsMadeOfIs();
+  aDeclarationMarksWhatItNames();
   aStructNamesWhatItHolds();
 
   if (failures == 0)

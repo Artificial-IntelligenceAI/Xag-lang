@@ -128,22 +128,22 @@ void onEverySizeAndFamily() {
 }
 
 void onCallsAndBorrows() {
-  AGREE("fn.int64 sum-to [int64 'n'] {\n"
+  AGREE("fn.int64 'sum-to' [int64 'n'] {\n"
         "  var.mut.int64 't' = [*0*];\n"
         "  loop.range.int64 'i' = [*1*, 'n'] { set 't' = ['t' + 'i']; }\n"
         "  give ['t']; }\n"
         "START { print.stdout[sum-to[*10*] \\n]; }\n");
-  AGREE("fn.int64 size [ref.str 't'] { give [count['t']]; }\n"
+  AGREE("fn.int64 'size' [ref.str 't'] { give [count['t']]; }\n"
         "START { var.str 's' = [*café*]; print.stdout[size[ref 's'] \\n]; }\n");
-  AGREE("fn.nothing edit [refmut.str 't'] { set 't' = ['t' *!*]; }\n"
+  AGREE("fn.nothing 'edit' [refmut.str 't'] { set 't' = ['t' *!*]; }\n"
         "START { var.mut.str 's' = [*hi*]; edit[refmut 's'];"
         " print.stdout['s' \\n]; }\n");
-  AGREE("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
+  AGREE("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
         "START { var.str 's' = [*taken*]; keep[move 's']; }\n");
-  AGREE("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
+  AGREE("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
         "START { var.str 's' = [*hi*]; var.int64 'n' = [*1*];\n"
         "  if 'n' == *1* { keep[move 's']; } }\n");
-  AGREE("fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+  AGREE("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
         "  if count['a'] >== count['b'] { give ['a']; } else { give ['b']; } }\n"
         "START { var.str 'x' = [*hello*]; var.str 'y' = [*hi*];\n"
         "  var.ref.str 'w' = [longer[ref 'x', ref 'y']];\n"
@@ -164,7 +164,7 @@ void onHoldingSeveralValues() {
         "  set 'ws'[*1*] = [*TWO*];\n"
         "  loop.range.int64 'i' = [*0*, (count[ref 'ws'] - *1*)] {\n"
         "    print.stdout['ws'['i'] str:* * (count['ws'['i']]) \\n]; } }\n");
-  AGREE("fn.int64 total [ref.many.int64 'xs'] {\n"
+  AGREE("fn.int64 'total' [ref.many.int64 'xs'] {\n"
         "  var.mut.int64 't' = [*0*];\n"
         "  loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {\n"
         "    set 't' = ['t' + 'xs'['i']]; }\n"
@@ -176,7 +176,7 @@ void onHoldingSeveralValues() {
 }
 
 void onHoldingNothing() {
-  AGREE("fn.or-nothing.int64 half [int64 'n'] {\n"
+  AGREE("fn.or-nothing.int64 'half' [int64 'n'] {\n"
         "  if 'n' == *0* { give [nothing]; }\n"
         "  give ['n' / *2*]; }\n"
         "START { loop.range.int64 'i' = [*0*, *4*] {\n"
@@ -189,7 +189,7 @@ void onHoldingNothing() {
 }
 
 void onChoosingBetweenCases() {
-  AGREE("fn.or-nothing.int64 half [int64 'n'] {\n"
+  AGREE("fn.or-nothing.int64 'half' [int64 'n'] {\n"
         "  if 'n' == *0* { give [nothing]; }\n"
         "  give ['n' / *2*]; }\n"
         "START { loop.range.int64 'i' = [*0*, *4*] {\n"
@@ -204,45 +204,45 @@ void onChoosingBetweenCases() {
 
 void onGroupingNamedThings() {
   // A field read and a field written, with the rest left as it was.
-  AGREE("struct point [int64 'x', int64 'y']\n"
+  AGREE("struct 'point' [int64 'x', int64 'y']\n"
         "START { var.mut.point 'p' = [*3* *4*];\n"
         "  print.stdout['p'.x str:* * 'p'.y \\n];\n"
         "  set 'p'.y = [*9*];\n"
         "  print.stdout['p'.x str:* * 'p'.y \\n]; }\n");
   // Text held by a struct is the struct's own, and let go with it.
-  AGREE("struct tag [str 'name', int64 'runs']\n"
+  AGREE("struct 'tag' [str 'name', int64 'runs']\n"
         "START { var.mut.tag 't' = [*ada* *36*];\n"
         "  print.stdout['t'.name str:* * 't'.runs \\n];\n"
         "  set 't'.name = [*bob*];\n"
         "  print.stdout['t'.name str:* * (count['t'.name]) \\n]; }\n");
   // A struct of structs, read and written down a path.
-  AGREE("struct point [int64 'x', int64 'y']\n"
-        "struct runner [str 'name', point 'at']\n"
-        "fn.nothing bump [refmut.runner 'r'] { set 'r'.at.x = ['r'.at.x + *1*]; }\n"
+  AGREE("struct 'point' [int64 'x', int64 'y']\n"
+        "struct 'runner' [str 'name', point 'at']\n"
+        "fn.nothing 'bump' [refmut.runner 'r'] { set 'r'.at.x = ['r'.at.x + *1*]; }\n"
         "START { var.mut.point 'a' = [*1* *2*];\n"
         "  var.mut.runner 'r' = [*ada* move 'a'];\n"
         "  bump[refmut 'r'];\n"
         "  print.stdout['r'.name str:* * 'r'.at.x str:* * 'r'.at.y \\n]; }\n");
   // One field handed over on its own, with the rest still there to read.
-  AGREE("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
-        "struct tag [str 'name', int64 'runs']\n"
+  AGREE("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
+        "struct 'tag' [str 'name', int64 'runs']\n"
         "START { var.tag 't' = [*ada* *36*];\n"
         "  keep[move 't'.name];\n"
         "  print.stdout['t'.runs \\n]; }\n");
   // Structs in a `many`, one of them replaced.
-  AGREE("struct tag [str 'name']\n"
+  AGREE("struct 'tag' [str 'name']\n"
         "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
         "  var.mut.many.tag 'ts' = [move 'a' move 'b'];\n"
         "  var.tag 'c' = [*cy*];\n"
         "  set 'ts'[*0*] = [move 'c'];\n"
         "  print.stdout['ts'[*0*].name str:* * 'ts'[*1*].name \\n]; }\n");
   // A struct behind a loan, through a function.
-  AGREE("struct point [int64 'x', int64 'y']\n"
-        "fn.int64 across [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
+  AGREE("struct 'point' [int64 'x', int64 'y']\n"
+        "fn.int64 'across' [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
         "START { var.point 'p' = [*20* *22*];\n"
         "  print.stdout[(across[ref 'p']) \\n]; }\n");
   // A struct behind `or-nothing`, both ways, under `when`.
-  AGREE("struct tag [str 'name']\n"
+  AGREE("struct 'tag' [str 'name']\n"
         "START { var.or-nothing.tag 't' = [*ada*];\n"
         "  when 't' {\n"
         "    is 'one'   { print.stdout['one'.name \\n]; }\n"

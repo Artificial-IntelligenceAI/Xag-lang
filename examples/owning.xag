@@ -1,15 +1,15 @@
 # What a name owns, what it lends, and what it gives away.
 
-fn.int64 size [ref.str 'text'] {
+fn.int64 'size' [ref.str 'text'] {
     give [count['text']];
 }
 
-fn.nothing excite [refmut.str 'text'] {
+fn.nothing 'excite' [refmut.str 'text'] {
     set 'text' = ['text' *!*];
 }
 
 # No ownership word, so this one takes it.
-fn.nothing keep [str 'text'] {
+fn.nothing 'keep' [str 'text'] {
     print.stdout['text' \n];
 }
 

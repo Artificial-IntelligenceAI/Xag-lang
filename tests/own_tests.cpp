@@ -54,9 +54,9 @@ Owned run(const std::string &text) {
   return o;
 }
 
-const char *kKeep = "fn.nothing keep [str 'text'] { print.stdout['text' \n]; }\n";
-const char *kLook = "fn.int64 look [ref.str 'text'] { give [count['text']]; }\n";
-const char *kEdit = "fn.nothing edit [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n";
+const char *kKeep = "fn.nothing 'keep' [str 'text'] { print.stdout['text' \n]; }\n";
+const char *kLook = "fn.int64 'look' [ref.str 'text'] { give [count['text']]; }\n";
+const char *kEdit = "fn.nothing 'edit' [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n";
 
 Owned withHelpers(const std::string &body) {
   return run(std::string(kKeep) + kLook + kEdit + "START {\n" + body + "\n}\n");
@@ -89,7 +89,7 @@ void aMistakeWithTwoPlacesPointsAtBoth() {
 
   // The loan rule points at every parameter it counted.
   const Owned loan =
-      run("fn.ref.str longer [ref.str 'a', ref.str 'b'] { give ['a']; }\nSTART { }\n");
+      run("fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] { give ['a']; }\nSTART { }\n");
   const xag::Diagnostic *named = loan.find("E0402");
   CHECK(named != nullptr);
   if (named)
@@ -107,26 +107,26 @@ void aTransferIsSpelled() {
 
 void smallValuesAreNotMoved() {
   // An `int64` is handed over by being copied, so nothing is spelled.
-  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.int64 'a' = [*2*]; var.int64 'b' = [twice['a']];"
             " print.stdout['a' \n]; }\n").ok());
-  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.int64 'a' = [*2*]; var.int64 'b' = [twice[move 'a']]; }\n")
             .code(0) == "E0405");
 }
 
 void aBorrowIsNotYoursToGiveAway() {
   CHECK(run(std::string(kKeep) +
-            "fn.nothing pass [ref.str 'text'] { keep[move 'text']; }\nSTART { }\n")
+            "fn.nothing 'pass' [ref.str 'text'] { keep[move 'text']; }\nSTART { }\n")
             .code(0) == "E0404");
   // Passing a loan along is not a transfer, so nothing is spelled again.
   CHECK(run(std::string(kLook) +
-            "fn.int64 pass [ref.str 'text'] { give [look['text']]; }\nSTART { }\n").ok());
+            "fn.int64 'pass' [ref.str 'text'] { give [look['text']]; }\nSTART { }\n").ok());
 }
 
 void aLoanIsLentBeforeItIsWritten() {
   CHECK(run(std::string(kEdit) +
-            "fn.nothing pass [ref.str 'text'] { edit[refmut 'text']; }\nSTART { }\n")
+            "fn.nothing 'pass' [ref.str 'text'] { edit[refmut 'text']; }\nSTART { }\n")
             .code(0) == "E0407");
   // A name that does not change cannot be lent for writing either.
   CHECK(withHelpers("var.str 's' = [*hi*];\n    edit[refmut 's'];").code(0) == "E0407");
@@ -135,13 +135,13 @@ void aLoanIsLentBeforeItIsWritten() {
 
 void aBorrowNeverOutlastsWhatItBorrowsFrom() {
   // One parameter is lent, so the loan is not in question — only the answer is.
-  CHECK(run("fn.ref.str broken [ref.str 'other'] {"
+  CHECK(run("fn.ref.str 'broken' [ref.str 'other'] {"
             " var.str 'text' = [*hello*]; give ['text']; }\nSTART { }\n")
             .code(0) == "E0401");
-  CHECK(run("fn.ref.str echo [ref.str 'text'] { give ['text']; }\nSTART { }\n").ok());
+  CHECK(run("fn.ref.str 'echo' [ref.str 'text'] { give ['text']; }\nSTART { }\n").ok());
 
   // With nothing lent at all, the signature is wrong before the body is read.
-  const Owned both = run("fn.ref.str broken [] {"
+  const Owned both = run("fn.ref.str 'broken' [] {"
                          " var.str 'text' = [*hello*]; give ['text']; }\nSTART { }\n");
   CHECK(both.reports("E0402"));
   CHECK(both.reports("E0401"));
@@ -149,17 +149,17 @@ void aBorrowNeverOutlastsWhatItBorrowsFrom() {
 
 void aLoanIsNamedWhenThereIsAChoice() {
   // One borrowed parameter: only one loan the answer could be on.
-  CHECK(run("fn.ref.str echo [ref.str 'a'] { give ['a']; }\nSTART { }\n").ok());
+  CHECK(run("fn.ref.str 'echo' [ref.str 'a'] { give ['a']; }\nSTART { }\n").ok());
   // Two: the compiler does not get to choose.
-  CHECK(run("fn.ref.str longer [ref.str 'a', ref.str 'b'] { give ['a']; }\nSTART { }\n")
+  CHECK(run("fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] { give ['a']; }\nSTART { }\n")
             .code(0) == "E0402");
-  CHECK(run("fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b']"
+  CHECK(run("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b']"
             " { give ['a']; }\nSTART { }\n").ok());
   // A loan nobody was lent on.
-  CHECK(run("fn.ref.'life'.str odd [ref.str 'a'] { give ['a']; }\nSTART { }\n")
+  CHECK(run("fn.ref.'life'.str 'odd' [ref.str 'a'] { give ['a']; }\nSTART { }\n")
             .code(0) == "E0402");
   // Nothing lent at all.
-  CHECK(run("fn.ref.str nothingLent [] { give [*x*]; }\nSTART { }\n").code(0) == "E0402");
+  CHECK(run("fn.ref.str 'nothingLent' [] { give [*x*]; }\nSTART { }\n").code(0) == "E0402");
 }
 
 void anArmThatMovesMovesForEveryArm() {
@@ -177,13 +177,13 @@ void aLoopWouldMoveItTwice() {
 }
 
 void giveIsAlreadyTheWord() {
-  CHECK(run("fn.int64 total [] { var.int64 'n' = [*1*]; give ['n']; }\nSTART { }\n").ok());
-  CHECK(run("fn.str greet [] { var.str 's' = [*hi*]; give ['s']; }\nSTART { }\n").ok());
+  CHECK(run("fn.int64 'total' [] { var.int64 'n' = [*1*]; give ['n']; }\nSTART { }\n").ok());
+  CHECK(run("fn.str 'greet' [] { var.str 's' = [*hi*]; give ['s']; }\nSTART { }\n").ok());
   // Spelling `move` there would be a second way to write one thing.
-  CHECK(run("fn.str greet [] { var.str 's' = [*hi*]; give [move 's']; }\nSTART { }\n")
+  CHECK(run("fn.str 'greet' [] { var.str 's' = [*hi*]; give [move 's']; }\nSTART { }\n")
             .code(0) == "E0406");
   // What was given is gone, the same as anything else handed over.
-  CHECK(run("fn.str greet [] { var.str 's' = [*hi*]; give ['s']; give ['s']; }\n"
+  CHECK(run("fn.str 'greet' [] { var.str 's' = [*hi*]; give ['s']; give ['s']; }\n"
             "START { }\n").code(0) == "E0403");
 }
 
@@ -250,7 +250,7 @@ void whatHoldsLendsIsNotYoursToGiveAway() {
 // A struct is known field by field where it is written, so one of them may be
 // handed over on its own — and what is left is the rest of it.
 void oneOfWhatAStructHoldsGoesOnItsOwn() {
-  const char *kTag = "struct tag [str 'name', int64 'runs']\n";
+  const char *kTag = "struct 'tag' [str 'name', int64 'runs']\n";
   auto shaped = [&](const std::string &body) {
     return run(std::string(kTag) + kKeep + kLook + kEdit + "START {\n" + body + "\n}\n");
   };
@@ -281,7 +281,7 @@ void oneOfWhatAStructHoldsGoesOnItsOwn() {
 // Its items go into places of their own, so each one is handed over — reading
 // them as pieces of a joined value let an owning one be let go twice.
 void aStructIsFilledRatherThanJoined() {
-  const char *kPair = "struct tag [str 'name']\nstruct pair [tag 'one', tag 'two']\n";
+  const char *kPair = "struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', tag 'two']\n";
   CHECK(run(std::string(kPair) + "START {\n"
             "    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
             "    var.pair 'p' = ['a' 'b'];\n}\n").code(0) == "E0406");
@@ -291,11 +291,11 @@ void aStructIsFilledRatherThanJoined() {
             "    print.stdout['p'.two.name \\n];\n}\n").ok());
 
   // What copies still copies: whether a word is needed is the field's question.
-  CHECK(run("struct mixed [int64 'n', str 's']\nSTART {\n"
+  CHECK(run("struct 'mixed' [int64 'n', str 's']\nSTART {\n"
             "    var.str 'a' = [*hi*];\n"
             "    var.mixed 'm' = [*7* move 'a'];\n"
             "    print.stdout['m'.s \\n];\n}\n").ok());
-  CHECK(run("struct mixed [int64 'n', str 's']\nSTART {\n"
+  CHECK(run("struct 'mixed' [int64 'n', str 's']\nSTART {\n"
             "    var.str 'a' = [*hi*];\n"
             "    var.mixed 'm' = [*7* 'a'];\n}\n").code(0) == "E0406");
 }

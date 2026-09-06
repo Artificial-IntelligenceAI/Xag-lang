@@ -979,14 +979,25 @@ private:
     if (out.chain.startsWith("fn")) {
       out.kind = ItemKind::Function;
       validate(out.chain, kFn);
-      if (check(TokenKind::Word)) {
+      // Marked where it is named, bare where it is called: naming a function
+      // and calling one are different acts, and only the first is naming.
+      if (check(TokenKind::Name)) {
         const Token name = advance();
         out.name = name.text;
         out.nameSpan = name.span;
       } else {
-        complain(peek().span, "E0101", "a function is named with a word.",
-                 {"a word names a function, and a name wears marks and holds a value"},
-                 {}, std::string("found ") + describe(peek().kind));
+        complain(peek().span, "E0101", "a declaration marks what it names.",
+                 {"a name wears marks where it is given, and a word does not"},
+                 {"`longer` calls it; `'longer'` is what it is called."},
+                 std::string("found ") + describe(peek().kind));
+        // A bare word here is the mistake being reported, so it is taken as the
+        // name anyway and reading goes on from where it would have. Leaving it
+        // where it sat left the fields to be read starting at the name.
+        if (check(TokenKind::Word)) {
+          const Token name = advance();
+          out.name = name.text;
+          out.nameSpan = name.span;
+        }
       }
       readFields(out.params);
       out.body = block();
@@ -999,14 +1010,20 @@ private:
                  {"a chain says what is unusual, and says nothing else"},
                  {"what a `struct` holds is written in its fields, and each of "
                   "them has a chain of its own."});
-      if (check(TokenKind::Word)) {
+      if (check(TokenKind::Name)) {
         const Token name = advance();
         out.name = name.text;
         out.nameSpan = name.span;
       } else {
-        complain(peek().span, "E0101", "a `struct` is named with a word.",
-                 {"a word names a thing, and a name wears marks and holds a value"},
-                 {}, std::string("found ") + describe(peek().kind));
+        complain(peek().span, "E0101", "a declaration marks what it names.",
+                 {"a name wears marks where it is given, and a word does not"},
+                 {"`point` is the type; `'point'` is what it is called."},
+                 std::string("found ") + describe(peek().kind));
+        if (check(TokenKind::Word)) {
+          const Token name = advance();
+          out.name = name.text;
+          out.nameSpan = name.span;
+        }
       }
       readFields(out.params);
     } else if (out.chain.startsWith("const")) {

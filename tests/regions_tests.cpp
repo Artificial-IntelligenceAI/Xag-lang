@@ -41,9 +41,9 @@ Held run(const std::string &text) {
 }
 
 const char *kHelpers =
-    "fn.int64 size [ref.str 't'] { give [count['t']]; }\n"
-    "fn.nothing edit [refmut.str 't'] { set 't' = ['t' *!*]; }\n"
-    "fn.nothing keep [str 't'] { print.stdout['t' \n]; }\n";
+    "fn.int64 'size' [ref.str 't'] { give [count['t']]; }\n"
+    "fn.nothing 'edit' [refmut.str 't'] { set 't' = ['t' *!*]; }\n"
+    "fn.nothing 'keep' [str 't'] { print.stdout['t' \n]; }\n";
 
 void expect(const std::string &body, const std::string &wanted, int line) {
   const Held held = run(std::string(kHelpers) + "START {\n" + body + "\n}\n");
@@ -176,7 +176,7 @@ void aLoanOfAManyIsALoanOfEveryPlaceInIt() {
 // Lending one of the things a struct holds lends the struct, because what the
 // loan points at lives inside it and goes wherever it goes.
 void lendingAFieldLendsTheStruct() {
-  const char *kTag = "struct tag [str 'name', int64 'runs']\n";
+  const char *kTag = "struct 'tag' [str 'name', int64 'runs']\n";
 
   SHAPED_REFUSES(kTag,
                  "var.tag 'a' = [*ada* *36*];\n"

@@ -2,13 +2,13 @@
 
 # One borrowed parameter, so there is only one thing the answer could be
 # borrowed from and nothing has to be named.
-fn.ref.str echo [ref.str 'text'] {
+fn.ref.str 'echo' [ref.str 'text'] {
     give ['text'];
 }
 
 # Two borrowed parameters. The answer comes from one of them, the compiler
 # cannot see which, so the loan is named and everything on it says so.
-fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {
+fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {
     if count['a'] >== count['b'] {
         give ['a'];
     } else {

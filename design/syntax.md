@@ -64,23 +64,33 @@ which of its characters were secretly instructions.
 Escapes: `\n`, `\t`, `\r`, `\\`. Inside a mark, `\*` and `\'` write the closing mark
 itself — the one character that could not otherwise appear there.
 
-## A word is a function, a name is a variable
+## A declaration marks what it names
 
 A **name** wears marks, so it may hold anything at all — spaces, punctuation,
 emoji — because the marks say where it stops.
 
 A **word** wears none, so it has to be plainer: letters, digits and `_`, joined by
-`-`. Words are function names, chain segments and types.
+`-`. Words are chain segments and types, and they are how a function is called.
 
 ```
-fn.int64 sum-to [int64 'n'] { ... }
+fn.int64 'sum-to' [int64 'n'] { ... }
+struct 'point' [int64 'x', int64 'y']
 
 sum-to['LIMIT'];
+var.point 'p' = [*1* *2*];
 var.str 'a name with spaces 🙂' = [*fine*];
 ```
 
-That is one more thing a reader never has to work out from context: marks say
-*variable*, bareness says *function*, everywhere and always.
+Every declaration marks the thing it names, and there is nothing to remember
+about which ones: `var`, `const`, `fn`, `struct`, a loop's counter, a parameter
+and a field are all the same. `'…'` means a name wherever you meet it, which is
+what the table above promised, and it was only ever true of some of them.
+
+Naming a function and calling one are different acts, and only the first is
+naming — so `'longer'` is what it is called and `longer[…]` is calling it. The
+same goes for a struct: `'point'` names it, `point` is the type afterwards. That
+is not position being consulted, which the marks never do: it is two different
+things being written, and they look different.
 
 `-` joins a word only when it sits between two word characters, which is what
 keeps it apart from subtraction — subtraction's operands are marked or bracketed,
@@ -335,7 +345,7 @@ type.
 
 ```
 var.mut.int64 'total' = [*0*];
-fn.ref.str longer [ref.str 'a', ref.str 'b'] { ... }
+fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] { ... }
 loop.perm.range.int64 'i' = [*1*, *100*] { ... }
 ```
 
@@ -456,8 +466,8 @@ is unchanged, so it works wherever a type does.
 
 ```
 var.many.int64 'xs'                     # a name
-fn.many.int64 first-few [int64 'n']     # an answer
-fn.int64 total [ref.many.int64 'xs']    # a parameter, borrowed
+fn.many.int64 'first-few' [int64 'n']     # an answer
+fn.int64 'total' [ref.many.int64 'xs']    # a parameter, borrowed
 ```
 
 `many.many.int64` is refused for now (`E0210`). One `many` is one level, and
@@ -576,7 +586,7 @@ type can say it.
 ```
 var.or-nothing.str 'line' = [nothing];
 
-fn.or-nothing.int64 half [int64 'n'] {
+fn.or-nothing.int64 'half' [int64 'n'] {
     if 'n' == *0* { give [nothing]; }
     give ['n' / *2*];
 }
@@ -666,7 +676,7 @@ A `struct` gives a name to a group of things, each with a name and a type of its
 own.
 
 ```
-struct point [int64 'x', int64 'y']
+struct 'point' [int64 'x', int64 'y']
 ```
 
 It is written where a function is, and reads the same way, because it asks the
@@ -679,8 +689,8 @@ Two structs may name each other, so the order they are written in does not
 matter:
 
 ```
-struct line [point 'from', point 'to']
-struct point [int64 'x', int64 'y']
+struct 'line' [point 'from', point 'to']
+struct 'point' [int64 'x', int64 'y']
 ```
 
 ### Making one needs no new notation either
@@ -722,7 +732,7 @@ Whether the *items going in* need `move` is each field's own question, though,
 the same as an element of a `many`:
 
 ```
-struct mixed [int64 'n', str 's']
+struct 'mixed' [int64 'n', str 's']
 
 var.str 'text' = [*hi*];
 var.mixed 'm' = [*7* move 'text'];    # the number copies, the text does not
@@ -800,9 +810,9 @@ same thing the type already says.
 A name owns its value until the value is moved, and then it holds nothing.
 
 ```
-fn.int64 size [ref.str 'text'] { ... }           # borrowed, read-only
-fn.nothing excite [refmut.str 'text'] { ... }  # borrowed, writable
-fn.nothing keep [str 'text'] { ... }           # takes it — `own` is the default
+fn.int64 'size' [ref.str 'text'] { ... }           # borrowed, read-only
+fn.nothing 'excite' [refmut.str 'text'] { ... }  # borrowed, writable
+fn.nothing 'keep' [str 'text'] { ... }           # takes it — `own` is the default
 ```
 
 ### A transfer is always spelled at the call site
@@ -822,7 +832,7 @@ A word is written where there is a **choice**, though, and `give` has none — t
 is nothing else it could mean — so the answer is handed over without one:
 
 ```
-fn.str greet [] {
+fn.str 'greet' [] {
     var.str 's' = [*hi*];
     give ['s'];
 }
@@ -857,7 +867,7 @@ is an error where it stands: the second pass round would find nothing there.
 ### A borrow never outlasts what it borrows from
 
 ```
-fn.ref.str broken [ref.str 'other'] {
+fn.ref.str 'broken' [ref.str 'other'] {
     var.str 'text' = [*hello*];
     give ['text'];
 }
@@ -906,7 +916,7 @@ When one parameter is borrowed, there is only one thing the answer could be
 borrowed from, so nothing has to be said:
 
 ```
-fn.ref.str echo [ref.str 'text'] {
+fn.ref.str 'echo' [ref.str 'text'] {
     give ['text'];
 }
 ```
@@ -915,7 +925,7 @@ When two are, there is a choice, and the compiler does not get to make it. The
 loan is given a name, and everything on that loan is written with it:
 
 ```
-fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {
+fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {
     if ['a' > 'b'] {
         give ['a'];
     } else {
@@ -938,7 +948,7 @@ guess:
 ```text
 this answer is borrowed, and so are two of the parameters.
 
-  1 | fn.ref.str longer [ref.str 'a', ref.str 'b'] {
+  1 | fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] {
     |    ^^^ here
 
 Error code: E0402

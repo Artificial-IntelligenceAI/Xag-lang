@@ -65,10 +65,10 @@ Built run(const std::string &text, bool elaborate = true) {
 
 Built inStart(const std::string &body) { return run("START {\n" + body + "\n}\n"); }
 Built raw(const std::string &body) { return run("START {\n" + body + "\n}\n", false); }
-const char *kKeep = "fn.nothing keep [str 'text'] { print.stdout['text' \n]; }\n";
+const char *kKeep = "fn.nothing 'keep' [str 'text'] { print.stdout['text' \n]; }\n";
 
 void everyBodyBecomesBlocks() {
-  const Built b = run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\nSTART { }\n");
+  const Built b = run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\nSTART { }\n");
   CHECK(b.clean());
   CHECK(b.built.mir.bodies.size() == 2);
   CHECK(b.has("fn twice -> int64"));
@@ -120,7 +120,7 @@ void switchIsGeneralFromTheStart() {
 }
 
 void typesAreSymbolic() {
-  const Built b = run("fn.str greet [ref.str 'who'] { give [*hi*]; }\nSTART { }\n");
+  const Built b = run("fn.str 'greet' [ref.str 'who'] { give [*hi*]; }\nSTART { }\n");
   CHECK(b.clean());
   // A body carries its own table, and a loan is a type in it like any other.
   CHECK(!b.body(0).types.empty());
@@ -166,7 +166,7 @@ void elaborationSettlesEveryDrop() {
 }
 
 void aParameterTakenByValueEndsWithItsCallee() {
-  const Built b = run("fn.nothing keep [str 'text'] { print.stdout['text' \n]; }\nSTART { }\n");
+  const Built b = run("fn.nothing 'keep' [str 'text'] { print.stdout['text' \n]; }\nSTART { }\n");
   CHECK(b.clean());
   CHECK(b.has("drop _1'text'"));
 }
@@ -178,7 +178,7 @@ void joiningIsItsOwnStep() {
 }
 
 void aCallKeepsItsArguments() {
-  const Built b = run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  const Built b = run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
                       "START { var.int64 'a' = [twice[*2*]]; }\n");
   CHECK(b.clean());
   CHECK(b.has("twice(*2*)"));

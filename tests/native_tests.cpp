@@ -92,14 +92,14 @@ void itEmitsWholePrograms() {
 }
 
 void itEmitsFunctionsAndLoans() {
-  EMITS("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  EMITS("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
         "START { print.stdout[twice[*21*] \\n]; }\n", "xag_twice");
-  EMITS("fn.int64 size [ref.str 'text'] { give [count['text']]; }\n"
+  EMITS("fn.int64 'size' [ref.str 'text'] { give [count['text']]; }\n"
         "START { var.str 's' = [*café*]; print.stdout[size[ref 's'] \\n]; }\n",
         "xag_str_count");
   // A function that lends its answer back must not look like one that hands it
   // over: getting that wrong once made the optimiser delete the program.
-  EMITS("fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+  EMITS("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
         "  if count['a'] >== count['b'] { give ['a']; } else { give ['b']; } }\n"
         "START { var.str 'x' = [*hello*]; var.str 'y' = [*hi*];\n"
         "  var.ref.str 'w' = [longer[ref 'x', ref 'y']];\n"
@@ -117,7 +117,7 @@ void itEmitsControlFlow() {
 }
 
 void itGuardsAConditionalDrop() {
-  EMITS("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
+  EMITS("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
         "START { var.str 's' = [*hi*]; var.int64 'n' = [*1*];\n"
         "  if 'n' == *1* { keep[move 's']; } }\n",
         "xag_str_drop");
@@ -140,7 +140,7 @@ void itEmitsAMany() {
 void itEmitsSomethingOrNothing() {
   // A written value would be folded into a constant on the way in, so this
   // holds something the optimiser cannot see the far side of.
-  EMITS("fn.int64 three [] { give [*3*]; }\n"
+  EMITS("fn.int64 'three' [] { give [*3*]; }\n"
         "START { var.or-nothing.int64 'n' = [three[]];\n"
         "  if 'n' holds 'v' { print.stdout['v' \\n]; } }\n", "insertvalue");
   // What may be missing lets go of what is inside only when there is something.
@@ -152,53 +152,53 @@ void aLoanPassedOnIsTheLoan() {
   // Lending something already borrowed passes the loan along rather than making
   // a loan of the pointer. Every borrow through two functions read rubbish
   // before this, and no vote between the interpreters would have said so.
-  EMITS("fn.int64 size [ref.str 't'] { give [count['t']]; }\n"
-        "fn.int64 outer [ref.str 'u'] { give [size[ref 'u']]; }\n"
+  EMITS("fn.int64 'size' [ref.str 't'] { give [count['t']]; }\n"
+        "fn.int64 'outer' [ref.str 'u'] { give [size[ref 'u']]; }\n"
         "START { var.str 's' = [*hello*]; print.stdout[(outer[ref 's']) \\n]; }\n",
         "xag_str_count");
 }
 
 void itEmitsAGroupOfNamedThings() {
-  EMITS("struct point [int64 'x', int64 'y']\n"
+  EMITS("struct 'point' [int64 'x', int64 'y']\n"
         "START { var.mut.point 'p' = [*3* *4*];\n"
         "  set 'p'.y = [*9*];\n"
         "  print.stdout['p'.x str:* * 'p'.y \\n]; }\n",
         "xag_print_int");
   // What it holds that has an owner is let go one at a time.
-  EMITS("struct tag [str 'name', int64 'runs']\n"
+  EMITS("struct 'tag' [str 'name', int64 'runs']\n"
         "START { var.tag 't' = [*ada* *36*];\n"
         "  print.stdout['t'.name \\n]; }\n",
         "xag_str_drop");
-  EMITS("struct tag [str 'name']\nstruct pair [tag 'one', tag 'two']\n"
+  EMITS("struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', tag 'two']\n"
         "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
         "  var.pair 'p' = [move 'a' move 'b'];\n"
         "  print.stdout['p'.two.name \\n]; }\n",
         "xag_str_drop");
   // Taking one out of a struct leaves nothing there for the drop to find.
-  EMITS("fn.nothing keep [str 't'] { print.stdout['t' \\n]; }\n"
-        "struct tag [str 'name', int64 'runs']\n"
+  EMITS("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
+        "struct 'tag' [str 'name', int64 'runs']\n"
         "START { var.tag 't' = [*ada* *36*];\n"
         "  keep[move 't'.name];\n"
         "  print.stdout['t'.runs \\n]; }\n",
         "xag_str_drop");
-  EMITS("struct point [int64 'x', int64 'y']\n"
+  EMITS("struct 'point' [int64 'x', int64 'y']\n"
         "START { var.point 'a' = [*1* *2*];\n  var.point 'b' = [*3* *4*];\n"
         "  var.many.point 'ps' = [move 'a' move 'b'];\n"
         "  print.stdout['ps'[*1*].x \\n]; }\n",
         "xag_many_new");
-  EMITS("struct point [int64 'x', int64 'y']\n"
-        "fn.int64 across [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
+  EMITS("struct 'point' [int64 'x', int64 'y']\n"
+        "fn.int64 'across' [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
         "START { var.point 'p' = [*20* *22*];\n"
         "  print.stdout[(across[ref 'p']) \\n]; }\n",
         "@xag_across");
   // A `many` of them, and one behind `or-nothing`. The second was invalid IR:
   // the group was built as though the absence were one of the fields.
-  EMITS("struct tag [str 'name']\n"
+  EMITS("struct 'tag' [str 'name']\n"
         "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
         "  var.many.tag 'ts' = [move 'a' move 'b'];\n"
         "  print.stdout['ts'[*1*].name \\n]; }\n",
         "xag_str_drop");
-  EMITS("struct tag [str 'name']\n"
+  EMITS("struct 'tag' [str 'name']\n"
         "START { var.or-nothing.tag 't' = [*ada*];\n"
         "  when 't' {\n"
         "    is 'one'   { print.stdout['one'.name \\n]; }\n"
@@ -211,24 +211,24 @@ void itEmitsAGroupOfNamedThings() {
 // `xag_many_drop`, which was handed something never allocated and aborted.
 void aStructLetsGoOfWhatItHolds() {
   // A struct of numbers owns nothing, so nothing is written at all.
-  REJECTS("struct point [int64 'x', int64 'y']\n"
+  REJECTS("struct 'point' [int64 'x', int64 'y']\n"
           "START { var.point 'p' = [*1* *2*];\n"
           "  print.stdout['p'.x \\n]; }\n",
           "call void @xag_many_drop");
   // Nor does a struct holding one of those.
-  REJECTS("struct point [int64 'x', int64 'y']\n"
-          "struct line [point 'from', point 'to']\n"
+  REJECTS("struct 'point' [int64 'x', int64 'y']\n"
+          "struct 'line' [point 'from', point 'to']\n"
           "START { var.point 'a' = [*1* *2*];\n  var.point 'b' = [*3* *4*];\n"
           "  var.line 'l' = [move 'a' move 'b'];\n"
           "  print.stdout['l'.to.x \\n]; }\n",
           "call void @xag_many_drop");
   // A struct inside a struct goes down to the text, and never to the array.
-  REJECTS("struct tag [str 'name']\nstruct pair [tag 'one', int64 'n']\n"
+  REJECTS("struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', int64 'n']\n"
           "START { var.tag 'a' = [*ada*];\n"
           "  var.pair 'p' = [move 'a' *7*];\n"
           "  print.stdout['p'.one.name \\n]; }\n",
           "call void @xag_many_drop");
-  EMITS("struct tag [str 'name']\nstruct pair [tag 'one', int64 'n']\n"
+  EMITS("struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', int64 'n']\n"
         "START { var.tag 'a' = [*ada*];\n"
         "  var.pair 'p' = [move 'a' *7*];\n"
         "  print.stdout['p'.one.name \\n]; }\n",

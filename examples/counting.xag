@@ -2,7 +2,7 @@
 
 const.int64 'LIMIT' = [*10*];
 
-fn.int64 sum-to [int64 'n'] {
+fn.int64 'sum-to' [int64 'n'] {
     var.mut.int64 'total' = [*0*];
     loop.range.int64 'i' = [*1*, 'n'] {
         set 'total' = ['total' + 'i'];

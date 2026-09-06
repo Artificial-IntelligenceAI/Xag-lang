@@ -146,59 +146,59 @@ void anImmutableNameDoesNotChange() {
 }
 
 void aBorrowSaysWhetherItWrites() {
-  CHECK(run("fn.nothing excite [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
+  CHECK(run("fn.nothing 'excite' [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
             "START { }\n").ok());
   // `ref` lends for reading, so writing through it is the same mistake as
   // writing to anything else that does not change.
-  CHECK(run("fn.nothing excite [ref.str 'text'] { set 'text' = ['text' *!*]; }\n"
+  CHECK(run("fn.nothing 'excite' [ref.str 'text'] { set 'text' = ['text' *!*]; }\n"
             "START { }\n").code(0) == "E0508");
 }
 
 void callsAreChecked() {
-  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.int64 'a' = [twice[*2*]]; }\n").ok());
-  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.int64 'a' = [twice[*2*, *3*]]; }\n").code(0) == "E0505");
-  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.str 's' = [*x*]; var.int64 'a' = [twice['s']]; }\n").code(0) == "E0506");
   CHECK(inStart("nosuch[*1*];").code(0) == "E0504");
 }
 
 void signaturesAreReadBeforeBodies() {
   // Two functions may call each other, and a constant may be used above itself.
-  CHECK(run("fn.int64 odd [int64 'n'] { give [even['n']]; }\n"
-            "fn.int64 even [int64 'n'] { give ['n']; }\n"
+  CHECK(run("fn.int64 'odd' [int64 'n'] { give [even['n']]; }\n"
+            "fn.int64 'even' [int64 'n'] { give ['n']; }\n"
             "START { var.int64 'a' = [odd[*3*]]; }\n").ok());
-  CHECK(run("fn.int64 limit [] { give ['LIMIT']; }\n"
+  CHECK(run("fn.int64 'limit' [] { give ['LIMIT']; }\n"
             "const.int64 'LIMIT' = [*10*];\n"
             "START { var.int64 'a' = [limit[]]; }\n").ok());
 }
 
 void giveAnswersItsFunction() {
   CHECK(inStart("give [*1*];").code(0) == "E0511");
-  CHECK(run("fn.nothing quiet [] { give [*1*]; }\nSTART { }\n").code(0) == "E0511");
-  CHECK(run("fn.str greet [] { give [*hi*]; }\nSTART { }\n").ok());
-  CHECK(run("fn.str greet [] { give [*1*]; }\nSTART { }\n").ok()); // *1* is text under str
+  CHECK(run("fn.nothing 'quiet' [] { give [*1*]; }\nSTART { }\n").code(0) == "E0511");
+  CHECK(run("fn.str 'greet' [] { give [*hi*]; }\nSTART { }\n").ok());
+  CHECK(run("fn.str 'greet' [] { give [*1*]; }\nSTART { }\n").ok()); // *1* is text under str
 }
 
 void aFunctionAnswersEveryWayOut() {
-  CHECK(run("fn.int64 f [] { }\nSTART { }\n").code(0) == "E0513");
-  CHECK(run("fn.int64 f [int64 'n'] { print.stdout[str:*hi* \\n]; }\nSTART { }\n")
+  CHECK(run("fn.int64 'f' [] { }\nSTART { }\n").code(0) == "E0513");
+  CHECK(run("fn.int64 'f' [int64 'n'] { print.stdout[str:*hi* \\n]; }\nSTART { }\n")
             .code(0) == "E0513");
-  CHECK(run("fn.int64 f [] { give [*1*]; }\nSTART { }\n").ok());
+  CHECK(run("fn.int64 'f' [] { give [*1*]; }\nSTART { }\n").ok());
 
   // Every arm and an `else`, so there is no way out that says nothing.
-  CHECK(run("fn.int64 f [int64 'n'] {\n"
+  CHECK(run("fn.int64 'f' [int64 'n'] {\n"
             "  if 'n' > *0* { give [*1*]; } else { give [*0*]; } }\nSTART { }\n").ok());
   // No `else`, so one way out is left silent.
-  CHECK(run("fn.int64 f [int64 'n'] {\n"
+  CHECK(run("fn.int64 'f' [int64 'n'] {\n"
             "  if 'n' > *0* { give [*1*]; } }\nSTART { }\n").code(0) == "E0513");
   // A loop may run no times at all, and then it has answered nothing.
-  CHECK(run("fn.int64 f [] {\n"
+  CHECK(run("fn.int64 'f' [] {\n"
             "  loop.range.int64 'i' = [*1*, *3*] { give [*1*]; } }\nSTART { }\n")
             .code(0) == "E0513");
   // `nothing` is a real answer, and needs none given.
-  CHECK(run("fn.nothing f [] { print.stdout[str:*hi* \\n]; }\nSTART { }\n").ok());
+  CHECK(run("fn.nothing 'f' [] { print.stdout[str:*hi* \\n]; }\nSTART { }\n").ok());
 }
 
 void breakNeedsALoop() {
@@ -283,10 +283,10 @@ void showingAManyIsRefused() {
 void aManyTravelsWhole() {
   // A lone item that is already the array is the array; anything else is one
   // of its places.
-  CHECK(run("fn.many.int64 f [] {\n"
+  CHECK(run("fn.many.int64 'f' [] {\n"
             "    var.many.int64 'xs' = [*1* *2*];\n"
             "    give ['xs'];\n}\n").ok());
-  CHECK(run("fn.int64 g [ref.many.int64 'xs'] { give ['xs'[*0*]]; }\n").ok());
+  CHECK(run("fn.int64 'g' [ref.many.int64 'xs'] { give ['xs'[*0*]]; }\n").ok());
 }
 
 void nothingNeedsSomewhereToBe() {
@@ -299,13 +299,13 @@ void aValueGoesInWithoutAWord() {
   // No choice about what it could mean, so nothing is written.
   CHECK(inStart("var.or-nothing.str 's' = [*hi*];").ok());
   CHECK(inStart("var.or-nothing.int64 'n' = [*3*];").ok());
-  CHECK(run("fn.or-nothing.int64 f [] { give [*3*]; }\n").ok());
+  CHECK(run("fn.or-nothing.int64 'f' [] { give [*3*]; }\n").ok());
   // But it still has to be the thing it holds.
   CHECK(inStart("var.or-nothing.int64 'n' = [*hi*];").code(0) == "E0509");
 }
 
 void holdsAsksSomethingThatMayBeMissing() {
-  CHECK(run("fn.or-nothing.int64 f [] { give [nothing]; }\n"
+  CHECK(run("fn.or-nothing.int64 'f' [] { give [nothing]; }\n"
             "START { var.or-nothing.int64 'n' = [f[]];\n"
             "  if 'n' holds 'v' { print.stdout['v' \\n]; } }\n").ok());
 
@@ -318,7 +318,7 @@ void holdsAsksSomethingThatMayBeMissing() {
 }
 
 void whatIsHeldIsTheTypeWithoutTheAbsence() {
-  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.or-nothing.int64 'n' = [*2*];\n"
             "  if 'n' holds 'v' { print.stdout[twice['v'] \\n]; } }\n").ok());
   // Arithmetic on the whole thing has no answer when it holds none.
@@ -350,7 +350,7 @@ void aWhenCoversEveryCase() {
 }
 
 void aWhenArmLendsWhatWasThere() {
-  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.or-nothing.int64 'n' = [*2*];\n"
             "  when 'n' { is 'v' { print.stdout[twice['v'] \\n]; } is nothing { } } }\n")
             .ok());
@@ -361,34 +361,34 @@ void aWhenArmLendsWhatWasThere() {
 }
 
 void aStructIsAGroupOfNamedThings() {
-  CHECK(run("struct point [int64 'x', int64 'y']\n"
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.point 'p' = [*1* *2*];\n"
             "    print.stdout['p'.y \\n];\n}\n").ok());
 
   // One value for each of the things it holds, in the order it was written in.
-  CHECK(run("struct point [int64 'x', int64 'y']\n"
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.point 'p' = [*1*];\n}\n").code(0) == "E0529");
-  CHECK(run("struct point [int64 'x', str 'name']\n"
+  CHECK(run("struct 'point' [int64 'x', str 'name']\n"
             "START {\n    var.int64 'n' = [*1*];\n"
             "    var.point 'p' = [*1* 'n'];\n}\n").code(0) == "E0506");
 
   // A field has to be one it holds, and only a struct has any.
-  CHECK(run("struct point [int64 'x']\n"
+  CHECK(run("struct 'point' [int64 'x']\n"
             "START {\n    var.mut.point 'p' = [*1*];\n"
             "    set 'p'.z = [*2*];\n}\n").code(0) == "E0528");
   CHECK(run("START {\n    var.mut.int64 'n' = [*1*];\n"
             "    set 'n'.x = [*2*];\n}\n").code(0) == "E0527");
 
   // A group of none is `nothing`, which the language already has.
-  CHECK(run("struct empty []\n").code(0) == "E0525");
+  CHECK(run("struct 'empty' []\n").code(0) == "E0525");
 
   // However many times it were laid out, there would be one more inside.
-  CHECK(run("struct node [int64 'v', node 'next']\n").code(0) == "E0526");
-  CHECK(run("struct a [b 'to']\nstruct b [a 'back']\n").code(0) == "E0526");
+  CHECK(run("struct 'node' [int64 'v', node 'next']\n").code(0) == "E0526");
+  CHECK(run("struct 'a' [b 'to']\nstruct 'b' [a 'back']\n").code(0) == "E0526");
 
   // They may name each other, so a later one is in scope for an earlier one.
-  CHECK(run("struct line [point 'from', point 'to']\n"
-            "struct point [int64 'x', int64 'y']\n"
+  CHECK(run("struct 'line' [point 'from', point 'to']\n"
+            "struct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.point 'a' = [*0* *0*];\n"
             "    var.point 'b' = [*1* *1*];\n"
             "    var.line 'l' = [move 'a' move 'b'];\n"
@@ -397,31 +397,31 @@ void aStructIsAGroupOfNamedThings() {
   // Which struct a `many` holds has to survive being asked for. Every one of
   // these resolved to whichever struct was declared first, so a program with
   // only one of them could not tell.
-  CHECK(run("struct point [int64 'x', int64 'y']\nstruct tag [str 'name']\n"
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\nstruct 'tag' [str 'name']\n"
             "START {\n    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
             "    var.many.tag 'ts' = [move 'a' move 'b'];\n"
             "    print.stdout['ts'[*1*].name \\n];\n}\n").ok());
-  CHECK(run("struct tag [str 'name']\nstruct point [int64 'x', int64 'y']\n"
+  CHECK(run("struct 'tag' [str 'name']\nstruct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.point 'a' = [*1* *2*];\n    var.point 'b' = [*3* *4*];\n"
             "    var.many.point 'ps' = [move 'a' move 'b'];\n"
             "    print.stdout['ps'[*0*].y \\n];\n}\n").ok());
   // And the wrong one is still refused, rather than quietly allowed.
-  CHECK(run("struct point [int64 'x', int64 'y']\nstruct tag [str 'name']\n"
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\nstruct 'tag' [str 'name']\n"
             "START {\n    var.point 'p' = [*1* *2*];\n"
             "    var.many.tag 'ts' = [move 'p'];\n}\n").code(0) == "E0506");
 
   // A name is a name, whichever kind it is.
-  CHECK(run("struct point [int64 'x']\nstruct point [int64 'y']\n").code(0) == "E0502");
-  CHECK(run("struct point [int64 'x', int64 'x']\n").code(0) == "E0502");
+  CHECK(run("struct 'point' [int64 'x']\nstruct 'point' [int64 'y']\n").code(0) == "E0502");
+  CHECK(run("struct 'point' [int64 'x', int64 'x']\n").code(0) == "E0502");
 }
 
 void aStructTravelsWithTheRest() {
   // It stands where a type stands: in a `many`, behind `or-nothing`, in a
   // function's parameters and in what it answers.
-  CHECK(run("struct point [int64 'x', int64 'y']\n"
-            "fn.point middle [ref.many.point 'ps'] {\n"
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
+            "fn.point 'middle' [ref.many.point 'ps'] {\n"
             "    var.point 'p' = [*0* *0*];\n    give [move 'p'];\n}\n").ok());
-  CHECK(run("struct point [int64 'x', int64 'y']\n"
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.or-nothing.point 'p' = [nothing];\n"
             "    if 'p' holds 'one' { print.stdout['one'.x \\n]; }\n}\n").ok());
 }
@@ -429,7 +429,7 @@ void aStructTravelsWithTheRest() {
 // A struct is handed over whole, as a `many` is, however little is in it: the
 // places it holds are its own, and there is only ever one of them.
 void aStructIsHandedOverRatherThanCopied() {
-  CHECK(run("struct tag [str 'name']\nstruct pair [tag 'one', tag 'two']\n"
+  CHECK(run("struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', tag 'two']\n"
             "START {\n    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
             "    var.pair 'p' = [move 'a' move 'b'];\n"
             "    print.stdout['p'.two.name \\n];\n}\n").ok());

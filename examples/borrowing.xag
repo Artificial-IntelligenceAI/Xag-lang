@@ -1,19 +1,19 @@
 # Lending for reading, lending for writing, and handing over for good.
 
-fn.int64 size [ref.str 'text'] {
+fn.int64 'size' [ref.str 'text'] {
     give [count['text']];
 }
 
-fn.nothing shout [refmut.str 'text'] {
+fn.nothing 'shout' [refmut.str 'text'] {
     set 'text' = ['text' *!*];
 }
 
-fn.nothing keep [str 'text'] {
+fn.nothing 'keep' [str 'text'] {
     print.stdout[str:*kept: * 'text' \n];
 }
 
 # Two things are lent and one comes back, so the loan is named.
-fn.ref.'life'.str longer [ref.'life'.str 'a', ref.'life'.str 'b'] {
+fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {
     if count['a'] >== count['b'] {
         give ['a'];
     } else {

@@ -216,11 +216,11 @@ impl<'a> Writer<'a> {
         // Something to hand a `str` to, so that moves and their drop flags get
         // written as well as read.
         self.out
-            .push_str("fn.nothing consume [str 't'] {\n    print.stdout['t' \\n];\n}\n\n");
+            .push_str("fn.nothing 'consume' [str 't'] {\n    print.stdout['t' \\n];\n}\n\n");
         self.out.push_str(
-            "fn.nothing look [ref.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n");
+            "fn.nothing 'look' [ref.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n");
         self.out.push_str(
-            "fn.nothing edit [refmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n");
+            "fn.nothing 'edit' [refmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n");
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
@@ -268,9 +268,10 @@ impl<'a> Writer<'a> {
         let ty = self.pick_whole();
         self.out.push_str("fn.");
         self.out.push_str(ty.written());
-        self.out.push(' ');
+        // Marked where it is named, bare where it is called.
+        self.out.push_str(" '");
         self.out.push_str(&name);
-        self.out.push_str(" [");
+        self.out.push_str("' [");
         self.scopes.push(Vec::new());
         for i in 0..count {
             if i > 0 {
