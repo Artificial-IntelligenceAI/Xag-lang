@@ -235,6 +235,37 @@ void aStructLetsGoOfWhatItHolds() {
         "xag_str_drop");
 }
 
+// Dividing is an instruction with a question in front of it, not a call. A call
+// is something the optimiser cannot see through, and `mod` against a written
+// number was costing about twenty times a machine's own remainder because of it.
+void dividingIsAnInstruction() {
+  const char *kMod = "START { var.int64 'n' = [*100*]; var.int64 'd' = [*7*];\n"
+                     "  print.stdout[('n' mod 'd') \\n]; }\n";
+  const char *kDiv = "START { var.int64 'n' = [*100*]; var.int64 'd' = [*7*];\n"
+                     "  print.stdout[('n' / 'd') \\n]; }\n";
+  EMITS(kMod, "srem");
+  EMITS(kDiv, "sdiv");
+  REJECTS(kMod, "call i128 @xag_int_mod");
+  REJECTS(kDiv, "call i128 @xag_int_div");
+
+  // Unsigned asks the unsigned instruction, and neither needs the signed pair
+  // guarded against.
+  EMITS("START { var.uint32 'n' = [*100*]; var.uint32 'd' = [*7*];\n"
+        "  print.stdout[('n' mod 'd') \\n]; }\n",
+        "urem");
+  EMITS("START { var.uint32 'n' = [*100*]; var.uint32 'd' = [*7*];\n"
+        "  print.stdout[('n' / 'd') \\n]; }\n",
+        "udiv");
+
+  // Dividing by zero still stops, and says which of the two it was.
+  EMITS(kMod, "xag_stop");
+
+  // Raising to a power is a loop rather than an instruction, so it stays a call.
+  EMITS("START { var.int64 'n' = [*2*]; var.int64 'p' = [*10*];\n"
+        "  print.stdout[('n' ^ 'p') \\n]; }\n",
+        "xag_int_pow");
+}
+
 } // namespace
 
 int main() {
@@ -247,6 +278,7 @@ int main() {
   aLoanPassedOnIsTheLoan();
   itEmitsAGroupOfNamedThings();
   aStructLetsGoOfWhatItHolds();
+  dividingIsAnInstruction();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";

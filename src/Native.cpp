@@ -309,6 +309,9 @@ private:
       runtime_[name] =
           module_.getOrInsertFunction(name, llvm::FunctionType::get(result, params, false));
     };
+    add("xag_stop", voidTy, {ptr});
+    if (auto *stops = llvm::dyn_cast<llvm::Function>(runtime_["xag_stop"].getCallee()))
+      stops->addFnAttr(llvm::Attribute::NoReturn);
     add("xag_str_from", voidTy, {ptr, ptr, i64});
     add("xag_str_join", voidTy, {ptr, ptr, i64});
     add("xag_str_count", i64, {ptr});
@@ -954,14 +957,55 @@ private:
     if (op == "-") return builder_.CreateSub(left, right);
     if (op == "x") return builder_.CreateMul(left, right);
 
-    // What is left is what a choice was made about, and a choice is written in
-    // one place: dividing by zero stops, and a negative power has no answer.
-    const char *called = op == "/" ? "xag_int_div" : op == "mod" ? "xag_int_mod"
-                                                                 : "xag_int_pow";
-    if (op != "/" && op != "mod" && op != "^")
+    // Dividing has a question in front of it rather than inside it: what to do
+    // about zero, and the one signed pair a machine has no answer for. Both are
+    // compares against written numbers, so both fold away wherever the divisor
+    // is written down — which is where dividing usually is. Calling out for it
+    // instead cost about twenty times a machine's own instruction, because the
+    // optimiser cannot see through a call and so never turns `mod *7*` into the
+    // multiply and shift it is.
+    if (op == "/" || op == "mod") {
+      auto *none = llvm::ConstantInt::get(right->getType(), 0);
+      llvm::Function *function = builder_.GetInsertBlock()->getParent();
+      auto *stops = llvm::BasicBlock::Create(context_, "byzero", function);
+      auto *goes = llvm::BasicBlock::Create(context_, "divides", function);
+      builder_.CreateCondBr(builder_.CreateICmpEQ(right, none), stops, goes);
+
+      builder_.SetInsertPoint(stops);
+      builder_.CreateCall(
+          runtime_["xag_stop"],
+          {builder_.CreateGlobalString(op == "/"
+                                           ? "a number was divided by zero"
+                                           : "a remainder was taken against zero",
+                                       "why")});
+      builder_.CreateUnreachable();
+
+      builder_.SetInsertPoint(goes);
+      if (!isSigned(working))
+        return op == "/" ? builder_.CreateUDiv(left, right)
+                         : builder_.CreateURem(left, right);
+
+      // The least number over -1 is the one quotient that does not fit, and it
+      // wraps like every other; the remainder beside it is none. Dividing by
+      // one instead and choosing afterwards keeps that pair off the
+      // instruction, which has no answer for it at all.
+      auto *one = llvm::ConstantInt::get(right->getType(), 1);
+      auto *wraps = builder_.CreateICmpEQ(
+          right, llvm::ConstantInt::getSigned(right->getType(), -1));
+      auto *by = builder_.CreateSelect(wraps, one, right);
+      auto *usual = op == "/" ? builder_.CreateSDiv(left, by)
+                              : builder_.CreateSRem(left, by);
+      auto *instead = op == "/" ? builder_.CreateSub(none, left)
+                                : llvm::ConstantInt::get(left->getType(), 0);
+      return builder_.CreateSelect(wraps, instead, usual);
+    }
+
+    // Raising to a power is a loop rather than an instruction, so it stays
+    // where it is written once: a negative power has no whole answer.
+    if (op != "^")
       return nullptr;
     auto *answered = builder_.CreateCall(
-        runtime_[called],
+        runtime_["xag_int_pow"],
         {widened(left, working), widened(right, working),
          builder_.getInt32(widthOf(working)),
          builder_.getInt32(isSigned(working) ? 1 : 0)});
