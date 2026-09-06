@@ -31,6 +31,7 @@ DEFAULT_XAGC = HERE.parent / "build" / "xagc"
 CASES = [
     ("add", "total + (i x 3)   native"),
     ("loop", "total + (i mod 7)"),
+    ("div", "total + (i / 7)"),
 ]
 
 RUNS = 7

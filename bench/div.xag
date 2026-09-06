@@ -1,0 +1,15 @@
+# The same billion iterations with `/` in the body, beside `loop.xag`'s `mod`.
+#
+# The two were made instructions in one change, with the same guards around
+# them — dividing by zero stops, and the least number over -1 is kept off the
+# instruction because a machine has no answer for it. So a benchmark watching
+# only one of them would let the other go back to being a call without saying
+# anything, which is the whole thing this is here to notice.
+
+START {
+    var.mut.int64 'total' = [*0*];
+    loop.range.int64 'i' = [*1*, *1000000000*] {
+        set 'total' = ['total' + ('i' / *7*)];
+    }
+    print.stdout[str:*total * 'total' \n];
+}
