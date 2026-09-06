@@ -332,6 +332,28 @@ void aSettledPlaceIsNotAskedAgain() {
         "call void @xag_many_out_of_range");
 }
 
+// A number written into text calls the same runtime the printing does.
+void itWritesANumberIntoText() {
+  EMITS("START { var.int64 'n' = [*42*];\n"
+        "  var.str 's' = [str:*x = * convert-to-str['n']];\n"
+        "  print.stdout['s' \\n]; }\n",
+        "xag_str_of_int");
+  EMITS("START { var.deci64 'd' = [*1.10*];\n"
+        "  print.stdout[convert-to-str['d'] \\n]; }\n",
+        "xag_str_of_deci");
+  EMITS("START { var.bin32 'b' = [*0.5*];\n"
+        "  print.stdout[convert-to-str['b'] \\n]; }\n",
+        "xag_str_of_bin");
+  EMITS("START { var.bool 'y' = [*true*];\n"
+        "  print.stdout[convert-to-str['y'] \\n]; }\n",
+        "xag_str_of_bool");
+  // What it makes owns, so it is let go of.
+  EMITS("START { var.int64 'n' = [*42*];\n"
+        "  var.str 's' = [convert-to-str['n']];\n"
+        "  print.stdout['s' \\n]; }\n",
+        "xag_str_drop");
+}
+
 } // namespace
 
 int main() {
@@ -346,6 +368,7 @@ int main() {
   aStructLetsGoOfWhatItHolds();
   dividingIsAnInstruction();
   aSettledPlaceIsNotAskedAgain();
+  itWritesANumberIntoText();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";

@@ -356,6 +356,37 @@ void aCountedLoopSaysHowFarItGets() {
         .ok());
 }
 
+// Nothing converts on its own, so this is how a number is asked to become text.
+// It answers a `str` rather than `or-nothing` of one: every number has a way of
+// being written, so it cannot fail — which is the whole difference between it
+// and `convert-to-number` going the other way.
+void aNumberIsAskedToBecomeText() {
+  CHECK(inStart("var.int64 'n' = [*42*];\n"
+                "    var.str 's' = [*x = * convert-to-str['n']];").ok());
+  CHECK(inStart("var.bool 'b' = [*true*];\n"
+                "    var.str 's' = [convert-to-str['b']];").ok());
+  CHECK(inStart("var.deci64 'd' = [*1.10*];\n"
+                "    var.str 's' = [convert-to-str['d']];").ok());
+
+  // Text is already text.
+  CHECK(inStart("var.str 't' = [*hi*];\n"
+                "    var.str 's' = [convert-to-str[ref 't']];").code(0) == "E0535");
+
+  // What holds several things has no one way of being written out — the same
+  // reason showing one is refused — and there is no text of nothing.
+  CHECK(inStart("var.many.int64 'xs' = [*1* *2*];\n"
+                "    var.str 's' = [convert-to-str[ref 'xs']];").code(0) == "E0535");
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
+            "START {\n    var.point 'p' = [*1* *2*];\n"
+            "    var.str 's' = [convert-to-str[ref 'p']];\n}\n").code(0) == "E0535");
+  CHECK(inStart("var.or-nothing.int64 'n' = [*1*];\n"
+                "    var.str 's' = [convert-to-str['n']];").code(0) == "E0535");
+
+  // One value, one answer.
+  CHECK(inStart("var.int64 'n' = [*1*];\n"
+                "    var.str 's' = [convert-to-str['n', 'n']];").code(0) == "E0505");
+}
+
 void aPermCounterOutlivesItsLoop() {
   CHECK(inStart("loop.perm.range.int64 'i' = [*1*, *3*] { }\n"
                 "    print.stdout['i' \\n];").ok());
@@ -634,6 +665,7 @@ int main() {
   whatIsWrittenDownIsWorkedOut();
   aLoopThatCannotFinishIsRefused();
   aNameMaySayItWraps();
+  aNumberIsAskedToBecomeText();
   aCountedLoopSaysHowFarItGets();
   aPermCounterOutlivesItsLoop();
   theCounterIsInScopeOnlyInTheLoop();

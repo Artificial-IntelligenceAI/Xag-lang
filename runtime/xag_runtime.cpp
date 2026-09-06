@@ -243,6 +243,14 @@ void xag_print(const XagStr *text) {
     std::fwrite(text->bytes, 1, text->length, output());
 }
 
+// Every number is written out by exactly one piece of code, which both printing
+// and `convert-to-str` call. Two spellings of the same value would be two
+// chances for the screen and the string to disagree.
+uint64_t xag_bool_writes(char *out, uint64_t room, int truth) {
+  const char *said = truth ? "true" : "false";
+  return xag_text_out(out, room, said, std::strlen(said));
+}
+
 void xag_print_bool(int truth) { std::fputs(truth ? "true" : "false", output()); }
 
 void xag_set_output(void *file) { out = static_cast<std::FILE *>(file); }
@@ -329,15 +337,12 @@ double xag_bin_pow(double base, double exponent, uint32_t width) {
 
 // The shortest spelling that reads back as the same value. Both engines call
 // this, so what a number looks like cannot depend on which of them said it.
-void xag_print_bin(double value, uint32_t width) {
-  if (std::isnan(value)) {
-    std::fputs("not-a-number", output());
-    return;
-  }
-  if (std::isinf(value)) {
-    std::fputs(value < 0 ? "-infinity" : "infinity", output());
-    return;
-  }
+uint64_t xag_bin_writes(char *out, uint64_t room, double value, uint32_t width) {
+  if (std::isnan(value))
+    return xag_text_out(out, room, "not-a-number", 12);
+  if (std::isinf(value))
+    return value < 0 ? xag_text_out(out, room, "-infinity", 9)
+                     : xag_text_out(out, room, "infinity", 8);
   const unsigned most = width == 16 ? 5u : width == 32 ? 9u : 17u;
   char written[64];
   for (unsigned digits = 1; digits <= most; ++digits) {
@@ -345,6 +350,12 @@ void xag_print_bin(double value, uint32_t width) {
     if (xag_bin_fit(std::strtod(written, nullptr), width) == value)
       break;
   }
+  return xag_text_out(out, room, written, std::strlen(written));
+}
+
+void xag_print_bin(double value, uint32_t width) {
+  char written[XAG_NUMBER_ROOM];
+  (void)xag_bin_writes(written, sizeof(written), value, width);
   std::fputs(written, output());
 }
 
@@ -381,7 +392,8 @@ int32_t xag_bin_reads(const char *text, uint64_t length, uint32_t width, double 
   return std::isinf(fitted) ? 0 : 1;
 }
 
-void xag_print_int(XagInt value, uint32_t width, int32_t is_signed) {
+uint64_t xag_int_writes(char *out, uint64_t room, XagInt value, uint32_t width,
+                        int32_t is_signed) {
   value = xag_int_fit(value, width, is_signed);
   char digits[41];
   unsigned at = sizeof(digits);
@@ -401,7 +413,41 @@ void xag_print_int(XagInt value, uint32_t width, int32_t is_signed) {
   }
   if (negative)
     digits[--at] = '-';
-  std::fwrite(digits + at, 1, sizeof(digits) - at, output());
+  return xag_text_out(out, room, digits + at, sizeof(digits) - at);
+}
+
+void xag_print_int(XagInt value, uint32_t width, int32_t is_signed) {
+  char written[XAG_NUMBER_ROOM];
+  (void)xag_int_writes(written, sizeof(written), value, width, is_signed);
+  std::fputs(written, output());
+}
+
+// `convert-to-str` is these: written out by the very code that prints, and then
+// kept as text the program owns.
+void xag_str_of_bool(XagStr *out, int truth) {
+  char written[XAG_NUMBER_ROOM];
+  xag_str_from(out, written, xag_bool_writes(written, sizeof(written), truth));
+}
+
+void xag_str_of_int(XagStr *out, XagInt value, uint32_t width, int32_t is_signed) {
+  char written[XAG_NUMBER_ROOM];
+  xag_str_from(out, written,
+               xag_int_writes(written, sizeof(written), value, width, is_signed));
+}
+
+void xag_str_of_bin(XagStr *out, double value, uint32_t width) {
+  char written[XAG_NUMBER_ROOM];
+  xag_str_from(out, written, xag_bin_writes(written, sizeof(written), value, width));
+}
+
+void xag_str_of_bin128(XagStr *out, XagBin128 value) {
+  char written[XAG_NUMBER_ROOM];
+  xag_str_from(out, written, xag_bin128_writes(written, sizeof(written), value));
+}
+
+void xag_str_of_deci(XagStr *out, uint32_t width, XagDeci value) {
+  char written[XAG_NUMBER_ROOM];
+  xag_str_from(out, written, xag_deci_writes(written, sizeof(written), width, value));
 }
 
 int64_t xag_live_allocations(void) { return live; }

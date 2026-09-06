@@ -3,8 +3,10 @@
 extern "C" {
 void *memcpy(void *to, const void *from, unsigned long count);
 int strcmp(const char *a, const char *b);
+unsigned long strlen(const char *text);
 }
 namespace std {
 using ::memcpy;
 using ::strcmp;
+using ::strlen;
 } // namespace std

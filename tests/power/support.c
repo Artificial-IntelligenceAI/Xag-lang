@@ -20,6 +20,13 @@ void *memset(void *at, int value, u64 count) {
   return at;
 }
 
+unsigned long strlen(const char *text) {
+  unsigned long n = 0;
+  while (text[n])
+    ++n;
+  return n;
+}
+
 int strcmp(const char *a, const char *b) {
   while (*a && *a == *b) {
     ++a;

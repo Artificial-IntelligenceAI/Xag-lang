@@ -549,20 +549,16 @@ int32_t xag_bin128_reads(const char *text, uint64_t length, XagBin128 *out) {
   return answer(put(sign, significand, exponent, sticky));
 }
 
-void xag_print_bin128(XagBin128 value) {
+uint64_t xag_bin128_writes(char *out, uint64_t room, XagBin128 value) {
   const Taken x = take(value);
-  if (x.kind == Kind::NotANumber) {
-    std::fputs("not-a-number", output());
-    return;
-  }
-  if (x.kind == Kind::Infinity) {
-    std::fputs(x.sign ? "-infinity" : "infinity", output());
-    return;
-  }
-  if (x.kind == Kind::Zero) {
-    std::fputs(x.sign ? "-0" : "0", output());
-    return;
-  }
+  if (x.kind == Kind::NotANumber)
+    return xag_text_out(out, room, "not-a-number", 12);
+  if (x.kind == Kind::Infinity)
+    return x.sign ? xag_text_out(out, room, "-infinity", 9)
+                  : xag_text_out(out, room, "infinity", 8);
+  if (x.kind == Kind::Zero)
+    return x.sign ? xag_text_out(out, room, "-0", 2)
+                  : xag_text_out(out, room, "0", 1);
 
   // Thirty-six digits is what binary128 needs before a spelling is certain to
   // read back; fewer are tried afterwards, and the shortest that survives wins.
@@ -674,11 +670,15 @@ void xag_print_bin128(XagBin128 value) {
 
     XagBin128 back = 0;
     if (xag_bin128_reads(written, static_cast<uint64_t>(put - written), &back) &&
-        back == value) {
-      std::fputs(written, output());
-      return;
-    }
+        back == value)
+      return xag_text_out(out, room, written, std::strlen(written));
   }
+  return xag_text_out(out, room, written, std::strlen(written));
+}
+
+void xag_print_bin128(XagBin128 value) {
+  char written[XAG_NUMBER_ROOM];
+  (void)xag_bin128_writes(written, sizeof(written), value);
   std::fputs(written, output());
 }
 

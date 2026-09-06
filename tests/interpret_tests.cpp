@@ -450,11 +450,41 @@ void itHoldsAGroupOfNamedThings() {
        "  print.stdout[(across[ref 'p']) \\n]; }\n", "42\n");
 }
 
+// A number written into text is written by the very code that prints it, so the
+// screen and the string can never come out differently.
+void itWritesANumberIntoText() {
+  SAYS("START { var.int64 'n' = [*42*];\n"
+       "  var.str 's' = [str:*x = * convert-to-str['n']];\n"
+       "  print.stdout['s' \\n]; }\n", "x = 42\n");
+
+  // Every family, and each one exactly as `print` writes it.
+  SAYS("START { var.bin64 'a' = [*0.1*];\n  print.stdout[convert-to-str['a'] \\n]; }\n",
+       "0.1\n");
+  SAYS("START { var.deci64 'b' = [*1.10*];\n  print.stdout[convert-to-str['b'] \\n]; }\n",
+       "1.10\n");
+  SAYS("START { var.int8 'c' = [*-5*];\n  print.stdout[convert-to-str['c'] \\n]; }\n",
+       "-5\n");
+  SAYS("START { var.bool 'd' = [*true*];\n  print.stdout[convert-to-str['d'] \\n]; }\n",
+       "true\n");
+  SAYS("START { var.uint128 'e' = [*340282366920938463463374607431768211455*];\n"
+       "  print.stdout[convert-to-str['e'] \\n]; }\n",
+       "340282366920938463463374607431768211455\n");
+  SAYS("START { var.bin128 'f' = [*0.5*];\n  print.stdout[convert-to-str['f'] \\n]; }\n",
+       "0.5\n");
+
+  // What it makes is let go of, like any other text. The balance is checked
+  // after every one of these.
+  SAYS("START { var.int64 'n' = [*7*];\n"
+       "  loop.range.int64 'i' = [*1*, *3*] {\n"
+       "    var.str 's' = [convert-to-str['n']];\n"
+       "    print.stdout['s' \\n]; } }\n", "7\n7\n7\n");
+}
+
 void itReadsWhatItIsGiven() {
   given = "12\nhello\n-5\n";
   SAYS("START {\n"
        "  loop.while read.stdin[] holds 'line' {\n"
-       "    var.or-nothing.int64 'n' = [number['line']];\n"
+       "    var.or-nothing.int64 'n' = [convert-to-number['line']];\n"
        "    when 'n' {\n"
        "      is 'v'     { print.stdout[str:*read * 'v' \\n]; }\n"
        "      is nothing { print.stdout[str:*not a number: * 'line' \\n]; } } } }\n",
@@ -475,7 +505,7 @@ void itReadsWhatItIsGiven() {
   // A decimal read out of text keeps the places it was written with.
   given = "1.10\n";
   SAYS("START { loop.while read.stdin[] holds 'l' {\n"
-       "    var.or-nothing.deci64 'd' = [number['l']];\n"
+       "    var.or-nothing.deci64 'd' = [convert-to-number['l']];\n"
        "    when 'd' { is 'v' { print.stdout['v' \\n]; } is nothing { } } } }\n",
        "1.10\n");
   given = "";
@@ -516,6 +546,7 @@ int main() {
   itCountsWhatEachPlaceHolds();
   itHoldsSomethingOrNothing();
   itHoldsAGroupOfNamedThings();
+  itWritesANumberIntoText();
   itReadsWhatItIsGiven();
   itKnowsWhatItWasGiven();
 

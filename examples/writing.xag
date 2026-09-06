@@ -1,0 +1,30 @@
+# Nothing converts on its own, so converting is a thing you ask for by name.
+#
+# The two directions are not mirror images. Every number has a way of being
+# written, so `convert-to-str` cannot fail and answers a `str`. Text that is not
+# a number has no number in it, so `convert-to-number` answers `or-nothing` of
+# whichever number the chain asked for.
+
+fn.str 'label' [ref.str 'what', int64 'how-many'] {
+    give [str:*• * 'what' str:*: * convert-to-str['how-many']];
+}
+
+START {
+    var.str 'apples' = [*apples*];
+    var.str 'line' = [label[ref 'apples', *12*]];
+    print.stdout['line' \n];
+
+    # It writes exactly what a print writes, because it is the same code
+    # writing it — a decimal keeps its trailing zero either way.
+    var.deci64 'price' = [*1.50*];
+    print.stdout[str:*as text: * convert-to-str['price'] \n];
+    print.stdout[str:*printed: * 'price' \n];
+
+    # And back again, which can fail, so it says so in its type.
+    var.str 'typed' = [*7*];
+    var.or-nothing.int64 'read' = [convert-to-number[ref 'typed']];
+    when 'read' {
+        is 'n'     { print.stdout[str:*read * convert-to-str['n'] \n]; }
+        is nothing { print.stdout[str:*that was not a number* \n]; }
+    }
+}

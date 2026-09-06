@@ -780,6 +780,44 @@ Lending one of them lends the struct, because what the loan points at lives
 inside it and goes wherever it goes — so handing the struct over while a field is
 lent is `E0408`, and writing that field behind the loan's back is `E0409`.
 
+## Converting, on purpose
+
+Nothing converts on its own — that is the rule `E0506` enforces everywhere. So
+converting is a thing you ask for, by name:
+
+```
+var.int64 'n' = [*42*];
+var.str 's' = [str:*x = * convert-to-str['n']];        # "x = 42"
+
+var.or-nothing.int64 'back' = [convert-to-number[ref 's']];
+```
+
+The two are not mirror images, and the names say which is which. Every number
+has a way of being written, so `convert-to-str` answers a `str` and cannot fail.
+Text that is not a number has no number in it, so `convert-to-number` answers
+`or-nothing` of whichever number the chain asked for — `holds` or `when` opens
+it.
+
+That is also why neither is spelled after a type. `str['n']` would sit one
+character away from `str:*hello*`, which does something else entirely; and
+`int64['s']` would promise an `int64` it cannot always deliver. A word that says
+`convert-to-…` promises only what it is aiming at.
+
+### It writes what a print writes
+
+`convert-to-str['n']` gives exactly the characters `print.stdout['n']` would
+write, because it is the same code writing them. `1.10` keeps its trailing
+zero, `0.1` comes back as `0.1`, a `uint128` gets all thirty-nine digits, and a
+`bool` is `true` or `false`. Two ways of putting a number in front of somebody
+cannot drift apart.
+
+### What has no one way of being written
+
+A `many`, a struct, and a value that may hold nothing are all refused
+(`E0535`) — what would stand between two of the things they hold is a decision
+nobody has made, which is the same reason showing one is refused, and there is
+no text of nothing. Text itself is refused too: it is already text.
+
 ## A sum that does not fit
 
 A sum that does not fit comes round, as a processor does it. That is rarely what
@@ -824,7 +862,7 @@ and a warning on every one of them would be a warning nobody reads.
 
 ```
 loop.while read.stdin[] holds 'line' {
-    var.or-nothing.deci64 'read' = [number['line']];
+    var.or-nothing.deci64 'read' = [convert-to-number['line']];
     when 'read' {
         is 'value' { ... }
         is nothing { print.stdout[str:*not a number: * 'line' \n]; }
@@ -837,17 +875,17 @@ empty line — an empty line is something a program may legitimately read, and
 telling the two apart is what the type is for. Whatever ended the line is not
 part of it.
 
-`number` reads a number out of text, which is where text stops being text. It
-answers `or-nothing` of whichever number was asked for, because text that is not
-a number has no number in it. Which number is a question something else has to
-have answered, the same way `fill` knows what it is filling — so `number` on its
-own, with nothing beside it to say, is `E0523`:
+`convert-to-number` reads a number out of text, which is where text stops being
+text. It answers `or-nothing` of whichever number was asked for, because text
+that is not a number has no number in it. Which number is a question something
+else has to have answered, the same way `fill` knows what it is filling — so it
+cannot stand on its own with nothing beside it to say, and that is `E0523`:
 
 ```text
 nothing here says what number this would be.
 
-  19 |         when number['line'] {
-     |              ^^^^^^^^^^^^^^ here
+  3 |     when convert-to-number[ref 'line'] {
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ here
 
 Error code: E0523
 Rule(s) broken: a size is always written, and only sizes the standard defines
@@ -1022,9 +1060,6 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **Turning a number into text, and text into a number.** Pieces side by side
-  join, and nothing converts on its own, so something has to do it and be named.
-  Now that a type can say it holds nothing, the failing half has somewhere to go.
 - **A type with more than two shapes.** `when` covers every case a value could
   be, and today a value can be two things. A type that could be several — with
   its own names and its own contents — is what would make the construct earn

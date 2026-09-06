@@ -18,7 +18,7 @@ START {
     loop.while read.stdin[] holds 'line' {
         # `number` answers whichever number was asked for, so something has to
         # ask. A `when` does not, which is why the answer is named first.
-        var.or-nothing.deci64 'read' = [number['line']];
+        var.or-nothing.deci64 'read' = [convert-to-number['line']];
         when 'read' {
             is 'value' {
                 set 'total' = ['total' + 'value'];

@@ -642,7 +642,7 @@ private:
       return collected(std::move(held));
     }
 
-    if (value.callee == "number") {
+    if (value.callee == "convert-to-number") {
       Value text = value.operands.empty() ? Value{} : read(value.operands[0]);
       Value *at = behind(text);
       const std::string had =
@@ -680,6 +680,33 @@ private:
         }
       }
       endValue(text);
+      return answer;
+    }
+
+    // Written out by the very code that prints, so a number on the screen and
+    // the same number in a `str` can never come out differently.
+    if (value.callee == "convert-to-str") {
+      Value piece = value.operands.empty() ? Value{} : read(value.operands[0]);
+      Value *at = behind(piece);
+      Value answer;
+      answer.kind = Value::Kind::Text;
+      answer.owns = true; // it is made here, so it is let go of here
+      const Type given = typeNamed(typeOf(value.operands[0].type));
+      if (!at) {
+        xag_str_from(&answer.text, "", 0);
+      } else if (given == Type::Bool) {
+        xag_str_of_bool(&answer.text, at->number != 0);
+      } else if (isDecimal(given)) {
+        xag_str_of_deci(&answer.text, widthOf(given), at->wide);
+      } else if (given == Type::Bin128) {
+        xag_str_of_bin128(&answer.text, at->wide);
+      } else if (isBinary(given)) {
+        xag_str_of_bin(&answer.text, at->real, widthOf(given));
+      } else {
+        xag_str_of_int(&answer.text, at->number, widthOf(given),
+                       isSigned(given) ? 1 : 0);
+      }
+      endValue(piece);
       return answer;
     }
 

@@ -809,16 +809,13 @@ int32_t xag_deci_reads(uint32_t width, const char *text, uint64_t length, XagDec
 // The standard's own spelling: plain where the number reads plainly, and
 // scientific where it does not. What is printed is the cohort member that was
 // arrived at, so `1.10` prints as `1.10` and not as `1.1`.
-void xag_print_deci(uint32_t width, XagDeci value) {
+uint64_t xag_deci_writes(char *out, uint64_t room, uint32_t width, XagDeci value) {
   const Taken x = take(width, value);
-  if (x.kind == Kind::NotANumber) {
-    std::fputs("not-a-number", output());
-    return;
-  }
-  if (x.kind == Kind::Infinity) {
-    std::fputs(x.sign ? "-infinity" : "infinity", output());
-    return;
-  }
+  if (x.kind == Kind::NotANumber)
+    return xag_text_out(out, room, "not-a-number", 12);
+  if (x.kind == Kind::Infinity)
+    return x.sign ? xag_text_out(out, room, "-infinity", 9)
+                  : xag_text_out(out, room, "infinity", 8);
 
   char digits[64];
   int32_t count = 0;
@@ -888,6 +885,12 @@ void xag_print_deci(uint32_t width, XagDeci value) {
       *put++ = order[--n];
   }
   *put = 0;
+  return xag_text_out(out, room, written, std::strlen(written));
+}
+
+void xag_print_deci(uint32_t width, XagDeci value) {
+  char written[XAG_NUMBER_ROOM];
+  (void)xag_deci_writes(written, sizeof(written), width, value);
   std::fputs(written, output());
 }
 

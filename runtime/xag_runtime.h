@@ -184,6 +184,37 @@ int32_t xag_deci_compare(uint32_t width, XagDeci a, XagDeci b);
 int32_t xag_deci_reads(uint32_t width, const char *text, uint64_t length, XagDeci *out);
 void xag_print_deci(uint32_t width, XagDeci value);
 
+// The most bytes any number takes when it is written out, including the closing
+// zero. A `bin128` is the widest, and it is nowhere near this.
+#define XAG_NUMBER_ROOM 128
+
+// Writing a number out, which is what both printing and `convert-to-str` do.
+// Each fills `out` and answers how many bytes it put there.
+// Copied by hand rather than with `memcpy`, so that a build with almost no
+// library behind it — the freestanding one the POWER decimal tests use — can
+// have this without linking the rest of the runtime.
+static inline uint64_t xag_text_out(char *out, uint64_t room, const char *text,
+                                    uint64_t length) {
+  const uint64_t fits = length < room ? length : (room ? room - 1 : 0);
+  for (uint64_t i = 0; i < fits; ++i)
+    out[i] = text[i];
+  out[fits] = 0;
+  return fits;
+}
+uint64_t xag_bool_writes(char *out, uint64_t room, int truth);
+uint64_t xag_int_writes(char *out, uint64_t room, XagInt value, uint32_t width,
+                        int32_t is_signed);
+uint64_t xag_bin_writes(char *out, uint64_t room, double value, uint32_t width);
+uint64_t xag_bin128_writes(char *out, uint64_t room, XagBin128 value);
+uint64_t xag_deci_writes(char *out, uint64_t room, uint32_t width, XagDeci value);
+
+// The same, made into text a program holds. `convert-to-str` is these.
+void xag_str_of_bool(XagStr *out, int truth);
+void xag_str_of_int(XagStr *out, XagInt value, uint32_t width, int32_t is_signed);
+void xag_str_of_bin(XagStr *out, double value, uint32_t width);
+void xag_str_of_bin128(XagStr *out, XagBin128 value);
+void xag_str_of_deci(XagStr *out, uint32_t width, XagDeci value);
+
 // ---- what comes in
 //
 // A line, without whatever ended it, and whether there was one at all. At the

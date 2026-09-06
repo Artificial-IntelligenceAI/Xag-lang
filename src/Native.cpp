@@ -309,6 +309,11 @@ private:
       runtime_[name] =
           module_.getOrInsertFunction(name, llvm::FunctionType::get(result, params, false));
     };
+    add("xag_str_of_bool", voidTy, {ptr, i32});
+    add("xag_str_of_int", voidTy, {ptr, builder_.getInt128Ty(), i32, i32});
+    add("xag_str_of_bin", voidTy, {ptr, builder_.getDoubleTy(), i32});
+    add("xag_str_of_bin128", voidTy, {ptr, builder_.getInt128Ty()});
+    add("xag_str_of_deci", voidTy, {ptr, i32, builder_.getInt128Ty()});
     add("xag_stop", voidTy, {ptr});
     if (auto *stops = llvm::dyn_cast<llvm::Function>(runtime_["xag_stop"].getCallee()))
       stops->addFnAttr(llvm::Attribute::NoReturn);
@@ -1068,7 +1073,7 @@ private:
       return builder_.CreateLoad(many_, out);
     }
 
-    if (value.callee == "number") {
+    if (value.callee == "convert-to-number") {
       const std::string spelled = nameOf(value.type);
       const std::string wanted = within(spelled);
       const Type named = typeNamed(wanted);
@@ -1120,6 +1125,39 @@ private:
       auto *held = builder_.CreateInsertValue(llvm::UndefValue::get(shell), there, 0);
       return builder_.CreateInsertValue(held,
                                         builder_.CreateLoad(typeFor(wanted), room), 1);
+    }
+
+    // Written out by the very code that prints, so a number on the screen and
+    // the same number in a `str` can never come out differently.
+    if (value.callee == "convert-to-str") {
+      auto *out = builder_.CreateAlloca(str_, nullptr, "written");
+      if (!value.operands.empty()) {
+        const std::string given = nameOf(value.operands[0].type);
+        const Type named = typeNamed(given);
+        llvm::Value *held = read(value.operands[0]);
+        if (named == Type::Bool)
+          builder_.CreateCall(runtime_["xag_str_of_bool"],
+                              {out, builder_.CreateZExt(held, builder_.getInt32Ty())});
+        else if (isDecimal(named))
+          builder_.CreateCall(
+              runtime_["xag_str_of_deci"],
+              {out, builder_.getInt32(static_cast<int>(widthOf(named))),
+               builder_.CreateZExt(held, builder_.getInt128Ty())});
+        else if (named == Type::Bin128)
+          builder_.CreateCall(runtime_["xag_str_of_bin128"], {out, held});
+        else if (isBinary(named))
+          builder_.CreateCall(
+              runtime_["xag_str_of_bin"],
+              {out, builder_.CreateFPExt(held, builder_.getDoubleTy()),
+               builder_.getInt32(static_cast<int>(widthOf(named)))});
+        else
+          builder_.CreateCall(
+              runtime_["xag_str_of_int"],
+              {out, widened(held, named),
+               builder_.getInt32(static_cast<int>(widthOf(named))),
+               builder_.getInt32(isSigned(named) ? 1 : 0)});
+      }
+      return builder_.CreateLoad(str_, out);
     }
 
     if (value.callee == "count") {
