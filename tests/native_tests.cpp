@@ -3,6 +3,7 @@
 // oracle's question, not this file's.
 
 #include "xag/Check.h"
+#include "xag/Fold.h"
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Native.h"
@@ -29,6 +30,9 @@ void emits(const std::string &program, const std::string &wanted, int line) {
   }
   xag::MirResult built = xag::build(source, parsed.program, checked);
   xag::elaborate(built.mir);
+  // The same road the compiler takes. Without this the module under test is not
+  // the module that gets built.
+  xag::fold(source, built.mir);
 
   for (bool optimise : {false, true}) {
     const xag::NativeResult emitted = xag::emitIr(built.mir, optimise);
@@ -69,6 +73,9 @@ void rejects(const std::string &program, const std::string &unwanted, int line) 
   }
   xag::MirResult built = xag::build(source, parsed.program, checked);
   xag::elaborate(built.mir);
+  // The same road the compiler takes. Without this the module under test is not
+  // the module that gets built.
+  xag::fold(source, built.mir);
   const xag::NativeResult emitted = xag::emitIr(built.mir, false);
   if (!emitted.ok()) {
     std::cerr << "FAIL line " << line << ": " << emitted.trouble << '\n';
@@ -125,9 +132,12 @@ void itGuardsAConditionalDrop() {
 
 void itEmitsAMany() {
   // The check is written out rather than called, so what a reach past the end
-  // reaches is the half that stops — and only that half.
-  EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  print.stdout['xs'[*0*] \\n]; }\n", "call void @xag_many_out_of_range");
+  // reaches is the half that stops — and only that half. The place has to be
+  // one nobody knows yet, since a written one is settled before this runs.
+  EMITS("fn.nothing 'at' [ref.many.int64 'xs', int64 'i'] {\n"
+        "  print.stdout['xs'['i'] \\n]; }\n"
+        "START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+        "  at[ref 'xs', *0*]; }\n", "call void @xag_many_out_of_range");
   EMITS("START { var.many.int64 'xs' = [*1* *2*];\n"
         "  print.stdout[(count[ref 'xs']) \\n]; }\n", "xag_many_new");
   // A `many` of text lets go of what sits in every place, not only the buffer.
@@ -239,10 +249,14 @@ void aStructLetsGoOfWhatItHolds() {
 // is something the optimiser cannot see through, and `mod` against a written
 // number was costing about twenty times a machine's own remainder because of it.
 void dividingIsAnInstruction() {
-  const char *kMod = "START { var.int64 'n' = [*100*]; var.int64 'd' = [*7*];\n"
-                     "  print.stdout[('n' mod 'd') \\n]; }\n";
-  const char *kDiv = "START { var.int64 'n' = [*100*]; var.int64 'd' = [*7*];\n"
-                     "  print.stdout[('n' / 'd') \\n]; }\n";
+  // Both numbers arrive while it runs: written ones are worked out before
+  // codegen ever sees them, and then there is no instruction to look for.
+  const char *kMod = "fn.nothing 'go' [int64 'n', int64 'd'] {\n"
+                     "  print.stdout[('n' mod 'd') \\n]; }\n"
+                     "START { go[*100*, *7*]; }\n";
+  const char *kDiv = "fn.nothing 'go' [int64 'n', int64 'd'] {\n"
+                     "  print.stdout[('n' / 'd') \\n]; }\n"
+                     "START { go[*100*, *7*]; }\n";
   EMITS(kMod, "srem");
   EMITS(kDiv, "sdiv");
   REJECTS(kMod, "call i128 @xag_int_mod");
@@ -250,11 +264,13 @@ void dividingIsAnInstruction() {
 
   // Unsigned asks the unsigned instruction, and neither needs the signed pair
   // guarded against.
-  EMITS("START { var.uint32 'n' = [*100*]; var.uint32 'd' = [*7*];\n"
-        "  print.stdout[('n' mod 'd') \\n]; }\n",
+  EMITS("fn.nothing 'go' [uint32 'n', uint32 'd'] {\n"
+        "  print.stdout[('n' mod 'd') \\n]; }\n"
+        "START { go[*100*, *7*]; }\n",
         "urem");
-  EMITS("START { var.uint32 'n' = [*100*]; var.uint32 'd' = [*7*];\n"
-        "  print.stdout[('n' / 'd') \\n]; }\n",
+  EMITS("fn.nothing 'go' [uint32 'n', uint32 'd'] {\n"
+        "  print.stdout[('n' / 'd') \\n]; }\n"
+        "START { go[*100*, *7*]; }\n",
         "udiv");
 
   // Dividing by zero still stops, and says which of the two it was.
@@ -264,6 +280,26 @@ void dividingIsAnInstruction() {
   EMITS("START { var.int64 'n' = [*2*]; var.int64 'p' = [*10*];\n"
         "  print.stdout[('n' ^ 'p') \\n]; }\n",
         "xag_int_pow");
+}
+
+// A place shown to be one the `many` has is not asked about again while it
+// runs. Asking costs a compare and a branch in the middle of every loop, and
+// `out-of-range` is the one default that costs anything at all.
+void aSettledPlaceIsNotAskedAgain() {
+  REJECTS("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
+          "  print.stdout['xs'[*1*] \\n]; }\n",
+          "call void @xag_many_out_of_range");
+  REJECTS("START { var.mut.many.int64 'xs' = [*1* *2* *3*];\n"
+          "  set 'xs'[*1*] = [*9*];\n"
+          "  print.stdout['xs'[*1*] \\n]; }\n",
+          "call void @xag_many_out_of_range");
+
+  // A place that is not known until it runs is still asked about.
+  EMITS("fn.nothing 'at' [ref.many.int64 'xs', int64 'i'] {\n"
+        "  print.stdout['xs'['i'] \\n]; }\n"
+        "START { var.many.int64 'ns' = [*10* *20*];\n"
+        "  at[ref 'ns', *1*]; }\n",
+        "xag_many_out_of_range");
 }
 
 } // namespace
@@ -279,6 +315,7 @@ int main() {
   itEmitsAGroupOfNamedThings();
   aStructLetsGoOfWhatItHolds();
   dividingIsAnInstruction();
+  aSettledPlaceIsNotAskedAgain();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";

@@ -535,7 +535,8 @@ private:
       auto *place = placePointer(
           isLoan(held) ? builder_.CreateLoad(builder_.getPtrTy(), slots_[s.place])
                        : slots_[s.place],
-          builder_.CreateSExtOrTrunc(read(s.at), builder_.getInt64Ty()), element);
+          builder_.CreateSExtOrTrunc(read(s.at), builder_.getInt64Ty()), element,
+          s.value.settled);
       if (element == "str") {
         // What was in the place ends here: a `many` holds a value everywhere,
         // and putting one in does not make room by forgetting the other.
@@ -633,10 +634,16 @@ private:
   // sits in the middle of every loop over a `many`. An unsigned compare covers
   // a negative index and an empty array at once: both are outside.
   llvm::Value *placePointer(llvm::Value *array, llvm::Value *index,
-                            const std::string &element) {
+                            const std::string &element, bool settled = false) {
     auto *whole = builder_.CreateLoad(many_, array);
     auto *base = builder_.CreateExtractValue(whole, 0);
     auto *length = builder_.CreateExtractValue(whole, 1);
+    // Already answered where the program was read: the place and the length
+    // were both written down, and the place is one this `many` has. Asking a
+    // second time costs a compare and a branch in the middle of every loop, and
+    // the answer cannot have changed.
+    if (settled)
+      return builder_.CreateGEP(typeFor(element), base, index);
     llvm::Function *function = builder_.GetInsertBlock()->getParent();
     llvm::BasicBlock *asked = builder_.GetInsertBlock();
     auto *inside = llvm::BasicBlock::Create(context_, "inside", function);
@@ -713,7 +720,7 @@ private:
     case RValueKind::Element: {
       const std::string element = elementOf(nameOf(value.operands[0].type));
       auto *place = placePointer(manyPointer(value.operands[0]),
-                                 asIndex(value.operands[1]), element);
+                                 asIndex(value.operands[1]), element, value.settled);
       // What copies is read out; what does not is lent where it stands. Asking
       // only whether it was text was right while text was the only thing a
       // place could own — a struct in a `many` was loaded into a slot that held

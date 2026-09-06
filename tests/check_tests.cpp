@@ -277,6 +277,16 @@ void whatIsWrittenDownIsWorkedOut() {
               "    var.int64 'i' = [*9*];\n"
               "    print.stdout['xs'['i'] \\n];\n}\n") == "E0532");
 
+  // Writing one asks the same question reading one does.
+  CHECK(built("START {\n    var.mut.many.int64 'xs' = [*1* *2*];\n"
+              "    set 'xs'[*5*] = [*9*];\n}\n") == "E0532");
+  CHECK(built("START {\n    var.mut.many.int64 'xs' = [*1* *2*];\n"
+              "    set 'xs'[*1*] = [*9*];\n}\n") == "");
+
+  // Pieces side by side, all written down, are one written thing.
+  CHECK(built("START {\n    var.str 's' = [*a* *b* *c*];\n"
+              "    print.stdout['s' \\n];\n}\n") == "");
+
   // Nothing is claimed about a place that is not known until it runs.
   CHECK(built("fn.nothing 'at' [ref.many.int64 'xs', int64 'i'] {\n"
               "    print.stdout['xs'['i'] \\n];\n}\n"

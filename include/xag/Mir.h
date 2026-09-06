@@ -62,6 +62,10 @@ struct RValue {
   unsigned local = 0;  // Ref
   std::vector<Operand> operands;
   TypeRef type;
+  // Element: the place asked for was shown to be one this `many` has, so the
+  // question does not need asking again while it runs. Last, so that every
+  // place that lists an RValue's parts keeps meaning what it meant.
+  bool settled = false;
 };
 
 enum class StatementKind {

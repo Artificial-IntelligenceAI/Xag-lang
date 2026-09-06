@@ -134,6 +134,25 @@ private:
     // about what the name holds afterwards.
     if (s.kind != StatementKind::Assign) {
       known_.erase(s.place);
+      // Writing one asks the same question reading one does, and it can be
+      // answered here for the same reason.
+      if (s.kind == StatementKind::Store && s.at.kind == OperandKind::Written &&
+          looksWhole(s.at.written) && !s.value.settled) {
+        const auto found = lengths_.find(s.place);
+        if (found != lengths_.end()) {
+          const XagInt at = wholeFrom(s.at.written, Type::Int64);
+          if (at >= 0 && at < found->second) {
+            s.value.settled = true;
+            return true;
+          }
+          complain(s.span, "E0532",
+                   "place " + spelledOut(at) + " was written to, and this `many` has " +
+                       std::to_string(found->second) + ".",
+                   {"a `many` holds the number of places it was made with"},
+                   {"both the place and the length are written down, so this stops "
+                    "every time it is reached rather than only sometimes."});
+        }
+      }
       return false;
     }
     RValue &value = s.value;
@@ -157,7 +176,9 @@ private:
       lengths_[s.place] = static_cast<std::int64_t>(value.operands.size());
 
     if (value.kind == RValueKind::Element)
-      element(s);
+      moved = element(s) || moved;
+    if (value.kind == RValueKind::Join)
+      moved = join(s) || moved;
     if (value.kind == RValueKind::Binary)
       moved = binary(s) || moved;
 
@@ -170,23 +191,60 @@ private:
     return moved;
   }
 
+  // Pieces side by side, all of them written down, are one written thing. The
+  // joining happened on every run and the answer was the same every time.
+  bool join(Statement &s) {
+    RValue &value = s.value;
+    if (value.operands.size() < 2)
+      return false;
+    for (const Operand &one : value.operands)
+      if (!written(one))
+        return false;
+    std::string whole;
+    for (const Operand &one : value.operands)
+      whole += unescaped(one.written);
+    Operand answer{OperandKind::Written, 0, std::move(whole), value.type};
+    value = RValue{RValueKind::Use, {}, {}, 0, {std::move(answer)}, value.type};
+    return true;
+  }
+
+  // An escape is an item beside the text rather than something hidden inside
+  // it, so joining one in is where it becomes the character it stands for.
+  static std::string unescaped(const std::string &written) {
+    if (written.size() == 2 && written[0] == '\\') {
+      switch (written[1]) {
+      case 'n': return "\n";
+      case 't': return "\t";
+      case 'r': return "\r";
+      case '\\': return "\\";
+      default: break;
+      }
+    }
+    return written;
+  }
+
   // A place asked for by a number, of a `many` whose length was written down.
-  void element(Statement &s) {
-    const RValue &value = s.value;
+  bool element(Statement &s) {
+    RValue &value = s.value;
     if (value.operands.size() != 2 || !written(value.operands[1]))
-      return;
+      return false;
     const auto found = lengths_.find(value.operands[0].local);
     if (found == lengths_.end() || !looksWhole(value.operands[1].written))
-      return;
+      return false;
     const XagInt at = wholeFrom(value.operands[1].written, Type::Int64);
-    if (at >= 0 && at < found->second)
-      return;
+    if (at >= 0 && at < found->second) {
+      // Asked and answered here, so nothing has to ask again while it runs.
+      const bool already = value.settled;
+      value.settled = true;
+      return !already;
+    }
     complain(s.span, "E0532",
              "place " + spelledOut(at) + " was asked for, and this `many` has " +
                  std::to_string(found->second) + ".",
              {"a `many` holds the number of places it was made with"},
              {"both the place and the length are written down, so this stops every "
               "time it is reached rather than only sometimes."});
+    return false;
   }
 
   bool binary(Statement &s) {
