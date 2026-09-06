@@ -1,0 +1,19 @@
+# A billion iterations, with a `mod` in the body.
+#
+# `mod` is here because it is the operation most easily got wrong: it has a
+# question in front of it — dividing by zero stops — and answering that
+# question with a call instead of a compare once cost twenty times a machine's
+# own remainder, because a call is something the optimiser cannot see through.
+# If this ever goes back to being several times `loop.c`, that is what has
+# happened.
+#
+# The sum is written with `mod` rather than as a plain series so that nothing
+# can work the answer out ahead of time instead of running the loop.
+
+START {
+    var.mut.int64 'total' = [*0*];
+    loop.range.int64 'i' = [*1*, *1000000000*] {
+        set 'total' = ['total' + ('i' mod *7*)];
+    }
+    print.stdout[str:*total * 'total' \n];
+}

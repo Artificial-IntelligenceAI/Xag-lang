@@ -1,0 +1,14 @@
+# The control: the same billion iterations with only arithmetic that compiles
+# to instructions.
+#
+# Both compilers fold this to a constant and never run the loop at all, which
+# is the point of having it here — it says the backend is being optimised, so
+# whatever `loop.xag` costs is about `mod` rather than about codegen.
+
+START {
+    var.mut.int64 'total' = [*0*];
+    loop.range.int64 'i' = [*1*, *1000000000*] {
+        set 'total' = ['total' + ('i' x *3*)];
+    }
+    print.stdout[str:*total * 'total' \n];
+}
