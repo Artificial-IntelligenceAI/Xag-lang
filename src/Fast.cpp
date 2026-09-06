@@ -44,9 +44,10 @@ enum class Op : uint8_t {
   // the pool rather than loaded into a slot first: `b` names the constant.
   IntAddK, IntSubK, IntMulK,
   IntLtK, IntGtK, IntLeK, IntGeK, IntEqK, IntNeK,
-  // A comparison and the JumpUnless that reads it, as one step: the truth is
-  // still written to `to`, and `jump` is taken when it is false. A loop asks
-  // one of these on every turn.
+  // A comparison and the switch that reads it, as one step: the truth is
+  // still written to `to`, then `jump` is taken when it is false and what
+  // `aux` holds above the signedness when it is true. A loop asks one of
+  // these on every turn.
   IntLtJ, IntGtJ, IntLeJ, IntGeJ, IntEqJ, IntNeJ,
   RealAdd, RealSub, RealMul, RealDiv, RealMod, RealPow,
   RealLt, RealGt, RealLe, RealGe, RealEq, RealNe,
@@ -318,10 +319,13 @@ private:
     unsigned most = scratch;
 
     std::vector<unsigned> starts(body.blocks.size(), 0);
+    // A fused comparison carries both its targets: where to go when false, in
+    // `jump`, and when true, in the high bits of `aux` above the signedness.
+    enum class Field { To, Jump, Then };
     struct Patch {
       unsigned at;    // which instruction
       unsigned block; // where it should go
-      bool fused;     // whether the target belongs in `jump` rather than `to`
+      Field field;    // and which field of it says so
     };
     std::vector<Patch> patches;
 
@@ -360,8 +364,29 @@ private:
       const Terminator &end = block.terminator;
       if (end.kind == TerminatorKind::Goto) {
         const unsigned target = end.targets.empty() ? 0 : end.targets[0];
-        if (!follows(target)) {
-          patches.push_back({static_cast<unsigned>(routine.code.size()), target, false});
+        // A block already laid out that is nothing but one fused comparison —
+        // a loop's test — is not jumped to but repeated here, targets and all,
+        // since running the copy is running the block. The loop's body then
+        // ends in the test rather than in a jump to it.
+        unsigned test = static_cast<unsigned>(routine.code.size());
+        for (size_t before = 0; before < which; ++before) {
+          if (body.blocks[before].id != target)
+            continue;
+          const unsigned from = starts[target];
+          const unsigned until = starts[body.blocks[before + 1].id];
+          if (until == from + 1 && jumps(routine.code[from].op))
+            test = from;
+          break;
+        }
+        if (test < routine.code.size()) {
+          const unsigned copy = static_cast<unsigned>(routine.code.size());
+          const size_t known = patches.size();
+          for (size_t i = 0; i < known; ++i)
+            if (patches[i].at == test)
+              patches.push_back({copy, patches[i].block, patches[i].field});
+          emit(routine.code[test]);
+        } else if (!follows(target)) {
+          patches.push_back({static_cast<unsigned>(routine.code.size()), target, Field::To});
           emit(Code{Op::Jump, 0, 0, 0, 0});
         }
       } else if (end.kind == TerminatorKind::Switch) {
@@ -378,15 +403,17 @@ private:
                              : Op::Halt;
         if (fused != Op::Halt) {
           routine.code.back().op = fused;
-          patches.push_back({static_cast<unsigned>(routine.code.size() - 1), otherwise, true});
+          const unsigned at = static_cast<unsigned>(routine.code.size() - 1);
+          patches.push_back({at, otherwise, Field::Jump});
+          patches.push_back({at, taken, Field::Then});
         } else {
           const uint32_t asked = into(end.condition, scratch);
-          patches.push_back({static_cast<unsigned>(routine.code.size()), otherwise, false});
+          patches.push_back({static_cast<unsigned>(routine.code.size()), otherwise, Field::To});
           emit(Code{Op::JumpUnless, 0, asked, 0, 0});
-        }
-        if (!follows(taken)) {
-          patches.push_back({static_cast<unsigned>(routine.code.size()), taken, false});
-          emit(Code{Op::Jump, 0, 0, 0, 0});
+          if (!follows(taken)) {
+            patches.push_back({static_cast<unsigned>(routine.code.size()), taken, Field::To});
+            emit(Code{Op::Jump, 0, 0, 0, 0});
+          }
         }
       } else {
         emit(end.answers ? Code{Op::ReturnValue, 0, end.answer.local, 0, 0}
@@ -401,13 +428,29 @@ private:
 
     for (const Patch &patch : patches) {
       const unsigned start = starts[patch.block < starts.size() ? patch.block : 0];
-      (patch.fused ? routine.code[patch.at].jump : routine.code[patch.at].to) = start;
+      Code &code = routine.code[patch.at];
+      switch (patch.field) {
+      case Field::To: code.to = start; break;
+      case Field::Jump: code.jump = start; break;
+      case Field::Then: code.aux = (code.aux & 1u) | (start << 1); break;
+      }
     }
     routine.slots = most;
     return routine;
   }
 
-  // The comparison that also jumps when false, or Halt for anything else.
+  // Whether this is a comparison that carries its own jumps.
+  static bool jumps(Op op) {
+    switch (op) {
+    case Op::IntLtJ: case Op::IntGtJ: case Op::IntLeJ:
+    case Op::IntGeJ: case Op::IntEqJ: case Op::IntNeJ:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  // The comparison that also jumps, or Halt for anything else.
   static Op fusedWithJump(Op op) {
     switch (op) {
     case Op::IntLt: return Op::IntLtJ;
@@ -1065,40 +1108,41 @@ private:
       case Op::IntEqK: to.whole = read(one.a).whole == pool[one.b].whole; break;
       case Op::IntNeK: to.whole = read(one.a).whole != pool[one.b].whole; break;
 
-      // The truth is written as the plain comparison writes it, and then the
-      // jump is taken or not, as JumpUnless would have.
+      // The truth is written as the plain comparison writes it, and then one
+      // of the two ways on is taken: `aux` above its lowest bit when true,
+      // `jump` when false.
       case Op::IntLtJ:
-        to.whole = one.aux ? read(one.a).whole < read(one.b).whole
-                           : static_cast<__uint128_t>(read(one.a).whole) <
-                                 static_cast<__uint128_t>(read(one.b).whole);
-        if (to.whole == 0) { at = one.jump; continue; }
-        break;
+        to.whole = (one.aux & 1) ? read(one.a).whole < read(one.b).whole
+                                 : static_cast<__uint128_t>(read(one.a).whole) <
+                                       static_cast<__uint128_t>(read(one.b).whole);
+        at = to.whole ? one.aux >> 1 : one.jump;
+        continue;
       case Op::IntGtJ:
-        to.whole = one.aux ? read(one.a).whole > read(one.b).whole
-                           : static_cast<__uint128_t>(read(one.a).whole) >
-                                 static_cast<__uint128_t>(read(one.b).whole);
-        if (to.whole == 0) { at = one.jump; continue; }
-        break;
+        to.whole = (one.aux & 1) ? read(one.a).whole > read(one.b).whole
+                                 : static_cast<__uint128_t>(read(one.a).whole) >
+                                       static_cast<__uint128_t>(read(one.b).whole);
+        at = to.whole ? one.aux >> 1 : one.jump;
+        continue;
       case Op::IntLeJ:
-        to.whole = one.aux ? read(one.a).whole <= read(one.b).whole
-                           : static_cast<__uint128_t>(read(one.a).whole) <=
-                                 static_cast<__uint128_t>(read(one.b).whole);
-        if (to.whole == 0) { at = one.jump; continue; }
-        break;
+        to.whole = (one.aux & 1) ? read(one.a).whole <= read(one.b).whole
+                                 : static_cast<__uint128_t>(read(one.a).whole) <=
+                                       static_cast<__uint128_t>(read(one.b).whole);
+        at = to.whole ? one.aux >> 1 : one.jump;
+        continue;
       case Op::IntGeJ:
-        to.whole = one.aux ? read(one.a).whole >= read(one.b).whole
-                           : static_cast<__uint128_t>(read(one.a).whole) >=
-                                 static_cast<__uint128_t>(read(one.b).whole);
-        if (to.whole == 0) { at = one.jump; continue; }
-        break;
+        to.whole = (one.aux & 1) ? read(one.a).whole >= read(one.b).whole
+                                 : static_cast<__uint128_t>(read(one.a).whole) >=
+                                       static_cast<__uint128_t>(read(one.b).whole);
+        at = to.whole ? one.aux >> 1 : one.jump;
+        continue;
       case Op::IntEqJ:
         to.whole = read(one.a).whole == read(one.b).whole;
-        if (to.whole == 0) { at = one.jump; continue; }
-        break;
+        at = to.whole ? one.aux >> 1 : one.jump;
+        continue;
       case Op::IntNeJ:
         to.whole = read(one.a).whole != read(one.b).whole;
-        if (to.whole == 0) { at = one.jump; continue; }
-        break;
+        at = to.whole ? one.aux >> 1 : one.jump;
+        continue;
 
       case Op::RealAdd: to.real = xag_bin_fit(read(one.a).real + read(one.b).real, one.aux); break;
       case Op::RealSub: to.real = xag_bin_fit(read(one.a).real - read(one.b).real, one.aux); break;
