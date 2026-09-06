@@ -66,6 +66,17 @@ arithmetic rather than a preference. Which a build has is settled when the
 runtime is compiled (`cmake -DXAG_DECIMAL=hardware`), and asking for one it has
 not got is refused rather than quietly answered by the other.
 
+Decimal has a second check that the oracle cannot give it. Three engines calling
+one runtime agree about everything inside that runtime, so a mistake in the
+arithmetic itself is a mistake all three make together and no vote will find it.
+`tests/decimal_cases.cpp` writes down every decimal operation and our answer, and
+`tests/decimal_reference.py` disagrees with them using Python's `decimal` —
+libmpdec, written by someone else from the same IBM specification IEEE 754
+decimal is drawn from, and derived from nothing here. It is a test and never goes
+near the language. Four hundred thousand cases agree exactly, apart from raising
+to a power, which the specification itself allows to be out by one in the last
+place.
+
 ## The oracle
 
 `generator/` writes Xag programs and asks every engine what they say — and when

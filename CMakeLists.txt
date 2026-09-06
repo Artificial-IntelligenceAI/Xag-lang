@@ -69,7 +69,12 @@ endif()
 # calls it, so none of them can disagree about what those mean.
 add_library(xagrt STATIC runtime/xag_runtime.cpp runtime/xag_bin128.cpp runtime/xag_deci.cpp)
 target_include_directories(xagrt PUBLIC runtime)
-target_compile_options(xagrt PRIVATE -fno-exceptions -Wall -Wextra)
+# The runtime is not a development artefact: a copy of it is linked into every
+# program `xagc build` writes, so it is compiled for delivery whatever the build
+# type says. Without this it inherited `Debug` and shipped unoptimised, which is
+# invisible in a program doing arithmetic the backend emits inline and about
+# five times over in one leaning on `deci` or `bin128`.
+target_compile_options(xagrt PRIVATE -fno-exceptions -Wall -Wextra -O2)
 if(XAG_DECIMAL STREQUAL "hardware")
   target_compile_definitions(xagrt PRIVATE XAG_DECIMAL_HARDWARE)
 endif()
@@ -125,6 +130,28 @@ foreach(suite lexer parser check own mir runtime interpret native regions fast)
   target_compile_options(${suite}_tests PRIVATE -fno-exceptions -Wall -Wextra)
   add_test(NAME ${suite} COMMAND ${suite}_tests)
 endforeach()
+
+# Decimal, against something that shares no code with it. Three engines calling
+# one runtime cannot catch a mistake inside that runtime — no vote between them
+# ever will — so the answers are written down and an implementation with no
+# shared ancestry is asked to disagree. Python's `decimal` is libmpdec, written
+# from the same IBM specification and from nothing here. It is a test-only
+# reference and never goes near the language.
+add_executable(decimal_cases tests/decimal_cases.cpp)
+target_link_libraries(decimal_cases PRIVATE xagrt)
+target_compile_options(decimal_cases PRIVATE -fno-exceptions -Wall -Wextra)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+  add_test(NAME decimal_against_libmpdec
+           COMMAND ${CMAKE_COMMAND}
+                   -DCASES=$<TARGET_FILE:decimal_cases>
+                   -DCHECKER=${CMAKE_CURRENT_SOURCE_DIR}/tests/decimal_reference.py
+                   -DPYTHON=${Python3_EXECUTABLE}
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/decimal_against.cmake)
+else()
+  message(STATUS "no python3 found, so decimal is not checked against libmpdec")
+endif()
 
 # The decimal knob, asked of the compiler itself rather than of a library: what
 # a build has is a fact about the build, and the only way to ask it is to run it.

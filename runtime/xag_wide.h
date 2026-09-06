@@ -81,6 +81,21 @@ inline U256 multiply(__uint128_t a, __uint128_t b) {
   return out;
 }
 
+// A wide value times a small one, staying wide. Ten to a large power does not
+// fit in 128 bits, so scaling by one cannot go through `multiply`; doing it by
+// repeated doubling instead cost sixty-nine steps where four will do.
+inline U256 multiplySmall(const U256 &value, uint64_t by) {
+  U256 out;
+  unsigned __int128 carry = 0;
+  for (int i = 0; i < 4; ++i) {
+    const unsigned __int128 here =
+        static_cast<unsigned __int128>(value.w[i]) * by + carry;
+    out.w[i] = static_cast<uint64_t>(here);
+    carry = here >> 64;
+  }
+  return out;
+}
+
 inline U256 shiftLeft(const U256 &value, unsigned by) {
   U256 out;
   if (by >= 256)
