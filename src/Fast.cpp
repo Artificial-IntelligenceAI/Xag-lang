@@ -12,20 +12,24 @@ namespace {
 
 // What a slot holds. There is no tag: the code knows what each slot is, because
 // the graph knew, and knowing it once is the whole point of compiling first.
+//
+// The fields are in the order that packs them into 64 bytes, because a slot is
+// copied whole every time a value moves and the copy costs what the slot weighs.
 struct Slot {
   XagInt whole = 0; // an int, a uint, a bool, a bin128's bits, a deci's bits
-  double real = 0;  // a bin16, bin32 or bin64
   XagStr text{nullptr, 0, 0};
-  uint32_t loan = 0; // where in the stack the lent slot is
-  bool owns = false; // whether this slot must end what it points at
-  bool loaned = false;
   // A `many`: the places, held the way text is. One owner ends them, and
   // everything reading them holds a view with no claim.
   std::vector<Slot> *places = nullptr;
+  double real = 0;   // a bin16, bin32 or bin64
+  uint32_t loan = 0; // where in the stack the lent slot is
+  bool owns = false; // whether this slot must end what it points at
+  bool loaned = false;
   // Whether this is the absence rather than a value. Only a slot whose type may
   // hold nothing is ever asked, so the flag costs the others nothing.
   bool empty = false;
 };
+static_assert(sizeof(Slot) == 64, "a slot is meant to be exactly one cache line");
 
 enum class Op : uint8_t {
   Halt,
@@ -222,9 +226,17 @@ private:
     std::vector<unsigned> starts(body.blocks.size(), 0);
     std::vector<std::pair<unsigned, unsigned>> patches; // instruction, block
 
-    for (const BasicBlock &block : body.blocks) {
+    for (size_t which = 0; which < body.blocks.size(); ++which) {
+      const BasicBlock &block = body.blocks[which];
       starts[block.id] = static_cast<unsigned>(routine.code.size());
       scratch = static_cast<unsigned>(body.locals.size());
+      // A jump to the block laid out next lands where the code would have gone
+      // anyway, so it is not emitted. A loop's test block is followed by its
+      // body, which makes this the jump taken on every turn.
+      const bool nextIs = which + 1 < body.blocks.size();
+      auto follows = [&](unsigned target) {
+        return nextIs && body.blocks[which + 1].id == target;
+      };
 
       for (const Statement &s : block.statements) {
         if (s.kind == StatementKind::Drop) {
@@ -247,22 +259,31 @@ private:
 
       const Terminator &end = block.terminator;
       if (end.kind == TerminatorKind::Goto) {
-        patches.emplace_back(routine.code.size(), end.targets.empty() ? 0 : end.targets[0]);
-        emit(Code{Op::Jump, 0, 0, 0, 0});
+        const unsigned target = end.targets.empty() ? 0 : end.targets[0];
+        if (!follows(target)) {
+          patches.emplace_back(routine.code.size(), target);
+          emit(Code{Op::Jump, 0, 0, 0, 0});
+        }
       } else if (end.kind == TerminatorKind::Switch) {
         const uint32_t asked = into(end.condition, scratch);
         const unsigned taken = end.targets.empty() ? 0 : end.targets[0];
         const unsigned otherwise = end.targets.size() > 1 ? end.targets.back() : taken;
         patches.emplace_back(routine.code.size(), otherwise);
         emit(Code{Op::JumpUnless, 0, asked, 0, 0});
-        patches.emplace_back(routine.code.size(), taken);
-        emit(Code{Op::Jump, 0, 0, 0, 0});
+        if (!follows(taken)) {
+          patches.emplace_back(routine.code.size(), taken);
+          emit(Code{Op::Jump, 0, 0, 0, 0});
+        }
       } else {
         emit(end.answers ? Code{Op::ReturnValue, 0, end.answer.local, 0, 0}
                          : Code{Op::Return, 0, 0, 0, 0});
       }
       most = most > scratch ? most : scratch;
     }
+    // Every block ends in a jump or a return, so this is only ever reached by a
+    // body with no blocks at all; it is here so the machine never has to ask
+    // whether it has run off the end.
+    emit(Code{Op::Halt, 0, 0, 0, 0});
 
     for (const auto &[at, block] : patches)
       routine.code[at].to = starts[block < starts.size() ? block : 0];
@@ -556,7 +577,17 @@ private:
     return *at;
   }
 
+  // Nearly every slot holds a number, and a number has nothing to end: nothing
+  // owned, nothing lent, nothing absent. Such a slot is left as it is, stale
+  // number and all, because whatever is written into it next is the only thing
+  // anyone will read from it.
   void end(Slot &slot) {
+    if (!slot.owns && !slot.empty && !slot.loaned && !slot.places)
+      return;
+    finish(slot);
+  }
+
+  void finish(Slot &slot) {
     if (slot.empty) {
       slot = Slot{};
       return;
@@ -594,14 +625,21 @@ private:
     const Code *code = routine.code.data();
     unsigned at = 0;
     std::vector<uint32_t> arguments;
+    // The stack never grows, so the frame is where it was found. The step count
+    // lives in a register while the loop runs and is put back whenever another
+    // routine needs to see it, because a member written on every step is a
+    // store on every step.
+    Slot *const slots = stack_.data() + base;
+    uint64_t steps = steps_;
 
-    while (at < routine.code.size() && trouble_.empty()) {
-      if (++steps_ > kBudget) {
+    // Nothing here can go wrong except a call, which is asked on its way back;
+    // and every routine ends in a Halt, so there is no end to run off.
+    for (;;) {
+      if (++steps > kBudget) {
         trouble_ = "the program ran longer than this engine will wait";
         break;
       }
       const Code &one = code[at];
-      Slot *slots = stack_.data() + base;
       auto read = [&](uint32_t i) -> Slot & { return behind(slots[i]); };
       Slot &to = slots[one.to];
 
@@ -948,10 +986,15 @@ private:
         pending_.assign(arguments.end() - one.b, arguments.end());
         arguments.resize(arguments.size() - one.b);
         Slot got;
-        if (one.a < routines_.size())
+        if (one.a < routines_.size()) {
+          steps_ = steps;
           call(one.a, base + routine.slots, got);
+          steps = steps_;
+        }
         end(to);
         to = got;
+        if (!trouble_.empty())
+          goto finished;
         break;
       }
       case Op::PrintWhole: xag_print_int(read(one.a).whole, one.aux >> 1, one.aux & 1); break;
@@ -972,16 +1015,16 @@ private:
         Slot keep = slots[one.a];
         slots[one.a] = Slot{};
         answer = keep;
-        at = static_cast<unsigned>(routine.code.size());
-        continue;
+        goto finished;
       }
       case Op::Return:
       case Op::Halt:
-        at = static_cast<unsigned>(routine.code.size());
-        continue;
+        goto finished;
       }
       ++at;
     }
+  finished:
+    steps_ = steps;
 
     for (unsigned i = 0; i < routine.slots; ++i)
       end(stack_[base + i]);
