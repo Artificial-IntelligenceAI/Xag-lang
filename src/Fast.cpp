@@ -546,7 +546,7 @@ public:
       return FastResult{false, "there is no START to run"};
 
     Slot answer;
-    call(start, 0, answer);
+    call(start, 0, answer, 0);
     end(answer);
     if (trouble_.empty() && !xag_balance_is_clear())
       trouble_ = "the program ended still holding " +
@@ -560,7 +560,10 @@ private:
 
   std::vector<Routine> routines_;
   std::vector<Slot> stack_;
-  std::vector<uint32_t> pending_; // arguments waiting for a call
+  // Where in the stack the arguments pushed so far are. One list for the whole
+  // machine rather than one per frame: a call takes its arguments off the top
+  // before it pushes any of its own, so the frames never see each other's.
+  std::vector<uint32_t> arguments_;
   std::string trouble_;
   Settings settings_;
   uint64_t steps_ = 0;
@@ -604,7 +607,7 @@ private:
     finish(slot);
   }
 
-  void finish(Slot &slot) {
+  [[gnu::noinline]] void finish(Slot &slot) {
     if (slot.empty) {
       slot = Slot{};
       return;
@@ -622,26 +625,113 @@ private:
     slot = Slot{};
   }
 
-  void call(unsigned which, uint32_t base, Slot &answer) {
+  // The steps that do more than a few loads and stores are functions of their
+  // own, kept out of the loop that runs everything else. That loop is one
+  // function, and the compiler allots its registers to the whole of it at
+  // once: every vector grown or list walked inside it is working state that
+  // competes with the code pointer and the frame for a register, and once
+  // those spill to the stack every step pays to fetch them back.
+
+  [[gnu::noinline]] void loadText(Slot &to, const Constant &value) {
+    end(to);
+    xag_str_from(&to.text, value.text.data(), value.text.size());
+    to.owns = true;
+  }
+
+  [[gnu::noinline]] void makeMany(Slot &to, unsigned count) {
+    auto *held = new std::vector<Slot>();
+    held->reserve(count);
+    for (unsigned i = 0; i < count; ++i) {
+      const uint32_t from = arguments_[arguments_.size() - count + i];
+      held->push_back(stack_[from]);
+      // What went in belongs to the array now, and the slot it came from
+      // must not end it a second time.
+      if (stack_[from].owns)
+        stack_[from] = Slot{};
+    }
+    arguments_.resize(arguments_.size() - count);
+    end(to);
+    to = Slot{};
+    to.places = held;
+    to.owns = true;
+    xag_note_taken();
+  }
+
+  [[gnu::noinline]] void fillMany(Slot &to, const Slot &one_of, XagInt places) {
+    auto *held = new std::vector<Slot>();
+    for (XagInt i = 0; i < places && i < 100000000; ++i) {
+      Slot copy = one_of;
+      copy.owns = false;
+      held->push_back(copy);
+    }
+    end(to);
+    to = Slot{};
+    to.places = held;
+    to.owns = true;
+    xag_note_taken();
+  }
+
+  [[gnu::noinline]] void elementAt(Slot &to, const Slot &of, XagInt index) {
+    const uint64_t length = of.places ? of.places->size() : 0;
+    const uint64_t at = xag_many_place(static_cast<int64_t>(index), length,
+                                       settings_.wrapsOutOfRange ? 1 : 0);
+    Slot seen = (*of.places)[at];
+    seen.owns = false; // a view, and no claim on what it sees
+    end(to);
+    to = seen;
+  }
+
+  [[gnu::noinline]] void storeAt(Slot &of, XagInt index, Slot &given) {
+    const uint64_t length = of.places ? of.places->size() : 0;
+    const uint64_t at = xag_many_place(static_cast<int64_t>(index), length,
+                                       settings_.wrapsOutOfRange ? 1 : 0);
+    Slot kept = given;
+    if (given.owns)
+      given = Slot{};
+    end((*of.places)[at]);
+    (*of.places)[at] = kept;
+  }
+
+  [[gnu::noinline]] void joinText(Slot &to, unsigned count) {
+    std::vector<XagStr> pieces;
+    pieces.reserve(count);
+    for (unsigned i = 0; i < count; ++i)
+      pieces.push_back(behind(stack_[arguments_[arguments_.size() - count + i]]).text);
+    arguments_.resize(arguments_.size() - count);
+    XagStr joined{nullptr, 0, 0};
+    xag_str_join(&joined, pieces.data(), pieces.size());
+    end(to);
+    to.text = joined;
+    to.owns = true;
+  }
+
+  // Runs a routine with the last `given` pushed arguments, which it takes off
+  // the list whether or not it can run.
+  void call(unsigned which, uint32_t base, Slot &answer, unsigned given) {
+    const uint32_t *pushed = arguments_.data() + (arguments_.size() - given);
+    if (which >= routines_.size()) {
+      arguments_.resize(arguments_.size() - given);
+      return;
+    }
     if (++depth_ > 400 || base + routines_[which].slots + 8 >= kStack) {
       trouble_ = "a function called itself further than this engine will follow";
       --depth_;
+      arguments_.resize(arguments_.size() - given);
       return;
     }
     const Routine &routine = routines_[which];
     for (unsigned i = 0; i < routine.slots; ++i)
       stack_[base + i] = Slot{};
-    for (unsigned i = 0; i < pending_.size() && i + 1 < routine.slots; ++i)
-      stack_[base + i + 1] = stack_[pending_[i]];
+    for (unsigned i = 0; i < given && i + 1 < routine.slots; ++i)
+      stack_[base + i + 1] = stack_[pushed[i]];
     // What was handed over is gone from where it was.
-    for (unsigned i = 0; i < pending_.size(); ++i)
-      if (stack_[pending_[i]].owns)
-        stack_[pending_[i]] = Slot{};
-    pending_.clear();
+    for (unsigned i = 0; i < given; ++i)
+      if (stack_[pushed[i]].owns)
+        stack_[pushed[i]] = Slot{};
+    arguments_.resize(arguments_.size() - given);
 
     const Code *code = routine.code.data();
     unsigned at = 0;
-    std::vector<uint32_t> arguments;
     // The stack never grows, so the frame is where it was found. The step count
     // lives in a register while the loop runs and is put back whenever another
     // routine needs to see it, because a member written on every step is a
@@ -673,13 +763,7 @@ private:
         end(to);
         to.whole = routine.pool[one.aux].whole;
         break;
-      case Op::LoadText: {
-        end(to);
-        const Constant &value = routine.pool[one.aux];
-        xag_str_from(&to.text, value.text.data(), value.text.size());
-        to.owns = true;
-        break;
-      }
+      case Op::LoadText: loadText(to, routine.pool[one.aux]); break;
       case Op::LoadNothing:
         end(to);
         break;
@@ -906,80 +990,11 @@ private:
         break;
       }
 
-      case Op::MakeMany: {
-        auto *held = new std::vector<Slot>();
-        held->reserve(one.b);
-        for (unsigned i = 0; i < one.b; ++i) {
-          const uint32_t from = arguments[arguments.size() - one.b + i];
-          held->push_back(stack_[from]);
-          // What went in belongs to the array now, and the slot it came from
-          // must not end it a second time.
-          if (stack_[from].owns)
-            stack_[from] = Slot{};
-        }
-        arguments.resize(arguments.size() - one.b);
-        end(to);
-        to = Slot{};
-        to.places = held;
-        to.owns = true;
-        xag_note_taken();
-        break;
-      }
-
-      case Op::FillMany: {
-        Slot one_of = read(one.a);
-        const XagInt places = read(one.b).whole;
-        auto *held = new std::vector<Slot>();
-        for (XagInt i = 0; i < places && i < 100000000; ++i) {
-          Slot copy = one_of;
-          copy.owns = false;
-          held->push_back(copy);
-        }
-        end(to);
-        to = Slot{};
-        to.places = held;
-        to.owns = true;
-        xag_note_taken();
-        break;
-      }
-
-      case Op::ElementAt: {
-        Slot &of = read(one.a);
-        const uint64_t length = of.places ? of.places->size() : 0;
-        const uint64_t at = xag_many_place(static_cast<int64_t>(read(one.b).whole),
-                                           length, settings_.wrapsOutOfRange ? 1 : 0);
-        Slot seen = (*of.places)[at];
-        seen.owns = false; // a view, and no claim on what it sees
-        end(to);
-        to = seen;
-        break;
-      }
-
-      case Op::StoreAt: {
-        Slot &of = read(one.to);
-        const uint64_t length = of.places ? of.places->size() : 0;
-        const uint64_t at = xag_many_place(static_cast<int64_t>(read(one.a).whole),
-                                           length, settings_.wrapsOutOfRange ? 1 : 0);
-        Slot given = stack_[base + one.b];
-        if (stack_[base + one.b].owns)
-          stack_[base + one.b] = Slot{};
-        end((*of.places)[at]);
-        (*of.places)[at] = given;
-        break;
-      }
-      case Op::TextJoin: {
-        std::vector<XagStr> pieces;
-        pieces.reserve(one.b);
-        for (unsigned i = 0; i < one.b; ++i)
-          pieces.push_back(behind(stack_[arguments[arguments.size() - one.b + i]]).text);
-        arguments.resize(arguments.size() - one.b);
-        XagStr joined{nullptr, 0, 0};
-        xag_str_join(&joined, pieces.data(), pieces.size());
-        end(to);
-        to.text = joined;
-        to.owns = true;
-        break;
-      }
+      case Op::MakeMany: makeMany(to, one.b); break;
+      case Op::FillMany: fillMany(to, read(one.a), read(one.b).whole); break;
+      case Op::ElementAt: elementAt(to, read(one.a), read(one.b).whole); break;
+      case Op::StoreAt: storeAt(read(one.to), read(one.a).whole, slots[one.b]); break;
+      case Op::TextJoin: joinText(to, one.b); break;
 
       case Op::Not: to.whole = read(one.a).whole == 0; break;
       case Op::And: to.whole = read(one.a).whole != 0 && read(one.b).whole != 0; break;
@@ -998,18 +1013,17 @@ private:
         break;
       }
 
-      case Op::PushArg: arguments.push_back(base + one.a); break;
+      case Op::PushArg: arguments_.push_back(base + one.a); break;
       case Op::Call: {
-        pending_.assign(arguments.end() - one.b, arguments.end());
-        arguments.resize(arguments.size() - one.b);
-        Slot got;
-        if (one.a < routines_.size()) {
-          steps_ = steps;
-          call(one.a, base + routine.slots, got);
-          steps = steps_;
-        }
+        // The answer lands where it is wanted rather than passing through a
+        // slot of its own. What was there is ended first: it cannot be one of
+        // the arguments, since the graph gives every call's answer a place of
+        // its own to fill.
         end(to);
-        to = got;
+        to = Slot{};
+        steps_ = steps;
+        call(one.a, base + routine.slots, to, one.b);
+        steps = steps_;
         if (!trouble_.empty())
           goto finished;
         break;
