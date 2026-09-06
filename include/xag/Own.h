@@ -9,7 +9,7 @@ namespace xag {
 
 struct OwnResult {
   std::vector<Diagnostic> diagnostics;
-  bool ok() const { return diagnostics.empty(); }
+  bool ok() const { return !anyErrors(diagnostics); }
 };
 
 // Who owns what, who has lent what, and what has stopped existing.

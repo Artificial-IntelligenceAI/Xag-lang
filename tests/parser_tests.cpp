@@ -351,6 +351,18 @@ void aStructIsNamedWhereItIsMade() {
   CHECK(inStart("var.two 't' = ['ns'[*0*] one[*3*]];").ok());
 }
 
+// A name may say that a sum which does not fit is meant to come round. The word
+// stands where the chain says what is unusual, so it keeps the order every
+// other word keeps, and writing the default is refused as everywhere else.
+void aNameMaySayItWraps() {
+  CHECK(inStart("var.mut.wrapping.int8 'sum' = [*0*];").ok());
+  CHECK(inStart("var.wrapping.int8 'n' = [*1*];").ok());
+  CHECK(inStart("var.mut.checked.int8 'n' = [*0*];").code(0) == "E0201");
+  CHECK(inStart("var.wrapping.mut.int8 'n' = [*0*];").code(0) == "E0205");
+  CHECK(run("fn.wrapping.int8 'f' [] { give [*0*]; }\n").code(0) == "E0203");
+  CHECK(inStart("loop.wrapping.range.int8 'i' = [*0*, *3*] { }").code(0) == "E0203");
+}
+
 void aStructNamesWhatItHolds() {
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n").ok());
   // The same shape as a function's parameters, because it is the same question:
@@ -399,6 +411,7 @@ int main() {
   holdsLendsWhatIsThere();
   whenIsMadeOfIs();
   aDeclarationMarksWhatItNames();
+  aNameMaySayItWraps();
   aStructNamesWhatItHolds();
   aStructIsNamedWhereItIsMade();
 

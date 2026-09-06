@@ -145,10 +145,28 @@ bool readSource(const std::string &path, std::string &text) {
 int report(const xag::Source &source, const std::vector<xag::Diagnostic> &diagnostics) {
   if (diagnostics.empty())
     return 0;
+  // Refusals and warnings are shown apart, because they are answers to
+  // different questions: one says the code was not built, the other says it was
+  // and here is what could not be worked out.
+  std::vector<xag::Diagnostic> errors;
+  std::vector<xag::Diagnostic> warnings;
+  for (const xag::Diagnostic &one : diagnostics)
+    (one.severity == xag::Severity::Error ? errors : warnings).push_back(one);
+
+  if (!warnings.empty()) {
+    xag::renderWarningOpening(std::cerr);
+    for (const xag::Diagnostic &one : warnings)
+      xag::render(source, one, std::cerr);
+    xag::renderWarningTally(warnings.size(), std::cerr);
+  }
+  if (errors.empty())
+    return 0;
+  if (!warnings.empty())
+    std::cerr << '\n';
   xag::renderOpening(std::cerr);
-  for (const xag::Diagnostic &diagnostic : diagnostics)
-    xag::render(source, diagnostic, std::cerr);
-  xag::renderTally(diagnostics.size(), std::cerr);
+  for (const xag::Diagnostic &one : errors)
+    xag::render(source, one, std::cerr);
+  xag::renderTally(errors.size(), std::cerr);
   return 1;
 }
 

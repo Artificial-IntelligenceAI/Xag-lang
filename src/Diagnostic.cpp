@@ -8,13 +8,32 @@ namespace xag {
 
 const char *const kIssues = "https://github.com/Artificial-IntelligenceAI/Xag-lang/issues";
 
+bool anyErrors(const std::vector<Diagnostic> &diagnostics) {
+  for (const Diagnostic &one : diagnostics)
+    if (one.severity == Severity::Error)
+      return true;
+  return false;
+}
+
 void renderOpening(std::ostream &out) {
   out << "Hello, I think there may be thing(s) wrong with your code. "
          "I'm sorry, if I'm wrong.\n";
 }
 
+// A different greeting, because the first one is an apology for refusing and
+// this is not a refusal: the code was built, and here is what was noticed.
+void renderWarningOpening(std::ostream &out) {
+  out << "Hello, your code built. There are thing(s) I could not work out, "
+         "and here they are.\n";
+}
+
 void renderTally(std::size_t errors, std::ostream &out) {
   out << '\n' << errors << (errors == 1 ? " error.\n" : " errors.\n");
+  out << "If I am wrong about any of that, please tell me: " << kIssues << '\n';
+}
+
+void renderWarningTally(std::size_t warnings, std::ostream &out) {
+  out << '\n' << warnings << (warnings == 1 ? " warning.\n" : " warnings.\n");
   out << "If I am wrong about any of that, please tell me: " << kIssues << '\n';
 }
 

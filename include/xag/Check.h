@@ -143,7 +143,7 @@ struct CheckResult {
     return found == expressions.end() ? Ty{} : found->second;
   }
 
-  bool ok() const { return diagnostics.empty(); }
+  bool ok() const { return !anyErrors(diagnostics); }
 };
 
 // Names and types. Ownership is a separate pass, and does not exist yet.

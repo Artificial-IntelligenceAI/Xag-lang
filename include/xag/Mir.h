@@ -139,7 +139,7 @@ struct Mir {
 struct MirResult {
   Mir mir;
   std::vector<Diagnostic> diagnostics;
-  bool ok() const { return diagnostics.empty(); }
+  bool ok() const { return !anyErrors(diagnostics); }
 };
 
 // Lowering reads what the checker already worked out rather than working it out

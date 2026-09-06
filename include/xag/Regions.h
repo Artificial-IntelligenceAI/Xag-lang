@@ -9,7 +9,7 @@ namespace xag {
 
 struct RegionResult {
   std::vector<Diagnostic> diagnostics;
-  bool ok() const { return diagnostics.empty(); }
+  bool ok() const { return !anyErrors(diagnostics); }
 };
 
 // How long a loan lasts, and what may not happen while it does.

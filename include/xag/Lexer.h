@@ -11,7 +11,7 @@ struct LexResult {
   std::vector<Token> tokens;
   std::vector<Diagnostic> diagnostics;
 
-  bool ok() const { return diagnostics.empty(); }
+  bool ok() const { return !anyErrors(diagnostics); }
 };
 
 // Lexing never stops at the first mistake: a bad character is reported and

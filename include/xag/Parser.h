@@ -12,7 +12,7 @@ struct ParseResult {
   Program program;
   std::vector<Diagnostic> diagnostics;
 
-  bool ok() const { return diagnostics.empty(); }
+  bool ok() const { return !anyErrors(diagnostics); }
 };
 
 // Parsing, like lexing, reports everything it can see rather than stopping at the

@@ -8,7 +8,8 @@ namespace {
 
 // The words a chain leaves out when they are what a name already is. Writing one
 // is an error: a chain says what is unusual, and says nothing else.
-constexpr std::array<std::string_view, 4> kDefaults{"immut", "own", "file", "temp"};
+constexpr std::array<std::string_view, 5> kDefaults{"immut", "own", "file", "temp",
+                                                   "checked"};
 
 bool isDefault(std::string_view word) {
   for (std::string_view d : kDefaults)
@@ -38,6 +39,7 @@ enum class Slot {
   Lifetime,   // 'life' — a name for a loan
   Counter,    // perm, default temp
   Form,       // range / while
+  Overflow,   // wrapping, default checked
 };
 
 // The question a slot answers, said the way the reader would ask it.
@@ -50,6 +52,7 @@ const char *question(Slot slot) {
   case Slot::Lifetime:   return "which loan it is on";
   case Slot::Counter:    return "whether the counter outlives the loop";
   case Slot::Form:       return "which kind of loop this is";
+  case Slot::Overflow:   return "whether a sum that does not fit is a mistake";
   case Slot::Unknown:    break;
   }
   return "nothing";
@@ -69,6 +72,8 @@ Slot slotOf(std::string_view word) {
     return Slot::Counter;
   if (word == "range" || word == "while")
     return Slot::Form;
+  if (word == "wrapping" || word == "checked")
+    return Slot::Overflow;
   return Slot::Unknown;
 }
 
@@ -85,7 +90,7 @@ struct Role {
 // A `var` takes no lifetime: only a function's answer has a choice of loans to
 // be on, and only its parameters can name one.
 const Role kVar{"a `var`", "var", true,
-                {Slot::Mutability, Slot::Ownership, Slot::Unknown, Slot::Unknown}};
+                {Slot::Mutability, Slot::Ownership, Slot::Overflow, Slot::Unknown}};
 const Role kParam{"a parameter", "", true,
                   {Slot::Mutability, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
 const Role kFn{"a `fn`", "fn", true,

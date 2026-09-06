@@ -227,6 +227,25 @@ void aCountedLoopCountsInItsOwnType() {
                 "    loop.range.int64 'i' = [*0*, 's'] { }").code(0) == "E0506");
 }
 
+// A counted loop adds one past where it stops to know it is done. When the last
+// value is the most the counter can hold, that one more does not fit, so the
+// loop cannot finish — and this is certain rather than suspected.
+void aLoopThatCannotFinishIsRefused() {
+  CHECK(inStart("loop.range.int8 'i' = [*0*, *127*] { }").code(0) == "E0531");
+  CHECK(inStart("loop.range.uint8 'i' = [*0*, *255*] { }").code(0) == "E0531");
+  CHECK(inStart("loop.range.int16 'i' = [*0*, *32767*] { }").code(0) == "E0531");
+  CHECK(inStart("loop.range.int8 'i' = [*0*, *126*] { }").ok());
+  CHECK(inStart("loop.range.int64 'i' = [*0*, *10*] { }").ok());
+}
+
+// A name may say that a sum which does not fit is meant to come round, and then
+// nothing is said about it. The word stands where the chain says what is
+// unusual, and writing the default is refused as everywhere else.
+void aNameMaySayItWraps() {
+  CHECK(inStart("var.mut.wrapping.int8 'sum' = [*0*];").ok());
+  CHECK(inStart("var.wrapping.int8 'n' = [*1*];").ok());
+}
+
 void aPermCounterOutlivesItsLoop() {
   CHECK(inStart("loop.perm.range.int64 'i' = [*1*, *3*] { }\n"
                 "    print.stdout['i' \\n];").ok());
@@ -502,6 +521,8 @@ int main() {
   breakNeedsALoop();
   conditionsAskABool();
   aCountedLoopCountsInItsOwnType();
+  aLoopThatCannotFinishIsRefused();
+  aNameMaySayItWraps();
   aPermCounterOutlivesItsLoop();
   theCounterIsInScopeOnlyInTheLoop();
   aManyHoldsSeveralOfOneType();
