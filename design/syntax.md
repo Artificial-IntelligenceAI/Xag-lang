@@ -660,6 +660,93 @@ There is no way to reach what is inside without asking first. Asking a `bool` is
 `E0519`, because a `bool` is never absent; using something that may be missing
 where a `bool` was wanted is `E0506`.
 
+## A group of named things
+
+A `struct` gives a name to a group of things, each with a name and a type of its
+own.
+
+```
+struct point [int64 'x', int64 'y']
+```
+
+It is written where a function is, and reads the same way, because it asks the
+same question: what is in here, in what order, and called what. A struct that
+holds nothing is `E0525` — a group of none is `nothing`, which the language
+already has — and one that holds itself is `E0526`, because however many times
+it were laid out there would always be one more of it inside.
+
+Two structs may name each other, so the order they are written in does not
+matter:
+
+```
+struct line [point 'from', point 'to']
+struct point [int64 'x', int64 'y']
+```
+
+### Making one needs no new notation either
+
+Items side by side, in the order the struct holds them — the same list as
+everywhere else, read the way this type reads it.
+
+```
+var.point 'p' = [*1* *2*];
+```
+
+Leaving one out is `E0529` rather than a shorter struct: they go in by position,
+so a missing one would silently move every one after it. A value of the wrong
+type is `E0506`, as anywhere.
+
+### One of them is named with a dot
+
+```
+print.stdout['p'.x \n];
+set 'p'.y = [*9*];
+```
+
+The mark stays on the name, because the name is the variable and `x` is not one
+— it is one of the things `'p'` holds, which is a word like any other. A field
+that the struct does not hold is `E0528`; asking a type that has no fields at
+all for one is `E0527`.
+
+### It is handed over, never copied
+
+Like a `many`, and for the same reason: the places it holds are its own, and
+there is only ever one of them. This is true however little is in it.
+
+```
+var.point 'a' = [*1* *2*];
+var.point 'b' = [move 'a'];
+```
+
+Whether the *items going in* need `move` is each field's own question, though,
+the same as an element of a `many`:
+
+```
+struct mixed [int64 'n', str 's']
+
+var.str 'text' = [*hi*];
+var.mixed 'm' = [*7* move 'text'];    # the number copies, the text does not
+```
+
+### One of them may go on its own
+
+This is what a struct has that a `many` does not. Which field is written is known
+where it is written, so one can be handed over while the rest stay:
+
+```
+var.tag 't' = [*ada* *36*];
+keep[move 't'.name];
+print.stdout['t'.runs \n];           # the rest of it is still here
+```
+
+What went is gone: asking for it again is `E0413`, and asking for the whole after
+a part has left is `E0414`. When the struct ends, it lets go of what it still
+holds and nothing else.
+
+Lending one of them lends the struct, because what the loan points at lives
+inside it and goes wherever it goes — so handing the struct over while a field is
+lent is `E0408`, and writing that field behind the loan's back is `E0409`.
+
 ## What comes in
 
 ```
@@ -865,6 +952,10 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 - **Turning a number into text, and text into a number.** Pieces side by side
   join, and nothing converts on its own, so something has to do it and be named.
   Now that a type can say it holds nothing, the failing half has somewhere to go.
+- **Writing one struct inside another where it stands.** A struct goes into a
+  struct by name, because a bracketed group is not an item — `[[*0* *0*] …]` has
+  nowhere to be read. The same brackets one level down is the obvious spelling,
+  and obvious is not the same as decided.
 - **A type with more than two shapes.** `when` covers every case a value could
   be, and today a value can be two things. A type that could be several — with
   its own names and its own contents — is what would make the construct earn

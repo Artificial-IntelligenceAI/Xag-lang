@@ -64,12 +64,37 @@ private:
     return "this";
   }
 
+  // Reaching into something and keeping a pointer to what is inside is a loan
+  // of the thing reached into, whatever the reaching was written as. A field, a
+  // place of a `many`, what an `or-nothing` holds: each of them answers a
+  // pointer where the thing inside has an owner, and that pointer is only good
+  // for as long as what it points into stays where it is.
+  //
+  // Without this a loan of `'p'.name` was recorded against the nameless value
+  // that carried it, which died at the end of the statement — so handing `'p'`
+  // over afterwards was allowed and the loan pointed at nothing.
+  static bool reachesInside(const RValue &value) {
+    return value.kind == RValueKind::Part || value.kind == RValueKind::Element ||
+           value.kind == RValueKind::Inside;
+  }
+
   void findLoans() {
     for (const BasicBlock &block : body_.blocks)
       for (unsigned at = 0; at < block.statements.size(); ++at) {
         const Statement &s = block.statements[at];
-        if (s.kind == StatementKind::Assign && s.value.kind == RValueKind::Ref)
-          loans_.push_back(Loan{s.value.local, s.value.op == "refmut", s.span, block.id, at});
+        if (s.kind != StatementKind::Assign)
+          continue;
+        if (s.value.kind == RValueKind::Ref) {
+          loans_.push_back(
+              Loan{s.value.local, s.value.op == "refmut", s.span, block.id, at});
+        } else if (reachesInside(s.value) && canHold(s.place) &&
+                   !s.value.operands.empty() &&
+                   s.value.operands[0].kind != OperandKind::Written) {
+          // Which way it will be used is not known here, so it is read as the
+          // gentler of the two: a loan for reading, which forbids handing the
+          // thing over and changing it behind the loan's back.
+          loans_.push_back(Loan{s.value.operands[0].local, false, s.span, block.id, at});
+        }
       }
   }
 
@@ -116,6 +141,24 @@ private:
         if (loans_[i].referent == s.value.local && loans_[i].span.begin == s.span.begin &&
             loans_[i].writes == (s.value.op == "refmut"))
           gathered[i] = 1;
+      // Lending something that is itself holding a loan carries that loan along
+      // with it: what the new one points at is only good while the old one is.
+      if (s.value.local < locals())
+        for (unsigned i = 0; i < loans_.size(); ++i)
+          if (holds[s.value.local][i])
+            gathered[i] = 1;
+    } else if (reachesInside(s.value) && !s.value.operands.empty() &&
+               s.value.operands[0].kind != OperandKind::Written) {
+      // The pointer this answers is the loan `findLoans` wrote down, so this is
+      // where something starts holding it.
+      for (unsigned i = 0; i < loans_.size(); ++i)
+        if (loans_[i].referent == s.value.operands[0].local &&
+            loans_[i].span.begin == s.span.begin)
+          gathered[i] = 1;
+      if (s.value.operands[0].local < locals())
+        for (unsigned i = 0; i < loans_.size(); ++i)
+          if (holds[s.value.operands[0].local][i])
+            gathered[i] = 1;
     } else {
       // Anything built out of something holding a loan may hold it too.
       for (const Operand &operand : s.value.operands)

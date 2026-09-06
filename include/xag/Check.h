@@ -27,7 +27,8 @@ enum class Type {
   Uint8, Uint16, Uint32, Uint64, Uint128,
   Bin16, Bin32, Bin64, Bin128,
   Deci32, Deci64, Deci128,
-  Many, // several of one type, however many were there when it was made
+  Many,   // several of one type, however many were there when it was made
+  Struct, // a group of named things, each with a type of its own
 };
 
 const char *name(Type type);
@@ -52,6 +53,9 @@ unsigned widthOf(Type type); // bits; 0 for the types that have no size
 struct Ty {
   Type kind = Type::Unknown;
   Type element = Type::Unknown; // only when kind is Many
+  // Which struct, when either of the above is one. Only one of them can be, so
+  // one number says which — a `many` of a struct is the far side of that.
+  unsigned named = 0;
   // Whether this may hold nothing instead. It stands outside the rest, so
   // `or-nothing.many.int64` is one of these and `many.or-nothing.int64` is not
   // — an array of maybes wants a table of types rather than a pair, which is
@@ -62,21 +66,28 @@ struct Ty {
   constexpr Ty(Type k) : kind(k) {}
   constexpr Ty(Type k, Type e) : kind(k), element(e) {}
   constexpr Ty(Type k, Type e, bool n) : kind(k), element(e), orNothing(n) {}
+  constexpr Ty(Type k, Type e, bool n, unsigned w)
+      : kind(k), element(e), named(w), orNothing(n) {}
 
   constexpr bool holds() const { return kind == Type::Many; }
   constexpr bool mayBeNothing() const { return orNothing; }
   // What is inside, once the `or-nothing` is taken off.
-  constexpr Ty within() const { return Ty{kind, element, false}; }
+  constexpr Ty within() const { return Ty{kind, element, false, named}; }
+  constexpr bool isStruct() const { return kind == Type::Struct; }
 };
 
 constexpr bool operator==(Ty a, Ty b) {
-  return a.kind == b.kind && a.element == b.element && a.orNothing == b.orNothing;
+  return a.kind == b.kind && a.element == b.element && a.orNothing == b.orNothing &&
+         a.named == b.named;
 }
 constexpr bool operator!=(Ty a, Ty b) { return !(a == b); }
 
 constexpr Ty many(Type element) { return Ty{Type::Many, element}; }
 constexpr Ty orNothingOf(Ty inside) {
-  return Ty{inside.kind, inside.element, true};
+  return Ty{inside.kind, inside.element, true, inside.named};
+}
+constexpr Ty structNamed(unsigned which) {
+  return Ty{Type::Struct, Type::Unknown, false, which};
 }
 
 // `many int64`, spelled the way it is written apart from the dots — which is
@@ -93,6 +104,19 @@ inline bool isDecimal(Ty t) { return !t.holds() && !t.orNothing && isDecimal(t.k
 inline bool isNumber(Ty t) { return !t.holds() && !t.orNothing && isNumber(t.kind); }
 inline unsigned widthOf(Ty t) { return t.holds() ? 0 : widthOf(t.kind); }
 
+// What a struct is made of, in the order it was written.
+struct Field {
+  std::string name;
+  Ty type;
+  Span span;
+};
+
+struct Shape {
+  std::string name;
+  std::vector<Field> fields;
+  Span span;
+};
+
 struct CheckResult {
   std::vector<Diagnostic> diagnostics;
 
@@ -101,6 +125,9 @@ struct CheckResult {
   std::unordered_map<const Expr *, Ty> expressions;
   std::unordered_map<const Stmt *, Ty> declarations;
   std::unordered_map<const Item *, Ty> items;
+  // The structs a file declared, so nothing after the checker has to read them
+  // out of the tree again. A `Ty` naming one is an index into this.
+  std::vector<Shape> shapes;
 
   Ty of(const Expr *e) const {
     auto found = expressions.find(e);

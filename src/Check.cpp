@@ -40,9 +40,27 @@ const char *name(Type type) {
   return "unknown";
 }
 
+// Named without the table to hand, which is every caller outside the checker.
+// A struct is spelled by the name it was given, and that is set below.
+// It holds the names rather than pointing at them: the checker that worked them
+// out is gone by the time the middle layer asks, so pointing at what it held
+// was reading freed memory, and a field of a struct came back spelled
+// `unknown`.
+std::vector<std::string> shapeNames;
+
+const char *shapeName(unsigned which) {
+  return which < shapeNames.size() ? shapeNames[which].c_str() : "unknown";
+}
+
 std::string name(Ty type) {
+  const std::string one =
+      type.kind == Type::Struct ? shapeName(type.named) : name(type.kind);
   const std::string inside =
-      type.holds() ? std::string("many ") + name(type.element) : name(type.kind);
+      type.holds()
+          ? std::string("many ") +
+                (type.element == Type::Struct ? shapeName(type.named)
+                                              : name(type.element))
+          : one;
   return type.orNothing ? "or-nothing " + inside : inside;
 }
 
@@ -134,6 +152,7 @@ public:
     // Every signature is read before any body is, so two functions may call
     // each other and a constant may be used above where it stands.
     scopes_.emplace_back();
+    collectShapes();
     collect();
     for (const Item &item : program_.items)
       body(item);
@@ -146,6 +165,7 @@ private:
   CheckResult result_;
   std::vector<std::unordered_map<std::string, Symbol>> scopes_;
   std::unordered_map<std::string, Signature> functions_;
+  std::vector<std::string> names_; // struct names, indexed the way `Ty` names them
   Ty giving_ = Type::Nothing;
   bool inFunction_ = false;
   unsigned loopDepth_ = 0;
@@ -193,10 +213,20 @@ private:
       return Type::Unknown;
     }
     const Type type = typeNamed(last.text);
+    unsigned which = 0;
+    bool isShape = false;
     if (type == Type::Unknown) {
-      complain(last.span, "E0503", "`" + last.text + "` is not a type.",
-               {"a size is always written, and only sizes the standard defines"});
-      return Type::Unknown;
+      for (unsigned i = 0; i < result_.shapes.size(); ++i)
+        if (result_.shapes[i].name == last.text) {
+          which = i;
+          isShape = true;
+          break;
+        }
+      if (!isShape) {
+        complain(last.span, "E0503", "`" + last.text + "` is not a type.",
+                 {"a size is always written, and only sizes the standard defines"});
+        return Type::Unknown;
+      }
     }
     // `many` stands with the type and says the name holds several of it, and
     // `or-nothing` stands outside that and says the whole of it may be missing.
@@ -223,7 +253,9 @@ private:
       return Type::Unknown;
     }
 
-    Ty settled = several ? many(type) : Ty{type};
+    Ty settled = isShape ? (several ? Ty{Type::Many, Type::Struct, false, which}
+                                    : structNamed(which))
+                         : (several ? many(type) : Ty{type});
     if (orNothing)
       settled = orNothingOf(settled);
     return settled;
@@ -272,6 +304,74 @@ private:
   }
 
   // ---- gathering what stands at the top of the file
+
+  // Structs are read before anything else, because a function's chain may name
+  // one and a field's chain may name another.
+  void collectShapes() {
+    for (const Item &item : program_.items) {
+      if (item.kind != ItemKind::Struct)
+        continue;
+      if (typeNamed(item.name) != Type::Unknown || item.name == "nothing") {
+        complain(item.nameSpan, "E0524",
+                 "`" + item.name + "` is already a type.",
+                 {"a word names one thing for the whole file"});
+        continue;
+      }
+      for (const Shape &already : result_.shapes)
+        if (already.name == item.name) {
+          complain(item.nameSpan, "E0502", "`" + item.name + "` is already a struct.",
+                   {"a word names one thing for the whole file"});
+        }
+      result_.shapes.push_back(Shape{item.name, {}, item.nameSpan});
+      names_.push_back(item.name);
+    }
+    shapeNames = names_;
+
+    // The fields come second, so that one struct may name another.
+    unsigned at = 0;
+    for (const Item &item : program_.items) {
+      if (item.kind != ItemKind::Struct)
+        continue;
+      Shape &shape = result_.shapes[at++];
+      for (const Param &field : item.params) {
+        for (const Field &already : shape.fields)
+          if (already.name == field.name)
+            complain(field.nameSpan, "E0502",
+                     "`'" + field.name + "'` is already a field of `" + shape.name +
+                         "`.",
+                     {"a name means one thing for as long as it stands"});
+        shape.fields.push_back(Field{field.name, typeOfChain(field.chain),
+                                     field.nameSpan});
+      }
+      if (shape.fields.empty())
+        complain(item.nameSpan, "E0525", "`" + shape.name + "` holds nothing.",
+                 {"a struct is a group of named things"},
+                 {"a group of none is `nothing`, which the language already has."});
+    }
+
+    // A struct that holds itself has no size a machine could give it.
+    for (unsigned which = 0; which < result_.shapes.size(); ++which)
+      if (reaches(which, which, 0))
+        complain(result_.shapes[which].span, "E0526",
+                 "`" + result_.shapes[which].name + "` holds itself.",
+                 {"a struct is as big as the things in it"},
+                 {"however many times it were laid out, there would always be one "
+                  "more of it inside."});
+  }
+
+  // Whether one struct can be reached from another by walking fields.
+  bool reaches(unsigned from, unsigned to, unsigned depth) const {
+    if (depth > result_.shapes.size())
+      return false;
+    for (const Field &field : result_.shapes[from].fields) {
+      const unsigned next = field.type.named;
+      if (field.type.kind != Type::Struct && field.type.element != Type::Struct)
+        continue;
+      if (next == to || reaches(next, to, depth + 1))
+        return true;
+    }
+    return false;
+  }
 
   void collect() {
     functions_["print.stdout"] = Signature{{}, Type::Nothing, true, Span{}};
@@ -420,6 +520,9 @@ private:
       }
       return expected;
 
+    case ExprKind::Field:
+      return field(e);
+
     case ExprKind::Index:
       return element(e);
 
@@ -427,6 +530,32 @@ private:
       return call(e, expected);
     }
     return Type::Unknown;
+  }
+
+  // `'p'.x` — which of the things a struct holds, and what that one is.
+  Ty field(const Expr &e) {
+    const Ty of = e.children.empty() ? Ty{} : expr(*e.children[0], Ty{});
+    if (of == Ty{})
+      return Ty{};
+    if (!of.isStruct() || of.orNothing) {
+      complain(e.span, "E0527",
+               "a `" + name(of) + "` has no fields.",
+               {"a field is one of the things a struct holds"},
+               of.orNothing ? std::vector<std::string>{
+                                  "what may hold nothing has to be asked before it "
+                                  "can be reached into."}
+                            : std::vector<std::string>{});
+      return Ty{};
+    }
+    const Shape &shape = result_.shapes[of.named];
+    for (const Field &one : shape.fields)
+      if (one.name == e.text)
+        return one.type;
+    complain(e.span, "E0528",
+             "`" + shape.name + "` has no field called `" + e.text + "`.",
+             {"a field is one of the things a struct holds"},
+             {"what it does hold is written where it was declared."});
+    return Ty{};
   }
 
   // `'xs'[*2*]` — the place a value sits, and the type of what sits there.
@@ -704,6 +833,8 @@ private:
                {"nothing converts on its own"});
       return expected;
     }
+    if (expected.isStruct())
+      return grouped(v, expected);
     if (expected.holds())
       return collected(v, expected);
     if (v.items.empty())
@@ -753,6 +884,36 @@ private:
     return want;
   }
 
+  // Items side by side under a struct: one for each of the things it holds, in
+  // the order it holds them. The same rule as everywhere — a value is a list of
+  // items and the type says what they are — and a lone item that is already the
+  // whole struct is the whole struct.
+  Ty grouped(const Value &v, Ty want) {
+    const Shape &shape = result_.shapes[want.named];
+    if (v.items.size() == 1 && selfTyped(*v.items[0])) {
+      const Ty got = expr(*v.items[0], want);
+      if (got == want || got == Ty{})
+        return want;
+    } else if (v.items.size() != shape.fields.size()) {
+      complain(v.span, "E0529",
+               "`" + shape.name + "` holds " + std::to_string(shape.fields.size()) +
+                   ", and this is " + std::to_string(v.items.size()) + ".",
+               {"a struct is made with one value for each of the things it holds"},
+               {"they go in the order the struct was written in, so leaving one out "
+                "would silently move every one after it."});
+    }
+    for (unsigned i = 0; i < v.items.size(); ++i) {
+      const Ty wanted = i < shape.fields.size() ? shape.fields[i].type : Ty{};
+      const Ty got = expr(*v.items[i], wanted);
+      if (wanted != Ty{} && got != Ty{} && got != wanted)
+        complain(v.items[i]->span, "E0506",
+                 "`'" + shape.fields[i].name + "'` is a `" + name(wanted) +
+                     "`, and this is a `" + name(got) + "`.",
+                 {"nothing converts on its own"});
+    }
+    return want;
+  }
+
   Ty onlyValue(const ValueList &list, Ty expected) {
     if (list.values.empty())
       return Type::Unknown;
@@ -792,6 +953,32 @@ private:
                  {"a bare chain is the safest chain, and not changing is the safest "
                   "thing a name can do."});
       Ty want = symbol->type;
+      // `set 'p'.x = …` — which of the things it holds is written, and what
+      // that one is.
+      for (unsigned i = 0; i < s.fields.size(); ++i) {
+        if (!want.isStruct() || want.orNothing) {
+          if (want != Ty{})
+            complain(s.fieldSpans[i], "E0527", "a `" + name(want) + "` has no fields.",
+                     {"a field is one of the things a struct holds"});
+          want = Ty{};
+          break;
+        }
+        const Shape &shape = result_.shapes[want.named];
+        bool found = false;
+        for (const Field &one : shape.fields)
+          if (one.name == s.fields[i]) {
+            want = one.type;
+            found = true;
+            break;
+          }
+        if (!found) {
+          complain(s.fieldSpans[i], "E0528",
+                   "`" + shape.name + "` has no field called `" + s.fields[i] + "`.",
+                   {"a field is one of the things a struct holds"});
+          want = Ty{};
+          break;
+        }
+      }
       if (s.index) {
         const Ty at = expr(*s.index, Type::Int64);
         if (at != Ty{} && at != Ty{Type::Int64})
@@ -991,6 +1178,9 @@ private:
 
   void body(const Item &item) {
     switch (item.kind) {
+    case ItemKind::Struct:
+      break; // read before anything else, and it has no body to walk
+
     case ItemKind::Const:
       onlyValueChecked(item.value, typeOfChain(item.chain), item.span);
       break;

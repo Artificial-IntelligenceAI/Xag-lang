@@ -314,6 +314,25 @@ void whenIsMadeOfIs() {
   CHECK(inStart("when 'x' { is value { } }").code(0) == "E0108");
 }
 
+void aStructNamesWhatItHolds() {
+  CHECK(run("struct point [int64 'x', int64 'y']\n").ok());
+  // The same shape as a function's parameters, because it is the same question:
+  // what is in here, in what order, and called what.
+  CHECK(run("struct pair [str 'name', many.int64 'runs']\n").ok());
+
+  // A word names it, and words name the things in it.
+  CHECK(run("struct 'point' [int64 'x']\n").code(0) == "E0101");
+  CHECK(run("struct point [int64 x]\n").code(0) == "E0101");
+
+  // Nothing else goes in the chain.
+  CHECK(run("struct.mut point [int64 'x']\n").code(0) == "E0203");
+
+  // Reading and writing one of the things it holds.
+  CHECK(inStart("var.point 'p' = [*1* *2*];\n    set 'p'.x = [*9*];").ok());
+  CHECK(inStart("print.stdout['p'.x \\n];").ok());
+  CHECK(inStart("print.stdout['p'.x.y \\n];").ok());
+}
+
 } // namespace
 
 int main() {
@@ -342,6 +361,7 @@ int main() {
   aTypeMaySayItHoldsNothing();
   holdsLendsWhatIsThere();
   whenIsMadeOfIs();
+  aStructNamesWhatItHolds();
 
   if (failures == 0)
     std::cout << "all parser tests passed\n";

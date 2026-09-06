@@ -62,6 +62,27 @@ void expect(const std::string &body, const std::string &wanted, int line) {
 #define HOLDS(body) expect(body, "", __LINE__)
 #define REFUSES(body, code) expect(body, code, __LINE__)
 
+// A struct is declared where a function is, so a program that has one cannot be
+// written as a body alone.
+void expectWith(const std::string &shapes, const std::string &body,
+                const std::string &wanted, int line) {
+  const Held held =
+      run(shapes + std::string(kHelpers) + "START {\n" + body + "\n}\n");
+  if (!held.compiled) {
+    std::cerr << "FAIL line " << line << ": the program did not reach this pass\n";
+    ++failures;
+    return;
+  }
+  if (held.code != wanted) {
+    std::cerr << "FAIL line " << line << ": got \"" << held.code << "\", wanted \""
+              << wanted << "\"\n";
+    ++failures;
+  }
+}
+
+#define SHAPED_HOLDS(shapes, body) expectWith(shapes, body, "", __LINE__)
+#define SHAPED_REFUSES(shapes, body, code) expectWith(shapes, body, code, __LINE__)
+
 void aLoanEndsWhenNobodyIsHoldingIt() {
   // Lent, looked at, done with — and then it may be handed over.
   HOLDS("var.str 's' = [*hi*];\n"
@@ -152,6 +173,39 @@ void aLoanOfAManyIsALoanOfEveryPlaceInIt() {
           "E0408");
 }
 
+// Lending one of the things a struct holds lends the struct, because what the
+// loan points at lives inside it and goes wherever it goes.
+void lendingAFieldLendsTheStruct() {
+  const char *kTag = "struct tag [str 'name', int64 'runs']\n";
+
+  SHAPED_REFUSES(kTag,
+                 "var.tag 'a' = [*ada* *36*];\n"
+                 "    var.ref.str 'w' = [ref 'a'.name];\n"
+                 "    var.tag 'gone' = [move 'a'];\n"
+                 "    print.stdout[(size['w']) \n];",
+                 "E0408");
+  SHAPED_REFUSES(kTag,
+                 "var.mut.tag 'a' = [*ada* *36*];\n"
+                 "    var.ref.str 'w' = [ref 'a'.name];\n"
+                 "    set 'a'.name = [*bob*];\n"
+                 "    print.stdout[(size['w']) \n];",
+                 "E0409");
+
+  // Reading one out and being done with it leaves nothing standing.
+  SHAPED_HOLDS(kTag,
+               "var.tag 'a' = [*ada* *36*];\n"
+               "    var.int64 'n' = [size[ref 'a'.name]];\n"
+               "    var.tag 'gone' = [move 'a'];\n"
+               "    print.stdout['n' \n];");
+
+  // A number that came out of one is a number, not a way back in.
+  SHAPED_HOLDS(kTag,
+               "var.tag 'a' = [*ada* *36*];\n"
+               "    var.int64 'r' = ['a'.runs];\n"
+               "    var.tag 'gone' = [move 'a'];\n"
+               "    print.stdout['r' \n];");
+}
+
 } // namespace
 
 int main() {
@@ -162,6 +216,7 @@ int main() {
   whatIsLentIsNotChangedBehindTheLoansBack();
   oneLoanForWritingOrAnyNumberForReading();
   aLoanOfAManyIsALoanOfEveryPlaceInIt();
+  lendingAFieldLendsTheStruct();
 
   if (failures == 0)
     std::cout << "all region tests passed\n";

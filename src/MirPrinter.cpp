@@ -57,6 +57,13 @@ struct Printer {
       return "holds(" + operand(v.operands[0]) + ")";
     case RValueKind::Inside:
       return "inside(" + operand(v.operands[0]) + ")";
+    case RValueKind::Part:
+      return operand(v.operands[0]) + "." + v.op;
+    case RValueKind::Taken:
+      return "take " + operand(v.operands[0]) + "." + v.op;
+    case RValueKind::Group:
+      text = "group(";
+      break;
     }
     for (unsigned i = 0; i < v.operands.size(); ++i)
       text += (i ? ", " : "") + operand(v.operands[i]);
@@ -81,8 +88,12 @@ struct Printer {
         else if (s.kind == StatementKind::Store)
           out << "    " << local(s.place) << "[" << operand(s.at) << "] = "
               << rvalue(s.value) << '\n';
-        else
-          out << "    " << local(s.place) << " = " << rvalue(s.value) << '\n';
+        else {
+          out << "    " << local(s.place);
+          for (unsigned part : s.parts)
+            out << '.' << part;
+          out << " = " << rvalue(s.value) << '\n';
+        }
       }
       const Terminator &end = block.terminator;
       switch (end.kind) {

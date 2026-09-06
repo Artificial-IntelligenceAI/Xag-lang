@@ -360,6 +360,65 @@ void aWhenArmLendsWhatWasThere() {
                 "    print.stdout['v' \\n];").code(0) == "E0501");
 }
 
+void aStructIsAGroupOfNamedThings() {
+  CHECK(run("struct point [int64 'x', int64 'y']\n"
+            "START {\n    var.point 'p' = [*1* *2*];\n"
+            "    print.stdout['p'.y \\n];\n}\n").ok());
+
+  // One value for each of the things it holds, in the order it was written in.
+  CHECK(run("struct point [int64 'x', int64 'y']\n"
+            "START {\n    var.point 'p' = [*1*];\n}\n").code(0) == "E0529");
+  CHECK(run("struct point [int64 'x', str 'name']\n"
+            "START {\n    var.int64 'n' = [*1*];\n"
+            "    var.point 'p' = [*1* 'n'];\n}\n").code(0) == "E0506");
+
+  // A field has to be one it holds, and only a struct has any.
+  CHECK(run("struct point [int64 'x']\n"
+            "START {\n    var.mut.point 'p' = [*1*];\n"
+            "    set 'p'.z = [*2*];\n}\n").code(0) == "E0528");
+  CHECK(run("START {\n    var.mut.int64 'n' = [*1*];\n"
+            "    set 'n'.x = [*2*];\n}\n").code(0) == "E0527");
+
+  // A group of none is `nothing`, which the language already has.
+  CHECK(run("struct empty []\n").code(0) == "E0525");
+
+  // However many times it were laid out, there would be one more inside.
+  CHECK(run("struct node [int64 'v', node 'next']\n").code(0) == "E0526");
+  CHECK(run("struct a [b 'to']\nstruct b [a 'back']\n").code(0) == "E0526");
+
+  // They may name each other, so a later one is in scope for an earlier one.
+  CHECK(run("struct line [point 'from', point 'to']\n"
+            "struct point [int64 'x', int64 'y']\n"
+            "START {\n    var.point 'a' = [*0* *0*];\n"
+            "    var.point 'b' = [*1* *1*];\n"
+            "    var.line 'l' = [move 'a' move 'b'];\n"
+            "    print.stdout['l'.to.x \\n];\n}\n").ok());
+
+  // A name is a name, whichever kind it is.
+  CHECK(run("struct point [int64 'x']\nstruct point [int64 'y']\n").code(0) == "E0502");
+  CHECK(run("struct point [int64 'x', int64 'x']\n").code(0) == "E0502");
+}
+
+void aStructTravelsWithTheRest() {
+  // It stands where a type stands: in a `many`, behind `or-nothing`, in a
+  // function's parameters and in what it answers.
+  CHECK(run("struct point [int64 'x', int64 'y']\n"
+            "fn.point middle [ref.many.point 'ps'] {\n"
+            "    var.point 'p' = [*0* *0*];\n    give [move 'p'];\n}\n").ok());
+  CHECK(run("struct point [int64 'x', int64 'y']\n"
+            "START {\n    var.or-nothing.point 'p' = [nothing];\n"
+            "    if 'p' holds 'one' { print.stdout['one'.x \\n]; }\n}\n").ok());
+}
+
+// A struct is handed over whole, as a `many` is, however little is in it: the
+// places it holds are its own, and there is only ever one of them.
+void aStructIsHandedOverRatherThanCopied() {
+  CHECK(run("struct tag [str 'name']\nstruct pair [tag 'one', tag 'two']\n"
+            "START {\n    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
+            "    var.pair 'p' = [move 'a' move 'b'];\n"
+            "    print.stdout['p'.two.name \\n];\n}\n").ok());
+}
+
 } // namespace
 
 int main() {
@@ -397,6 +456,9 @@ int main() {
   whatIsHeldIsTheTypeWithoutTheAbsence();
   aWhenCoversEveryCase();
   aWhenArmLendsWhatWasThere();
+  aStructIsAGroupOfNamedThings();
+  aStructTravelsWithTheRest();
+  aStructIsHandedOverRatherThanCopied();
 
   if (failures == 0)
     std::cout << "all check tests passed\n";

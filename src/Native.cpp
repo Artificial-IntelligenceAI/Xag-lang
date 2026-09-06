@@ -64,6 +64,12 @@ bool copiesNamed(const std::string &type) {
 }
 
 // What is left once the `or-nothing` is off it.
+// A type as the middle layer spells it, which is the one language both the
+// checker and this file already speak.
+std::string spellOf(Ty type) {
+  return type.kind == Type::Unknown ? std::string("?") : name(type);
+}
+
 std::string within(const std::string &type) {
   const std::string bare = withoutLoan(type);
   return bare.rfind("or-nothing ", 0) == 0 ? bare.substr(11) : bare;
@@ -127,6 +133,7 @@ private:
   llvm::IRBuilder<> builder_;
   llvm::StructType *str_ = nullptr;
   llvm::StructType *many_ = nullptr;
+  std::unordered_map<std::string, llvm::StructType *> shapes_;
 
   std::unordered_map<std::string, llvm::Function *> functions_;
   std::unordered_map<std::string, llvm::FunctionCallee> runtime_;
@@ -137,6 +144,107 @@ private:
 
   // ---- types
 
+  // What each struct is made of, by the name it was given.
+  const Shape *shapeOf(const std::string &spelled) const {
+    for (const Shape &shape : mir_.shapes)
+      if (shape.name == spelled)
+        return &shape;
+    return nullptr;
+  }
+
+  // Whether letting one of these go means doing anything at all. A struct of
+  // numbers holds nothing that has an owner, and asking is what keeps a drop of
+  // one from being written at all.
+  bool ownsAnything(const std::string &spelled) const {
+    const std::string bare = withoutLoan(spelled);
+    if (copiesNamed(bare) || bare == "nothing")
+      return false;
+    if (mayBeNothing(bare))
+      return ownsAnything(within(bare));
+    if (holdsMany(bare))
+      return true; // the places themselves have an owner, whatever is in them
+    if (const Shape *shape = shapeOf(bare))
+      for (const Field &field : shape->fields) {
+        if (ownsAnything(spellOf(field.type)))
+          return true;
+      }
+    return shapeOf(bare) ? false : bare == "str";
+  }
+
+  // Letting go of one value, whatever it is made of.
+  //
+  // This walks: a struct lets go of each of the things it holds, and one of
+  // those may be another struct, or a `many`, or something that may hold
+  // nothing. Choosing between three runtime calls with a chain of `?:` instead
+  // sent a struct held inside a struct to `xag_many_drop`, which was handed
+  // something that was never allocated and aborted.
+  void letGo(const std::string &spelled, llvm::Value *at) {
+    const std::string bare = withoutLoan(spelled);
+    if (!ownsAnything(bare))
+      return;
+    if (bare == "str") {
+      builder_.CreateCall(runtime_["xag_str_drop"], {at});
+      return;
+    }
+    if (mayBeNothing(bare)) {
+      // What is inside goes only when there is something inside. The flag is in
+      // the value rather than in a local beside it.
+      llvm::Function *function = builder_.GetInsertBlock()->getParent();
+      auto *letgo = llvm::BasicBlock::Create(context_, "letgo", function);
+      auto *after = llvm::BasicBlock::Create(context_, "kept", function);
+      auto *whole = builder_.CreateLoad(typeFor(bare), at);
+      builder_.CreateCondBr(builder_.CreateExtractValue(whole, 0), letgo, after);
+      builder_.SetInsertPoint(letgo);
+      letGo(within(bare), builder_.CreateStructGEP(typeFor(bare), at, 1));
+      builder_.CreateBr(after);
+      builder_.SetInsertPoint(after);
+      return;
+    }
+    if (holdsMany(bare)) {
+      const std::string element = elementOf(bare);
+      if (element == "str") {
+        builder_.CreateCall(runtime_["xag_many_drop_str"], {at});
+        return;
+      }
+      if (ownsAnything(element))
+        letGoOfEveryPlace(element, at);
+      builder_.CreateCall(runtime_["xag_many_drop"], {at});
+      return;
+    }
+    if (const Shape *shape = shapeOf(bare))
+      for (unsigned i = 0; i < shape->fields.size(); ++i)
+        letGo(spellOf(shape->fields[i].type),
+              builder_.CreateStructGEP(typeFor(bare), at, i));
+  }
+
+  // Every place of a `many`, one at a time, before the array itself goes. The
+  // runtime has a walk of its own for text, which is the common case; anything
+  // else is written out here because what one place holds is not something the
+  // runtime knows the shape of.
+  void letGoOfEveryPlace(const std::string &element, llvm::Value *array) {
+    auto *whole = builder_.CreateLoad(many_, array);
+    auto *base = builder_.CreateExtractValue(whole, 0);
+    auto *length = builder_.CreateExtractValue(whole, 1);
+    llvm::Function *function = builder_.GetInsertBlock()->getParent();
+    auto *test = llvm::BasicBlock::Create(context_, "eachplace", function);
+    auto *body = llvm::BasicBlock::Create(context_, "letgoplace", function);
+    auto *done = llvm::BasicBlock::Create(context_, "placesgone", function);
+    auto *counter = builder_.CreateAlloca(builder_.getInt64Ty(), nullptr, "place");
+    builder_.CreateStore(builder_.getInt64(0), counter);
+    builder_.CreateBr(test);
+
+    builder_.SetInsertPoint(test);
+    auto *i = builder_.CreateLoad(builder_.getInt64Ty(), counter);
+    builder_.CreateCondBr(builder_.CreateICmpULT(i, length), body, done);
+
+    builder_.SetInsertPoint(body);
+    letGo(element, builder_.CreateGEP(typeFor(element), base, i));
+    builder_.CreateStore(builder_.CreateAdd(i, builder_.getInt64(1)), counter);
+    builder_.CreateBr(test);
+
+    builder_.SetInsertPoint(done);
+  }
+
   llvm::Type *typeFor(const std::string &spelled) {
     if (spelled == "bool")
       return builder_.getInt1Ty();
@@ -144,6 +252,19 @@ private:
       return str_;
     if (isLoan(spelled))
       return builder_.getPtrTy();
+    if (const Shape *shape = shapeOf(withoutLoan(spelled))) {
+      // Named struct types, so the IR reads the way the program does.
+      auto found = shapes_.find(shape->name);
+      if (found != shapes_.end())
+        return found->second;
+      auto *made = llvm::StructType::create(context_, "xag." + shape->name);
+      shapes_[shape->name] = made;
+      std::vector<llvm::Type *> held;
+      for (const Field &field : shape->fields)
+        held.push_back(typeFor(spellOf(field.type)));
+      made->setBody(held);
+      return made;
+    }
     if (mayBeNothing(spelled))
       // Whether it is there, and what it is. Two fields, because a `str` that
       // is absent and a `str` that is empty are different things and no bit
@@ -265,6 +386,9 @@ private:
       else if (holdsMany(held) && !isLoan(held))
         builder_.CreateStore(llvm::Constant::getNullValue(many_), slots_[local.id]);
       else if (mayBeNothing(held) && !isLoan(held))
+        builder_.CreateStore(llvm::Constant::getNullValue(typeFor(held)),
+                             slots_[local.id]);
+      else if (shapeOf(held) && !isLoan(held))
         builder_.CreateStore(llvm::Constant::getNullValue(typeFor(held)),
                              slots_[local.id]);
     }
@@ -423,46 +547,21 @@ private:
 
     if (s.kind == StatementKind::Drop) {
       const std::string held = localType(s.place);
-
-      // Something that may hold nothing lets go of what is inside only when
-      // there is something inside. The flag is in the value rather than in a
-      // local beside it, so the branch is read from the value itself.
-      if (mayBeNothing(held)) {
-        const std::string inner = within(held);
-        if (copiesNamed(inner) || inner == "nothing")
-          return;
-        llvm::Function *function = builder_.GetInsertBlock()->getParent();
-        auto *letGo = llvm::BasicBlock::Create(context_, "letgo", function);
-        auto *after = llvm::BasicBlock::Create(context_, "kept", function);
-        auto *whole = builder_.CreateLoad(typeFor(held), slots_[s.place]);
-        builder_.CreateCondBr(builder_.CreateExtractValue(whole, 0), letGo, after);
-        builder_.SetInsertPoint(letGo);
-        auto *at = builder_.CreateStructGEP(typeFor(held), slots_[s.place], 1);
-        builder_.CreateCall(runtime_[inner == "str" ? "xag_str_drop"
-                                    : elementOf(inner) == "str" ? "xag_many_drop_str"
-                                                                : "xag_many_drop"],
-                            {at});
-        builder_.CreateBr(after);
-        builder_.SetInsertPoint(after);
+      if (!ownsAnything(held))
         return;
-      }
-
-      if (held != "str" && !holdsMany(held))
-        return;
-      const char *how = held == "str"          ? "xag_str_drop"
-                        : elementOf(held) == "str" ? "xag_many_drop_str"
-                                                   : "xag_many_drop";
       if (!s.conditional) {
-        builder_.CreateCall(runtime_[how], {slots_[s.place]});
+        letGo(held, slots_[s.place]);
         return;
       }
+      // A value that only some ways through the program put anything in is let
+      // go behind the flag that says whether they did.
       llvm::Function *function = builder_.GetInsertBlock()->getParent();
       auto *doIt = llvm::BasicBlock::Create(context_, "drop", function);
       auto *after = llvm::BasicBlock::Create(context_, "kept", function);
       auto *flag = builder_.CreateLoad(builder_.getInt1Ty(), slots_[s.flag]);
       builder_.CreateCondBr(flag, doIt, after);
       builder_.SetInsertPoint(doIt);
-      builder_.CreateCall(runtime_[how], {slots_[s.place]});
+      letGo(held, slots_[s.place]);
       builder_.CreateBr(after);
       builder_.SetInsertPoint(after);
       return;
@@ -471,6 +570,27 @@ private:
     llvm::Value *value = evaluate(s.value);
     if (!value)
       return;
+
+    // Down to the one thing being written, which leaves everything beside it
+    // exactly where it was — the whole point of a place having parts.
+    if (!s.parts.empty()) {
+      std::string held = withoutLoan(localType(s.place));
+      llvm::Value *where = isLoan(localType(s.place))
+                               ? builder_.CreateLoad(builder_.getPtrTy(),
+                                                     slots_[s.place])
+                               : slots_[s.place];
+      for (unsigned part : s.parts) {
+        const Shape *shape = shapeOf(held);
+        if (!shape || part >= shape->fields.size())
+          return;
+        where = builder_.CreateStructGEP(typeFor(held), where, part);
+        held = spellOf(shape->fields[part].type);
+      }
+      if (!copiesNamed(held) && held == "str")
+        builder_.CreateCall(runtime_["xag_str_drop"], {where});
+      builder_.CreateStore(value, where);
+      return;
+    }
 
     // A value going into something that may hold nothing is that value, held.
     // The absence writes itself; everything else has to be wrapped on the way.
@@ -591,9 +711,13 @@ private:
       const std::string element = elementOf(nameOf(value.operands[0].type));
       auto *place = placePointer(manyPointer(value.operands[0]),
                                  asIndex(value.operands[1]), element);
-      // What copies is read out; what does not is lent where it stands.
-      return element == "str" ? place
-                              : builder_.CreateLoad(typeFor(element), place);
+      // What copies is read out; what does not is lent where it stands. Asking
+      // only whether it was text was right while text was the only thing a
+      // place could own — a struct in a `many` was loaded into a slot that held
+      // a pointer, and reading one of its fields found nothing.
+      return copiesNamed(element)
+                 ? builder_.CreateLoad(typeFor(element), place)
+                 : place;
     }
 
     case RValueKind::Use:
@@ -628,6 +752,49 @@ private:
       builder_.CreateCall(runtime_["xag_str_join"],
                           {out, array, builder_.getInt64(count)});
       return builder_.CreateLoad(str_, out);
+    }
+
+    case RValueKind::Group: {
+      auto *shell = typeFor(nameOf(value.type));
+      llvm::Value *built = llvm::UndefValue::get(shell);
+      for (unsigned i = 0; i < value.operands.size(); ++i)
+        built = builder_.CreateInsertValue(built, read(value.operands[i]), i);
+      return built;
+    }
+
+    case RValueKind::Taken: {
+      const std::string of = operandType(value.operands[0]);
+      const Shape *shape = shapeOf(withoutLoan(of));
+      if (!shape || value.local >= shape->fields.size())
+        return nullptr;
+      const std::string inner = spellOf(shape->fields[value.local].type);
+      auto *where = isLoan(of) ? builder_.CreateLoad(builder_.getPtrTy(),
+                                                     slots_[value.operands[0].local])
+                               : slots_[value.operands[0].local];
+      auto *at = builder_.CreateStructGEP(typeFor(withoutLoan(of)), where,
+                                          value.local);
+      auto *got = builder_.CreateLoad(typeFor(inner), at);
+      // What is left behind holds nothing, so the drop at the end of the scope
+      // has nothing to let go of.
+      builder_.CreateStore(llvm::Constant::getNullValue(typeFor(inner)), at);
+      return got;
+    }
+
+    case RValueKind::Part: {
+      const std::string of = operandType(value.operands[0]);
+      const Shape *shape = shapeOf(withoutLoan(of));
+      if (!shape || value.local >= shape->fields.size())
+        return nullptr;
+      const std::string inner = spellOf(shape->fields[value.local].type);
+      // What copies is read out; what has an owner is lent where it stands.
+      auto *where = isLoan(of)
+                        ? builder_.CreateLoad(builder_.getPtrTy(),
+                                              slots_[value.operands[0].local])
+                        : slots_[value.operands[0].local];
+      auto *at = builder_.CreateStructGEP(typeFor(withoutLoan(of)), where,
+                                          value.local);
+      return copiesNamed(inner) ? builder_.CreateLoad(typeFor(inner), at)
+                                : static_cast<llvm::Value *>(at);
     }
 
     case RValueKind::Holds: {

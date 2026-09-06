@@ -56,7 +56,8 @@ const char *question(Slot slot) {
 }
 
 Slot slotOf(std::string_view word) {
-  if (word == "var" || word == "fn" || word == "const" || word == "loop")
+  if (word == "var" || word == "fn" || word == "const" || word == "loop" ||
+      word == "struct")
     return Slot::Kind;
   if (word == "export" || word == "program" || word == "file")
     return Slot::Visibility;
@@ -89,6 +90,8 @@ const Role kParam{"a parameter", "", true,
                   {Slot::Mutability, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
 const Role kFn{"a `fn`", "fn", true,
                {Slot::Visibility, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
+const Role kStruct{"a `struct`", "struct", false,
+                   {Slot::Unknown, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 const Role kConst{"a `const`", "const", true,
                   {Slot::Visibility, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 const Role kLoopRange{"a counted `loop`", "loop", true,
@@ -418,6 +421,7 @@ private:
     switch (token.kind) {
     case TokenKind::Name: {
       advance();
+      ExprPtr so_far;
       // A bare word followed by `[` is a call; a name followed by one is an
       // element of what the name holds. The marks say which before the bracket
       // is reached, so the two can never be read for each other.
@@ -426,11 +430,29 @@ private:
         ExprPtr where = item();
         Span span{token.span.begin, peek().span.end};
         expect(TokenKind::RBracket, "`]`");
-        auto at = make(ExprKind::Index, span, token.text);
-        at->children.push_back(std::move(where));
-        return at;
+        so_far = make(ExprKind::Index, span, token.text);
+        so_far->children.push_back(std::move(where));
+      } else {
+        so_far = make(ExprKind::Name, token.span, token.text);
       }
-      return make(ExprKind::Name, token.span, token.text);
+
+      // `'p'.x` — a field. The dot is unmistakable after a mark: a chain has no
+      // marked name before it, and a call path has no mark anywhere.
+      while (check(TokenKind::Dot)) {
+        advance();
+        if (!check(TokenKind::Word)) {
+          complain(peek().span, "E0102", "a field is named with a word.",
+                   {"a word names a field, and a name wears marks"}, {},
+                   std::string("found ") + describe(peek().kind));
+          break;
+        }
+        const Token field = advance();
+        Span span{token.span.begin, field.span.end};
+        auto reach = make(ExprKind::Field, span, field.text);
+        reach->children.push_back(std::move(so_far));
+        so_far = std::move(reach);
+      }
+      return so_far;
     }
     case TokenKind::Written:
       advance();
@@ -729,6 +751,19 @@ private:
         s->index = item();
         expect(TokenKind::RBracket, "`]`");
       }
+      // `set 'p'.x = …` — which of the things it holds is written.
+      while (check(TokenKind::Dot)) {
+        advance();
+        if (!check(TokenKind::Word)) {
+          complain(peek().span, "E0102", "a field is named with a word.",
+                   {"a word names a field, and a name wears marks"}, {},
+                   std::string("found ") + describe(peek().kind));
+          break;
+        }
+        const Token field = advance();
+        s->fields.push_back(field.text);
+        s->fieldSpans.push_back(field.span);
+      }
       expect(TokenKind::Equals, "`=`");
       s->value = valueList();
       expect(TokenKind::Semicolon, "`;`");
@@ -890,6 +925,32 @@ private:
 
   // ---- items
 
+  // A field list and a parameter list are the same thing written down: typed
+  // names, side by side, bracketed because nothing else bounds them.
+  void readFields(std::vector<Param> &into) {
+    if (!expect(TokenKind::LBracket, "`[`"))
+      return;
+    while (!check(TokenKind::RBracket) && !atEnd()) {
+      Param field;
+      field.span.begin = peek().span.begin;
+      field.chain = chain();
+      validate(field.chain, kParam);
+      if (check(TokenKind::Name)) {
+        const Token name = advance();
+        field.name = name.text;
+        field.nameSpan = name.span;
+      } else {
+        complain(peek().span, "E0101", "a field is a name.", {}, {},
+                 std::string("found ") + describe(peek().kind));
+      }
+      field.span.end = previous().span.end;
+      into.push_back(std::move(field));
+      if (!accept(TokenKind::Comma))
+        break;
+    }
+    expect(TokenKind::RBracket, "`]`");
+  }
+
   void startItem(Item &out) {
     out.kind = ItemKind::Start;
     advance(); // START
@@ -927,28 +988,27 @@ private:
                  {"a word names a function, and a name wears marks and holds a value"},
                  {}, std::string("found ") + describe(peek().kind));
       }
-      if (expect(TokenKind::LBracket, "`[`")) {
-        while (!check(TokenKind::RBracket) && !atEnd()) {
-          Param param;
-          param.span.begin = peek().span.begin;
-          param.chain = chain();
-          validate(param.chain, kParam);
-          if (check(TokenKind::Name)) {
-            const Token name = advance();
-            param.name = name.text;
-            param.nameSpan = name.span;
-          } else {
-            complain(peek().span, "E0101", "a parameter is a name.", {}, {},
-                     std::string("found ") + describe(peek().kind));
-          }
-          param.span.end = previous().span.end;
-          out.params.push_back(std::move(param));
-          if (!accept(TokenKind::Comma))
-            break;
-        }
-        expect(TokenKind::RBracket, "`]`");
-      }
+      readFields(out.params);
       out.body = block();
+    } else if (out.chain.startsWith("struct")) {
+      out.kind = ItemKind::Struct;
+      validate(out.chain, kStruct);
+      if (out.chain.segments.size() > 1)
+        complain(out.chain.span, "E0212",
+                 "a `struct` says nothing but what it is called.",
+                 {"a chain says what is unusual, and says nothing else"},
+                 {"what a `struct` holds is written in its fields, and each of "
+                  "them has a chain of its own."});
+      if (check(TokenKind::Word)) {
+        const Token name = advance();
+        out.name = name.text;
+        out.nameSpan = name.span;
+      } else {
+        complain(peek().span, "E0101", "a `struct` is named with a word.",
+                 {"a word names a thing, and a name wears marks and holds a value"},
+                 {}, std::string("found ") + describe(peek().kind));
+      }
+      readFields(out.params);
     } else if (out.chain.startsWith("const")) {
       out.kind = ItemKind::Const;
       validate(out.chain, kConst);
@@ -965,8 +1025,9 @@ private:
       expect(TokenKind::Semicolon, "`;`");
     } else {
       complain(out.chain.span, "E0104",
-               "a file holds constants, functions and `START`.",
-               {"`const`, `fn` and `START` are what stands at the top of a file"},
+               "a file holds structs, constants, functions and `START`.",
+               {"`struct`, `const`, `fn` and `START` are what stands at the top of "
+                "a file"},
                {"a `var` belongs inside something that runs; the top level does not run."});
       recover();
       return;

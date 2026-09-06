@@ -75,6 +75,14 @@ struct Binding {
   Span span;
   bool moved = false;
   Span movedAt;
+  // Which of the things it holds have been handed over on their own. A field is
+  // known where it is written, so this can be tracked one at a time — which is
+  // the whole reason a struct's ownership is not the array's.
+  std::vector<std::string> partsMoved;
+  std::vector<Span> partsMovedAt;
+  // Which struct it is, when it is one, so that a value written for it knows
+  // that its items go into places of their own rather than being joined.
+  std::string fills;
 };
 
 // What `holds` lends: a borrow of what was there, so it is read where it stands
@@ -122,6 +130,13 @@ public:
     collect();
     scopes_.emplace_back();
     for (const Item &item : program_.items)
+      if (item.kind == ItemKind::Struct) {
+        std::vector<bool> fields;
+        for (const Param &field : item.params)
+          fields.push_back(copyChain(field.chain));
+        shapes_[item.name] = std::move(fields);
+      }
+    for (const Item &item : program_.items)
       if (item.kind == ItemKind::Const)
         scopes_.back()[item.name] =
             Binding{Mode::Owned, copyChain(item.chain), copyType(item.chain.type().text),
@@ -137,6 +152,10 @@ private:
   OwnResult result_;
   std::vector<std::unordered_map<std::string, Binding>> scopes_;
   std::unordered_map<std::string, FnInfo> functions_;
+  // Whether each of the things a struct holds copies, in the order it holds
+  // them. A struct is never itself copied, but what goes into one place of it
+  // is that place's question, the same as an element of a `many`.
+  std::unordered_map<std::string, std::vector<bool>> shapes_;
   Mode giving_ = Mode::Owned;
   bool givingCopies_ = true;
 
@@ -226,6 +245,28 @@ private:
 
   void read(const Expr &e) { use(e, Use::Read, Mode::Owned, false); }
 
+  // `'p'.name` down to the name it is of, and the fields walked through on the
+  // way. Anything else is not somewhere a field can be taken from.
+  static const Expr *rootOf(const Expr &e, std::vector<std::string> &fields) {
+    const Expr *at = &e;
+    while (at->kind == ExprKind::Field) {
+      fields.insert(fields.begin(), at->text);
+      if (at->children.empty())
+        return nullptr;
+      at = at->children[0].get();
+    }
+    return at->kind == ExprKind::Name ? at : nullptr;
+  }
+
+  // Whether this field, or the whole it is part of, has already gone.
+  const Span *goneAlready(const Binding &binding,
+                          const std::vector<std::string> &fields) const {
+    for (unsigned i = 0; i < binding.partsMoved.size(); ++i)
+      if (fields.empty() || binding.partsMoved[i] == fields.front())
+        return &binding.partsMovedAt[i];
+    return nullptr;
+  }
+
   // `mode` and `copies` describe the place the value is going.
   void use(const Expr &e, Use how, Mode wanted, bool copies) {
     switch (e.kind) {
@@ -233,6 +274,17 @@ private:
       Binding *binding = lookup(e.text);
       if (!binding)
         return; // the checker has already said so
+      if (!binding->partsMoved.empty()) {
+        complain(e.span, "E0414",
+                 "`'" + e.text + "'` is not all here: `'" + e.text + "'." +
+                     binding->partsMoved.front() + "` was handed over.",
+                 {"a struct holds each of its things until that one is moved"},
+                 {"what is left of it can still be reached one field at a time; the "
+                  "whole of it cannot, because part of the whole is somewhere else."},
+                 "the whole of it is wanted here",
+                 {Note{binding->partsMovedAt.front(), "and this went from it here"}});
+        return;
+      }
       if (binding->moved) {
         // Two places matter: where it is wanted, and where it went.
         complain(e.span, "E0403", "`'" + e.text + "'` was moved, and holds nothing now.",
@@ -253,6 +305,39 @@ private:
                  {"a declaration describes a thing, but this acts: `" +
                   std::string(word(wanted)) + "` is the word for what happens to `'" +
                   e.text + "'` next."});
+      }
+      return;
+    }
+
+    case ExprKind::Field: {
+      std::vector<std::string> fields;
+      const Expr *root = rootOf(e, fields);
+      Binding *binding = root ? lookup(root->text) : nullptr;
+      if (!binding) {
+        for (const ExprPtr &child : e.children)
+          read(*child);
+        return;
+      }
+      if (binding->moved) {
+        complain(e.span, "E0403", "`'" + root->text + "'` was moved, and holds nothing now.",
+                 {"a name holds its value until it is moved, and then holds nothing"},
+                 {}, "used here",
+                 {Note{binding->movedAt, "but it was handed over here"}});
+        return;
+      }
+      if (const Span *gone = goneAlready(*binding, fields)) {
+        complain(e.span, "E0413",
+                 "`'" + root->text + "'." + fields.front() +
+                     "` was handed over, and is not there now.",
+                 {"a struct holds each of its things until that one is moved"},
+                 {"the rest of it is still there; this one is not."},
+                 "used here", {Note{*gone, "but it was handed over here"}});
+        return;
+      }
+      if (how == Use::Consume && wanted == Mode::Owned && !copies) {
+        // Taking one of them out, which leaves the rest where they are.
+        binding->partsMoved.push_back(fields.front());
+        binding->partsMovedAt.push_back(e.span);
       }
       return;
     }
@@ -289,6 +374,11 @@ private:
       Binding *binding = (inner.kind == ExprKind::Name || inner.kind == ExprKind::Index)
                              ? lookup(inner.text)
                              : nullptr;
+
+      if (e.text == "move" && inner.kind == ExprKind::Field) {
+        use(inner, Use::Consume, Mode::Owned, false);
+        return;
+      }
 
       if (e.text == "move") {
         if (inner.kind == ExprKind::Index) {
@@ -410,9 +500,24 @@ private:
     scopes_.pop_back();
   }
 
+  const std::vector<bool> *shapeNamed(const std::string &type) const {
+    auto found = shapes_.find(type);
+    return found == shapes_.end() ? nullptr : &found->second;
+  }
+
   void consumeInto(const ValueList &list, Mode mode, bool copies, bool collects = false,
-                   bool elementCopies = true) {
+                   bool elementCopies = true, const std::string &fills = {}) {
+    const std::vector<bool> *fields = fills.empty() ? nullptr : shapeNamed(fills);
     for (const Value &value : list.values) {
+      // A struct's items each go into a place of their own, as a `many`'s do,
+      // so each of them is handed over. Reading them as pieces of a joined
+      // value let an owning one be put in and let go twice.
+      if (fields && value.items.size() != 1) {
+        for (unsigned i = 0; i < value.items.size(); ++i)
+          use(*value.items[i], Use::Consume, Mode::Owned,
+              i < fields->size() ? (*fields)[i] : true);
+        continue;
+      }
       // Items side by side under a `many` each end up in a place of their own,
       // so each is handed over. Under anything else they are joined, and
       // joining reads its pieces and builds something new out of them.
@@ -442,11 +547,13 @@ private:
     case StmtKind::Declare: {
       const Mode mode = modeOfChain(s.chain);
       const bool copies = copyChain(s.chain);
+      const std::string fills =
+          holdsMany(s.chain) || mode != Mode::Owned ? std::string() : s.chain.type().text;
       consumeInto(s.value, mode, copies, holdsMany(s.chain),
-                  copyType(s.chain.type().text));
+                  copyType(s.chain.type().text), fills);
       scopes_.back()[s.name] =
           Binding{mode, copies, copyType(s.chain.type().text), holdsMany(s.chain),
-                  changeable(s.chain), s.nameSpan, false, {}};
+                  changeable(s.chain), s.nameSpan, false, {}, {}, {}, fills};
       break;
     }
 
@@ -469,7 +576,8 @@ private:
       }
       consumeInto(s.value, binding ? binding->mode : Mode::Owned,
                   binding ? binding->copies : true, binding && binding->holds,
-                  binding ? binding->elementCopies : true);
+                  binding ? binding->elementCopies : true,
+                  binding && s.fields.empty() ? binding->fills : std::string());
       if (binding)
         binding->moved = false; // it holds something again
       break;

@@ -1,0 +1,33 @@
+# A `struct` gives a name to a group of things, each with a name and a type of
+# its own. It is written where a function is, and reads the same way, because it
+# asks the same question: what is in here, in what order, and called what.
+
+struct point [int64 'x', int64 'y']
+
+struct runner [str 'name', point 'at']
+
+fn.int64 across [ref.point 'p'] {
+    give ['p'.x + 'p'.y];
+}
+
+START {
+    var.mut.point 'p' = [*20* *22*];
+    print.stdout[str:*across: * (across[ref 'p']) \n];
+
+    # One of them is named with a dot. The mark stays on the name, because the
+    # name is the variable and `x` is one of the things it holds.
+    set 'p'.y = [*0*];
+    print.stdout[str:*after setting y: * (across[ref 'p']) \n];
+
+    # A struct is handed over rather than copied, as a `many` is: the places it
+    # holds are its own. Whether an item going in needs `move` is that field's
+    # own question — a number copies, text does not.
+    var.str 'who' = [*ada*];
+    var.runner 'r' = [move 'who' move 'p'];
+    print.stdout['r'.name str:* is at * 'r'.at.x \n];
+
+    # This is what a struct has that a `many` does not: which field is written is
+    # known where it is written, so one may go on its own and the rest stay.
+    var.str 'taken' = [move 'r'.name];
+    print.stdout[str:*took * 'taken' str:*, kept * 'r'.at.x \n];
+}

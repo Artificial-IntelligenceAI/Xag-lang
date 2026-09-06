@@ -50,6 +50,9 @@ enum class RValueKind {
   Fill,    // two operands: what to put in every place, and how many places
   Holds,   // one operand: whether something that may hold nothing holds anything
   Inside,  // one operand: what it holds, which the caller has already asked about
+  Group,   // one operand per thing a struct holds, in the order it holds them
+  Part,    // one operand: a struct, and `local` says which of its fields
+  Taken,   // the same, but the field is handed over and left holding nothing
 };
 
 struct RValue {
@@ -71,6 +74,10 @@ struct Statement {
   StatementKind kind = StatementKind::Assign;
   Span span;
   unsigned place = 0;
+  // Which part of it. A field is known where it is written, so a place is a
+  // local and a path of fields into it — which is what lets one field be handed
+  // over while the rest stay, and one be lent while another is written.
+  std::vector<unsigned> parts;
   Operand at; // Store: which of the places
   RValue value;
 
@@ -124,6 +131,9 @@ struct Settings {
 struct Mir {
   std::vector<Body> bodies;
   Settings settings;
+  // What each struct is made of, carried through so that nothing after the
+  // checker has to read it out of the tree again.
+  std::vector<Shape> shapes;
 };
 
 struct MirResult {

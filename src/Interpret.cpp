@@ -134,7 +134,7 @@ private:
     return true;
   }
 
-  void put(unsigned slot, Value value) {
+  void put(unsigned slot, const std::vector<unsigned> &parts, Value value) {
     Frame &frame = frames_.back();
     Value *target = &frame.locals[slot];
     // Writing a *value* to a name that holds a loan writes through it, which is
@@ -145,6 +145,23 @@ private:
     if (target->kind == Value::Kind::Loan && value.kind != Value::Kind::Loan)
       if (Value *lent = behind(*target))
         target = lent;
+
+    // Down to the one thing being written, which leaves everything beside it
+    // exactly as it was.
+    for (unsigned part : parts) {
+      Value *at = behind(*target);
+      if (!at || !at->places || part >= at->places->size()) {
+        endValue(value);
+        return;
+      }
+      target = &(*at->places)[part];
+    }
+    if (!parts.empty() && value.kind == Value::Kind::Text && !value.owns) {
+      XagStr copy{nullptr, 0, 0};
+      xag_str_from(&copy, value.text.bytes, value.text.length);
+      value.text = copy;
+      value.owns = true;
+    }
     endValue(*target);
     *target = std::move(value);
   }
@@ -326,6 +343,47 @@ private:
         held.push_back(piece);
       }
       return collected(std::move(held));
+    }
+
+    case RValueKind::Group: {
+      // A struct is a fixed run of values in order, which is what a `many` is
+      // too. Only the type tells them apart, and the type was settled before
+      // any of this ran.
+      std::vector<Value> held;
+      for (const Operand &operand : value.operands) {
+        Value piece = read(operand);
+        if (piece.kind == Value::Kind::Text && !piece.owns) {
+          XagStr copy{nullptr, 0, 0};
+          xag_str_from(&copy, piece.text.bytes, piece.text.length);
+          piece.text = copy;
+          piece.owns = true;
+        }
+        held.push_back(piece);
+      }
+      return collected(std::move(held));
+    }
+
+    case RValueKind::Taken: {
+      // Handed over, and what held it is left holding nothing there.
+      Value of = read(value.operands[0]);
+      Value *at = behind(of);
+      Value answer;
+      if (at && at->places && value.local < at->places->size()) {
+        answer = (*at->places)[value.local];
+        (*at->places)[value.local] = Value{};
+      }
+      endValue(of);
+      return answer;
+    }
+
+    case RValueKind::Part: {
+      Value of = read(value.operands[0]);
+      Value *at = behind(of);
+      Value answer;
+      if (at && at->places && value.local < at->places->size())
+        answer = viewOf((*at->places)[value.local]); // lent, not taken
+      endValue(of);
+      return answer;
     }
 
     case RValueKind::Fill: {
@@ -689,7 +747,7 @@ private:
         Value produced = evaluate(s.value);
         if (!trouble_.empty())
           break;
-        put(s.place, std::move(produced));
+        put(s.place, s.parts, std::move(produced));
       }
       if (!trouble_.empty())
         break;

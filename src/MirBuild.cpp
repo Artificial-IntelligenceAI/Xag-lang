@@ -67,6 +67,11 @@ public:
         result_.mir.bodies.push_back(std::move(body_));
         continue;
       }
+      // A struct declares a shape, not something to run. Laying one out as a
+      // body made a callable named after the type, whose parameters were let go
+      // at the end though nobody had ever handed them over.
+      if (item.kind == ItemKind::Struct)
+        continue;
       body_ = Body{};
       body_.name = item.kind == ItemKind::Start ? "START" : item.name;
       scopes_.clear();
@@ -119,7 +124,7 @@ private:
   // A name nothing declared may still be a constant, which is a call.
   unsigned callConst(const Expr &e, const std::string &spelled) {
     const unsigned into = temporary(typeRef(spelled), copiesNamed(spelled));
-    emit(Statement{StatementKind::Assign, e.span, into, {},
+    emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                    RValue{RValueKind::Call, {}, constBody(e.text), 0, {},
                           typeRef(spelled)}});
     return into;
@@ -132,6 +137,14 @@ private:
   std::vector<Loop> loops_;
 
   // ---- small pieces
+
+  // Which struct a spelled type names, and what it is made of.
+  const Shape *shapeOf(const std::string &spelled) const {
+    for (const Shape &shape : checked_.shapes)
+      if (shape.name == spelled)
+        return &shape;
+    return nullptr;
+  }
 
   Ty lookupItem(const Item &item) const {
     auto found = checked_.items.find(&item);
@@ -243,7 +256,7 @@ private:
       return;
     const std::vector<unsigned> &owned = scopes_.back();
     for (auto local = owned.rbegin(); local != owned.rend(); ++local)
-      emit(Statement{StatementKind::Drop, Span{}, *local, {}, RValue{}});
+      emit(Statement{StatementKind::Drop, Span{}, *local, {}, {}, RValue{}});
   }
 
   // ---- expressions
@@ -295,7 +308,7 @@ private:
       // Text written into a temporary is text that temporary owns.
       const unsigned into = owns(type) ? owningTemporary(typeRef(spell(type)))
                                        : temporary(typeRef(spell(type)), copies(type));
-      emit(Statement{StatementKind::Assign, e.span, into, {},
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Use, {}, {}, 0, {operandOf(e)}, typeRef(spell(type))}});
       return into;
     }
@@ -307,19 +320,44 @@ private:
     case ExprKind::Borrow: {
       if (e.children.empty())
         return temporary(typeRef("?"), true);
+      // Taking one of the things a struct holds hands over the value itself,
+      // and leaves that one holding nothing — so the drop at the end of the
+      // scope finds it already gone and there is no flag to keep.
+      if (e.text == "move" && e.children[0]->kind == ExprKind::Field) {
+        const Expr &field = *e.children[0];
+        const unsigned of = lower(*field.children[0]);
+        const std::string held =
+            withoutLoan(body_.types[body_.locals[of].type.index]);
+        const Shape *shape = shapeOf(held);
+        unsigned which = 0;
+        std::string inner = "?";
+        if (shape)
+          for (unsigned i = 0; i < shape->fields.size(); ++i)
+            if (shape->fields[i].name == field.text) {
+              which = i;
+              inner = spell(shape->fields[i].type);
+            }
+        const unsigned into = owningTemporary(typeRef(inner));
+        emit(Statement{StatementKind::Assign, field.span, into, {}, {},
+                       RValue{RValueKind::Taken, field.text, {}, which,
+                              {Operand{OperandKind::Copy, of, {},
+                                       body_.locals[of].type}},
+                              typeRef(inner)}});
+        return into;
+      }
       if (e.text == "move")
         return lower(*e.children[0]);
       const unsigned of = lower(*e.children[0]);
       const std::string name = e.text + " " + body_.types[body_.locals[of].type.index];
       const unsigned into = temporary(typeRef(name), true);
-      emit(Statement{StatementKind::Assign, e.span, into, {},
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Ref, e.text, {}, of, {}, typeRef(name)}});
       return into;
     }
 
     case ExprKind::Unary: {
       const unsigned into = temporary(typeRef(spell(type)), copies(type));
-      emit(Statement{StatementKind::Assign, e.span, into, {},
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Unary, e.text, {}, 0,
                             {operandOf(*e.children[0])}, typeRef(spell(type))}});
       return into;
@@ -329,7 +367,7 @@ private:
       Operand left = operandOf(*e.children[0]);
       Operand right = operandOf(*e.children[1]);
       const unsigned into = temporary(typeRef(spell(type)), copies(type));
-      emit(Statement{StatementKind::Assign, e.span, into, {},
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Binary, e.text, {}, 0,
                             {std::move(left), std::move(right)}, typeRef(spell(type))}});
       return into;
@@ -351,9 +389,37 @@ private:
       parts.push_back(e.children.empty()
                           ? Operand{OperandKind::Written, 0, "0", typeRef("int64")}
                           : operandOf(*e.children[0]));
-      emit(Statement{StatementKind::Assign, e.span, into, {},
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Element, {}, {}, 0, std::move(parts),
                             typeRef(spelled)}});
+      return into;
+    }
+
+    case ExprKind::Field: {
+      // Which of the things it holds, worked out where it is written — so the
+      // middle layer carries a number rather than a name.
+      if (e.children.empty())
+        return temporary(typeRef("?"), true);
+      const unsigned of = lower(*e.children[0]);
+      const std::string held = withoutLoan(body_.types[body_.locals[of].type.index]);
+      const Shape *shape = shapeOf(held);
+      unsigned which = 0;
+      std::string inner = "?";
+      if (shape)
+        for (unsigned i = 0; i < shape->fields.size(); ++i)
+          if (shape->fields[i].name == e.text) {
+            which = i;
+            inner = spell(shape->fields[i].type);
+          }
+      // What copies is read out; what has an owner is lent where it stands, the
+      // same as an element of a `many`.
+      const bool copiesIt = copiesNamed(inner);
+      const std::string as = copiesIt ? inner : "ref " + inner;
+      const unsigned into = temporary(typeRef(as), copiesIt);
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
+                     RValue{RValueKind::Part, e.text, {}, which,
+                            {Operand{OperandKind::Copy, of, {}, body_.locals[of].type}},
+                            typeRef(as)}});
       return into;
     }
 
@@ -361,7 +427,7 @@ private:
       // An absence is a value like any other, written down where it stands.
       const std::string spelled = spell(type);
       const unsigned into = owningTemporary(typeRef(spelled));
-      emit(Statement{StatementKind::Assign, e.span, into, {},
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Use, {}, {}, 0,
                             {Operand{OperandKind::Written, 0, "nothing",
                                      typeRef(spelled)}},
@@ -380,7 +446,7 @@ private:
           parts.push_back(valueOperand(value));
         parts.resize(2);
         const unsigned into = owningTemporary(typeRef(spelled));
-        emit(Statement{StatementKind::Assign, e.span, into, {},
+        emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                        RValue{RValueKind::Fill, {}, {}, 0, std::move(parts),
                               typeRef(spelled)}});
         return into;
@@ -407,7 +473,7 @@ private:
       const unsigned into = (owns(type) && !isLoanType(spelled))
                                 ? owningTemporary(typeRef(spelled))
                                 : temporary(typeRef(spelled), copies(type));
-      emit(Statement{StatementKind::Assign, e.span, into, {},
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Call, {}, callee, 0, std::move(arguments),
                             typeRef(spelled)}});
       return into;
@@ -427,7 +493,7 @@ private:
     for (const ExprPtr &item : value.items)
       pieces.push_back(operandOf(*item));
     const unsigned into = owningTemporary(typeRef("str"));
-    emit(Statement{StatementKind::Assign, value.span, into, {},
+    emit(Statement{StatementKind::Assign, value.span, into, {}, {},
                    RValue{RValueKind::Join, {}, {}, 0, std::move(pieces), typeRef("str")}});
     return Operand{OperandKind::Move, into, {}, typeRef("str")};
   }
@@ -439,6 +505,13 @@ private:
     // joined into one. Stopping at the loan sent `or-nothing.many.int64` down
     // the joining path and made three numbers into the text "123".
     const std::string held = within(withoutLoan(spelled));
+    if (const Shape *shape = shapeOf(held)) {
+      // The struct's own spelling, not the name's: a name that may hold nothing
+      // is filled with the thing and then wrapped, and saying `or-nothing tag`
+      // here had the group built as though the absence were one of its fields.
+      groupInto(place, list, span, held, *shape);
+      return;
+    }
     if (held.rfind("many ", 0) == 0) {
       collectInto(place, list, span, held);
       return;
@@ -447,8 +520,30 @@ private:
       return;
     Operand operand = valueOperand(list.values[0]);
     const TypeRef type = operand.type;
-    emit(Statement{StatementKind::Assign, span, place, {},
+    emit(Statement{StatementKind::Assign, span, place, {}, {},
                    RValue{RValueKind::Use, {}, {}, 0, {std::move(operand)}, type}});
+  }
+
+  // One item for each of the things a struct holds, in the order it holds them.
+  void groupInto(unsigned place, const ValueList &list, Span span,
+                 const std::string &spelled, const Shape &shape) {
+    (void)shape;
+    if (list.values.empty())
+      return;
+    const Value &v = list.values[0];
+    if (v.items.size() == 1 && checked_.of(v.items[0].get()).isStruct()) {
+      Operand whole = operandOf(*v.items[0]);
+      const TypeRef type = whole.type;
+      emit(Statement{StatementKind::Assign, span, place, {}, {},
+                     RValue{RValueKind::Use, {}, {}, 0, {std::move(whole)}, type}});
+      return;
+    }
+    std::vector<Operand> parts;
+    for (const ExprPtr &one : v.items)
+      parts.push_back(operandOf(*one));
+    emit(Statement{StatementKind::Assign, span, place, {}, {},
+                   RValue{RValueKind::Group, {}, {}, 0, std::move(parts),
+                          typeRef(spelled)}});
   }
 
   // Items side by side under a `many` stay several. A lone item that is already
@@ -462,14 +557,14 @@ private:
       if (v.items.size() == 1 && checked_.of(v.items[0].get()).holds()) {
         Operand operand = operandOf(*v.items[0]);
         const TypeRef type = operand.type;
-        emit(Statement{StatementKind::Assign, span, place, {},
+        emit(Statement{StatementKind::Assign, span, place, {}, {},
                        RValue{RValueKind::Use, {}, {}, 0, {std::move(operand)}, type}});
         return;
       }
       for (const ExprPtr &item : v.items)
         parts.push_back(operandOf(*item));
     }
-    emit(Statement{StatementKind::Assign, span, place, {},
+    emit(Statement{StatementKind::Assign, span, place, {}, {},
                    RValue{RValueKind::Collect, {}, {}, 0, std::move(parts),
                           typeRef(spelled)}});
   }
@@ -486,7 +581,7 @@ private:
     carried = lower(condition);
     held = body_.types[body_.locals[carried].type.index];
     const unsigned answer = temporary(typeRef("bool"), true);
-    emit(Statement{StatementKind::Assign, condition.span, answer, {},
+    emit(Statement{StatementKind::Assign, condition.span, answer, {}, {},
                    RValue{RValueKind::Holds, {}, {}, 0,
                           {Operand{OperandKind::Copy, carried, {},
                                    body_.locals[carried].type}},
@@ -504,7 +599,7 @@ private:
     const bool copies = copiesNamed(inner);
     const std::string as = copies ? inner : "ref " + inner;
     const unsigned into = addLocal(holds, typeRef(as), copies);
-    emit(Statement{StatementKind::Assign, where, into, {},
+    emit(Statement{StatementKind::Assign, where, into, {}, {},
                    RValue{RValueKind::Inside, {}, {}, 0,
                           {Operand{OperandKind::Copy, carried, {},
                                    body_.locals[carried].type}},
@@ -528,6 +623,31 @@ private:
       const unsigned *local = findName(s.name);
       if (!local)
         break;
+      // Which of the things it holds is written. The path is worked out here,
+      // where the fields are known, so nothing further down reads a name.
+      if (!s.fields.empty()) {
+        std::vector<unsigned> parts;
+        std::string held = withoutLoan(body_.types[body_.locals[*local].type.index]);
+        for (const std::string &field : s.fields) {
+          const Shape *shape = shapeOf(held);
+          if (!shape)
+            break;
+          for (unsigned i = 0; i < shape->fields.size(); ++i)
+            if (shape->fields[i].name == field) {
+              parts.push_back(i);
+              held = spell(shape->fields[i].type);
+              break;
+            }
+        }
+        Operand what = s.value.values.empty()
+                           ? Operand{OperandKind::Written, 0, "", typeRef(held)}
+                           : valueOperand(s.value.values[0]);
+        const TypeRef type = what.type;
+        emit(Statement{StatementKind::Assign, s.span, *local, std::move(parts), {},
+                       RValue{RValueKind::Use, {}, {}, 0, {std::move(what)}, type}});
+        break;
+      }
+
       if (s.index) {
         const std::string held =
             elementOf(body_.types[body_.locals[*local].type.index]);
@@ -535,7 +655,7 @@ private:
         Operand value = s.value.values.empty()
                             ? Operand{OperandKind::Written, 0, "", typeRef(held)}
                             : valueOperand(s.value.values[0]);
-        emit(Statement{StatementKind::Store, s.span, *local, std::move(at),
+        emit(Statement{StatementKind::Store, s.span, *local, {}, std::move(at),
                        RValue{RValueKind::Use, {}, {}, 0, {std::move(value)},
                               typeRef(held)}});
         break;
@@ -558,7 +678,7 @@ private:
       const unsigned subject = lower(*s.condition);
       const std::string carried = body_.types[body_.locals[subject].type.index];
       const unsigned answer = temporary(typeRef("bool"), true);
-      emit(Statement{StatementKind::Assign, s.condition->span, answer, {},
+      emit(Statement{StatementKind::Assign, s.condition->span, answer, {}, {},
                      RValue{RValueKind::Holds, {}, {}, 0,
                             {Operand{OperandKind::Copy, subject, {},
                                      body_.locals[subject].type}},
@@ -642,7 +762,7 @@ private:
 
       current_ = header;
       const unsigned more = temporary(typeRef("bool"), true);
-      emit(Statement{StatementKind::Assign, s.span, more, {},
+      emit(Statement{StatementKind::Assign, s.span, more, {}, {},
                      RValue{RValueKind::Binary, "<==", {}, 0,
                             {Operand{OperandKind::Copy, counter, {}, body_.locals[counter].type},
                              Operand{OperandKind::Copy, last, {}, body_.locals[last].type}},
@@ -660,7 +780,7 @@ private:
         statement(*inner);
       closeScope();
       loops_.pop_back();
-      emit(Statement{StatementKind::Assign, s.span, counter, {},
+      emit(Statement{StatementKind::Assign, s.span, counter, {}, {},
                      RValue{RValueKind::Binary, "+", {}, 0,
                             {Operand{OperandKind::Copy, counter, {}, body_.locals[counter].type},
                              // The step is a number of the counter's own type,
@@ -717,7 +837,7 @@ private:
         if (answer.kind == OperandKind::Copy && answer.local < body_.locals.size() &&
             !body_.locals[answer.local].copies)
           answer.kind = OperandKind::Move;
-        emit(Statement{StatementKind::Assign, s.span, 0, {},
+        emit(Statement{StatementKind::Assign, s.span, 0, {}, {},
                        RValue{RValueKind::Use, {}, {}, 0, {answer}, answer.type}});
         finish(Terminator{TerminatorKind::Return, s.span, {}, {}, {}, true,
                           Operand{OperandKind::Move, 0, {}, body_.result}});
@@ -738,7 +858,7 @@ private:
   void assignOne(unsigned place, const Value &value, Span span) {
     Operand operand = valueOperand(value);
     const TypeRef type = operand.type;
-    emit(Statement{StatementKind::Assign, span, place, {},
+    emit(Statement{StatementKind::Assign, span, place, {}, {},
                    RValue{RValueKind::Use, {}, {}, 0, {std::move(operand)}, type}});
   }
 
@@ -761,6 +881,7 @@ MirResult build(const Source &source, const Program &program,
   (void)source; // spans in the IR already carry everything a diagnostic needs
   MirResult result = Builder(program, checked).run();
   result.mir.settings = settings;
+  result.mir.shapes = checked.shapes;
   return result;
 }
 

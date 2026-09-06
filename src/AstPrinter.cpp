@@ -34,6 +34,7 @@ struct Printer {
     case ExprKind::Borrow:  out << "transfer " << e.text << '\n'; break;
     case ExprKind::Index:   out << "element of '" << e.text << "'\n"; break;
     case ExprKind::Nothing: out << "nothing\n"; break;
+    case ExprKind::Field:   out << "field " << e.text << '\n'; break;
     case ExprKind::Unary:   out << "unary " << e.text << '\n'; break;
     case ExprKind::Binary:  out << "binary " << e.text << '\n'; break;
     case ExprKind::Group:   out << "group\n"; break;
@@ -74,7 +75,10 @@ struct Printer {
       values(s.value, depth + 1);
       break;
     case StmtKind::Set:
-      out << "set '" << s.name << "'\n";
+      out << "set '" << s.name << "'";
+      for (const std::string &field : s.fields)
+        out << '.' << field;
+      out << '\n';
       if (s.index) {
         indent(depth + 1);
         out << "at\n";
@@ -130,6 +134,14 @@ struct Printer {
 
   void item(const Item &i) {
     switch (i.kind) {
+    case ItemKind::Struct:
+      out << "struct " << i.name << '\n';
+      for (const Param &field : i.params) {
+        indent(1);
+        chain(field.chain);
+        out << " '" << field.name << "'\n";
+      }
+      return;
     case ItemKind::Start:
       out << "START\n";
       block(i.body, 1);

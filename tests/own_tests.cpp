@@ -247,6 +247,59 @@ void whatHoldsLendsIsNotYoursToGiveAway() {
                     "    if 's' holds 'text' { print.stdout[(look[ref 'text']) \n]; }").ok());
 }
 
+// A struct is known field by field where it is written, so one of them may be
+// handed over on its own — and what is left is the rest of it.
+void oneOfWhatAStructHoldsGoesOnItsOwn() {
+  const char *kTag = "struct tag [str 'name', int64 'runs']\n";
+  auto shaped = [&](const std::string &body) {
+    return run(std::string(kTag) + kKeep + kLook + kEdit + "START {\n" + body + "\n}\n");
+  };
+
+  CHECK(shaped("var.tag 'a' = [*ada* *36*];\n"
+               "    keep[move 'a'.name];\n"
+               "    print.stdout['a'.runs \\n];").ok());
+
+  // Only once, as with anything else.
+  CHECK(shaped("var.tag 'a' = [*ada* *36*];\n"
+               "    keep[move 'a'.name];\n"
+               "    keep[move 'a'.name];").code(0) == "E0413");
+
+  // What went is gone, whether it is asked for by name or as part of the whole.
+  CHECK(shaped("var.tag 'a' = [*ada* *36*];\n"
+               "    keep[move 'a'.name];\n"
+               "    print.stdout['a'.name \\n];").code(0) == "E0413");
+  CHECK(shaped("var.tag 'a' = [*ada* *36*];\n"
+               "    keep[move 'a'.name];\n"
+               "    var.tag 'b' = [move 'a'];").code(0) == "E0414");
+
+  // Handing the whole over takes what is in it with it.
+  CHECK(shaped("var.tag 'a' = [*ada* *36*];\n"
+               "    var.tag 'b' = [move 'a'];\n"
+               "    print.stdout['a'.runs \\n];").code(0) == "E0403");
+}
+
+// Its items go into places of their own, so each one is handed over — reading
+// them as pieces of a joined value let an owning one be let go twice.
+void aStructIsFilledRatherThanJoined() {
+  const char *kPair = "struct tag [str 'name']\nstruct pair [tag 'one', tag 'two']\n";
+  CHECK(run(std::string(kPair) + "START {\n"
+            "    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
+            "    var.pair 'p' = ['a' 'b'];\n}\n").code(0) == "E0406");
+  CHECK(run(std::string(kPair) + "START {\n"
+            "    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
+            "    var.pair 'p' = [move 'a' move 'b'];\n"
+            "    print.stdout['p'.two.name \\n];\n}\n").ok());
+
+  // What copies still copies: whether a word is needed is the field's question.
+  CHECK(run("struct mixed [int64 'n', str 's']\nSTART {\n"
+            "    var.str 'a' = [*hi*];\n"
+            "    var.mixed 'm' = [*7* move 'a'];\n"
+            "    print.stdout['m'.s \\n];\n}\n").ok());
+  CHECK(run("struct mixed [int64 'n', str 's']\nSTART {\n"
+            "    var.str 'a' = [*hi*];\n"
+            "    var.mixed 'm' = [*7* 'a'];\n}\n").code(0) == "E0406");
+}
+
 } // namespace
 
 int main() {
@@ -267,6 +320,8 @@ int main() {
   nothingIsTakenOutOfAMany();
   lendingAnElementLendsTheWholeArray();
   whatHoldsLendsIsNotYoursToGiveAway();
+  oneOfWhatAStructHoldsGoesOnItsOwn();
+  aStructIsFilledRatherThanJoined();
 
   if (failures == 0)
     std::cout << "all ownership tests passed\n";

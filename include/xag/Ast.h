@@ -52,6 +52,7 @@ enum class ExprKind {
   Borrow,  // ref 'x' / refmut / move   text is the word, one child
   Index,   // 'xs'[*2*]                 text is the name, one child: the index
   Nothing, // nothing                   what an `or-nothing` holds when it holds none
+  Field,   // 'p'.x                     text is the field, one child: what it is of
   Call,    // print.stdout[…]           path is the dotted callee, args
   Unary,   // not 'x'                   text is the word, one child
   Binary,  // 'a' + 'b'                 text is the operator, two children
@@ -113,6 +114,8 @@ struct Stmt {
   Span nameSpan;               // Declare, Set, LoopRange
   std::string name;            //  "
   ExprPtr index;               // Set, when written `set 'xs'[*2*] = …`
+  std::vector<std::string> fields;   // Set, when written `set 'p'.x = …`
+  std::vector<Span> fieldSpans;      //  "
   ValueList value;             // Declare, Set, LoopRange, Give
   ExprPtr condition;           // LoopWhile, and the subject of a When
   std::string holds;           // LoopWhile, when written `loop.while … holds 'x'`
@@ -122,7 +125,7 @@ struct Stmt {
   ExprPtr call;                // Call
 };
 
-enum class ItemKind { Function, Const, Start };
+enum class ItemKind { Function, Const, Start, Struct };
 
 struct Param {
   Span span;
@@ -138,7 +141,7 @@ struct Item {
   Chain chain;              // Function, Const
   Span nameSpan;
   std::string name;         // the function's word, or the constant's name
-  std::vector<Param> params;// Function
+  std::vector<Param> params;// Function, and the fields of a Struct
   ValueList value;          // Const
   Block body;               // Function, Start
 };
