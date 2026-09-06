@@ -165,11 +165,15 @@ find_program(XAG_LLD ld.lld HINTS ${LLVM_TOOLS_BINARY_DIR}
 find_program(XAG_CROSS_CLANG clang HINTS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH)
 if(XAG_QEMU_PPC64 AND XAG_LLD AND XAG_CROSS_CLANG AND
    LLVM_TARGETS_TO_BUILD MATCHES "PowerPC")
+  add_executable(power_decimal_compare tests/power/compare.cpp)
+  target_link_libraries(power_decimal_compare PRIVATE xagrt)
+  target_compile_options(power_decimal_compare PRIVATE -Wall -Wextra)
+
   add_test(NAME power_decimal_unit
            COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/power/run.sh)
   set_tests_properties(power_decimal_unit PROPERTIES
-    ENVIRONMENT "CLANG=${XAG_CROSS_CLANG};LLD=${XAG_LLD};QEMU=${XAG_QEMU_PPC64};PATH=${LLVM_TOOLS_BINARY_DIR}:$ENV{PATH}"
-    TIMEOUT 120)
+    ENVIRONMENT "CLANG=${XAG_CROSS_CLANG};LLD=${XAG_LLD};QEMU=${XAG_QEMU_PPC64};PATH=${LLVM_TOOLS_BINARY_DIR}:$ENV{PATH};COMPARE=$<TARGET_FILE:power_decimal_compare>"
+    TIMEOUT 180)
 else()
   message(STATUS "no qemu-system-ppc64, ld.lld or PowerPC target, "
                  "so the decimal unit is not asked")

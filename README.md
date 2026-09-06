@@ -77,12 +77,17 @@ near the language. Four hundred thousand cases agree exactly, apart from raising
 to a power, which the specification itself allows to be out by one in the last
 place.
 
-`tests/power/` asks a real decimal unit the same kind of question, on a machine
-that has one. No machine here does, so it cross-compiles a program with no
-operating system under it, hands it to QEMU where a kernel would go, and reads
-the answers back over the console — no disk image, no distribution, nothing
-downloaded. It runs when `qemu-system-ppc64` and `ld.lld` are present and stays
-out of the way otherwise.
+`tests/power/` asks a real decimal unit the same questions. No machine here has
+one, so it cross-compiles a program with no operating system under it, hands it
+to QEMU where a kernel would go, and reads the answers back over the console —
+no disk image, no distribution, nothing downloaded. Twenty thousand sums,
+differences, products and quotients agree exactly, cohorts included.
+
+Neither side has to know the other's encoding: a case crosses as a coefficient
+and a power of ten, which is what a decimal *is*. Ours is BID, with the
+coefficient an ordinary binary integer; IBM's unit is DPD, with it packed three
+digits to ten bits. It runs when `qemu-system-ppc64` and `ld.lld` are present
+and stays out of the way otherwise.
 
 ## The oracle
 

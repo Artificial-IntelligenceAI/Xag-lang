@@ -76,6 +76,42 @@ static i64 wholeOf(double decimal) {
   __builtin_memcpy(&value, &out, 8);
   return value;
 }
+// A decimal64 built from a whole-number coefficient and a power of ten, and
+// taken apart again the same way. `dcffix` puts an integer into the unit,
+// `diex` writes the exponent it stands at, and `dxex` reads that back — so a
+// value can cross between here and a program that holds it some other way
+// without either of them having to know the other's encoding.
+#define BIAS64 398
+
+static double atPower(i64 coefficient, int power) {
+  double value = decimalOf(coefficient);
+  i64 biased = power + BIAS64;
+  double held;
+  __asm__("" : "+r"(biased));
+  __builtin_memcpy(&held, &biased, 8);
+  double out;
+  __asm__("diex %0, %1, %2" : "=d"(out) : "d"(held), "d"(value));
+  return out;
+}
+
+static i64 coefficientOf(double value) {
+  i64 zero = BIAS64;
+  double held;
+  __asm__("" : "+r"(zero));
+  __builtin_memcpy(&held, &zero, 8);
+  double flat;
+  __asm__("diex %0, %1, %2" : "=d"(flat) : "d"(held), "d"(value));
+  return wholeOf(flat);
+}
+
+static i64 powerOf(double value) {
+  double out;
+  __asm__("dxex %0, %1" : "=d"(out) : "d"(value));
+  i64 biased;
+  __builtin_memcpy(&biased, &out, 8);
+  return biased - BIAS64;
+}
+
 static double add(double a, double b) {
   double o; __asm__("dadd %0, %1, %2" : "=d"(o) : "d"(a), "d"(b)); return o;
 }
@@ -133,5 +169,59 @@ void run(void) {
 
   say4(wrong ? P4('S', 'O', 'M', 'E') : P4('a', 'l', 'l', ' '), 4);
   say4(wrong ? P4(' ', 'B', 'A', 'D') : P4('g', 'o', 'o', 'd'), 4);
+  nl();
+
+  // Now the part nothing here can check: every case is written out as a
+  // coefficient and a power of ten, which is what a decimal is whatever
+  // encoding holds it, and something on the other side compares the unit's
+  // answer against the one worked out in software.
+  say4(P4('c', 'a', 's', 'e'), 4);
+  say4(P4('s', ' ', ' ', ' '), 2);
+  nl();
+
+  u64 state = 0x2545F4914F6CDD1DUL;
+  for (int i = 0; i < 20000; ++i) {
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    const u64 draw = state;
+
+    // Coefficients up to sixteen digits, which is what a decimal64 holds, and
+    // powers close enough together that both sides have something to say.
+    i64 leftCoefficient = (i64)(draw % 10000000000000000UL);
+    i64 rightCoefficient = (i64)((draw >> 17) % 10000000000000000UL);
+    int leftPower = (int)((draw >> 40) % 41) - 20;
+    int rightPower = (int)((draw >> 47) % 41) - 20;
+    if (draw & 1)
+      leftCoefficient = -leftCoefficient;
+    if (draw & 2)
+      rightCoefficient = -rightCoefficient;
+
+    const double a = atPower(leftCoefficient, leftPower);
+    const double b = atPower(rightCoefficient, rightPower);
+    double r;
+    const int which = i & 3;
+    if (which == 0)
+      r = add(a, b);
+    else if (which == 1)
+      r = sub(a, b);
+    else if (which == 2)
+      r = mul(a, b);
+    else
+      r = divide(a, b);
+
+    sayNumber(leftCoefficient);   say4(P4('e', 0, 0, 0), 1);
+    sayNumber(leftPower);         say4(P4(' ', 0, 0, 0), 1);
+    say4(which == 0 ? P4('+', 0, 0, 0)
+         : which == 1 ? P4('-', 0, 0, 0)
+         : which == 2 ? P4('x', 0, 0, 0) : P4('/', 0, 0, 0), 1);
+    say4(P4(' ', 0, 0, 0), 1);
+    sayNumber(rightCoefficient);  say4(P4('e', 0, 0, 0), 1);
+    sayNumber(rightPower);        say4(P4(' ', '=', ' ', 0), 3);
+    sayNumber(coefficientOf(r));  say4(P4('e', 0, 0, 0), 1);
+    sayNumber(powerOf(r));
+    nl();
+  }
+  say4(P4('e', 'n', 'd', 0), 3);
   nl();
 }

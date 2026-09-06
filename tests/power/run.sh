@@ -34,13 +34,33 @@ if llvm-objdump -d "$out/decimal_unit.elf" | grep -q '(2)$'; then
   exit 1
 fi
 
-said=$("$qemu" -M pseries -cpu POWER9 -m 1G -nographic -nodefaults \
-       -serial mon:stdio -kernel "$out/decimal_unit.elf" 2>/dev/null &
-       pid=$!; sleep 12; kill -9 $pid 2>/dev/null; wait $pid 2>/dev/null) || true
+# Wait for the guest to say it is done rather than for a fixed count of
+# seconds: it prints a character per hypercall, so how long it takes depends on
+# how much it has to say.
+log="$out/said.txt"
+: > "$log"
+"$qemu" -M pseries -cpu POWER9 -m 1G -nographic -nodefaults \
+        -serial mon:stdio -kernel "$out/decimal_unit.elf" > "$log" 2>/dev/null &
+pid=$!
+waited=0
+while [ $waited -lt 600 ]; do
+  if grep -q '^end' "$log" 2>/dev/null; then break; fi
+  if ! kill -0 $pid 2>/dev/null; then break; fi
+  sleep 1
+  waited=$((waited + 1))
+done
+kill -9 $pid 2>/dev/null || true
+wait $pid 2>/dev/null || true
+said=$(cat "$log")
 
-echo "$said" | sed -n '/dfp here/,$p'
-if echo "$said" | grep -q "all good"; then
-  exit 0
+echo "$said" | sed -n '/dfp here/,/^all good/p'
+if ! echo "$said" | grep -q "all good"; then
+  echo "the decimal unit did not agree about its own arithmetic" >&2
+  exit 1
 fi
-echo "the decimal unit did not agree" >&2
-exit 1
+
+# The second half needs something that can run our decimal, which the guest
+# cannot: it has no operating system and nothing linked into it.
+if [ -n "$COMPARE" ]; then
+  echo "$said" | sed -n '/^cases/,$p' | tail -n +2 | tr -d '\r' | "$COMPARE"
+fi
