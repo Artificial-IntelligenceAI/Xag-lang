@@ -4,6 +4,31 @@
 # program *answers*, and every value of it is a separate language that all three
 # engines must agree under. The other changes what gets *delivered*, and costs
 # nothing to test.
+#
+# ---- how a default is chosen ----
+#
+# Tankun's rule:
+#
+#     Most safety, with no runtime performance cost.
+#
+# Claude's reading of the same rule, which is what settles the awkward ones:
+#
+#     No default may make code pay for a guarantee it did not ask for.
+#
+# The two agree everywhere except on what counts as a cost. `overflow = "stop"`
+# taxes every `+` in the program, including the ones that could never overflow,
+# so it is not the default; the safety is bought at build time instead, where it
+# is free. `characters = "clusters"` costs more than `letters`, but only when
+# `count` is asked — and a reader who asked how many characters there are was
+# asking about clusters. A cost paid by the operation that wanted it is not a
+# tax on everything else.
+#
+# Where no value is free, the rule still says take the safest: `out-of-range`
+# costs a compare under `stops` and a modulo under `wraps`, so `stops` wins on
+# safety with nothing given up.
+#
+# The rule exists because defaults drift one reasonable-looking commit at a
+# time, and each step is easy to argue for on its own.
 
 [defaults]
 # Changes what a program answers. `truncated` rounds toward zero and the
