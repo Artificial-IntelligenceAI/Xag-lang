@@ -216,6 +216,13 @@ private:
     for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
       add(op, i128, {i128, i128, i32, i32});
     add("xag_many_place", i64, {i64, i64, i32});
+    add("xag_set_arguments", voidTy, {i32, ptr});
+    add("xag_read_line", i32, {ptr});
+    add("xag_arguments", voidTy, {ptr});
+    add("xag_int_reads", i32, {i32, i32, ptr, i64, ptr});
+    add("xag_deci_reads", i32, {i32, ptr, i64, ptr});
+    add("xag_bin_reads", i32, {ptr, i64, i32, ptr});
+    add("xag_bin128_reads", i32, {ptr, i64, ptr});
     add("xag_many_out_of_range", voidTy, {i64, i64});
     add("xag_many_new", voidTy, {ptr, i64, i64});
     add("xag_many_drop", voidTy, {ptr});
@@ -825,6 +832,78 @@ private:
       return nullptr;
     }
 
+    if (value.callee == "read.stdin") {
+      // The line comes back through a pointer and the answer says whether there
+      // was one, which is exactly the two fields the type has.
+      auto *shell = typeFor(nameOf(value.type));
+      auto *line = builder_.CreateAlloca(str_, nullptr, "line");
+      builder_.CreateStore(llvm::Constant::getNullValue(str_), line);
+      auto *got = builder_.CreateCall(runtime_["xag_read_line"], {line});
+      auto *there = builder_.CreateICmpNE(got, builder_.getInt32(0));
+      auto *held = builder_.CreateInsertValue(llvm::UndefValue::get(shell), there, 0);
+      return builder_.CreateInsertValue(held, builder_.CreateLoad(str_, line), 1);
+    }
+
+    if (value.callee == "arguments") {
+      auto *out = builder_.CreateAlloca(many_, nullptr, "given");
+      builder_.CreateCall(runtime_["xag_arguments"], {out});
+      return builder_.CreateLoad(many_, out);
+    }
+
+    if (value.callee == "number") {
+      const std::string spelled = nameOf(value.type);
+      const std::string wanted = within(spelled);
+      const Type named = typeNamed(wanted);
+      auto *shell = typeFor(spelled);
+      auto *text = value.operands.empty() ? nullptr : textPointer(value.operands[0]);
+      if (!text)
+        return llvm::Constant::getNullValue(shell);
+
+      // The bytes and how many, which is what every reader in the runtime asks
+      // for; where the number goes differs by family and nothing else does.
+      auto *bytes = builder_.CreateLoad(builder_.getPtrTy(), text);
+      auto *length = builder_.CreateLoad(
+          builder_.getInt64Ty(), builder_.CreateStructGEP(str_, text, 1));
+      auto *room = builder_.CreateAlloca(typeFor(wanted), nullptr, "read");
+      builder_.CreateStore(llvm::Constant::getNullValue(typeFor(wanted)), room);
+
+      llvm::Value *got = nullptr;
+      const auto width = builder_.getInt32(static_cast<int>(widthOf(named)));
+      if (isWhole(named)) {
+        auto *wide = builder_.CreateAlloca(builder_.getInt128Ty(), nullptr, "whole");
+        got = builder_.CreateCall(
+            runtime_["xag_int_reads"],
+            {width, builder_.getInt32(isSigned(named) ? 1 : 0), bytes, length, wide});
+        builder_.CreateStore(
+            builder_.CreateTrunc(builder_.CreateLoad(builder_.getInt128Ty(), wide),
+                                 typeFor(wanted)),
+            room);
+      } else if (isDecimal(named)) {
+        auto *wide = builder_.CreateAlloca(builder_.getInt128Ty(), nullptr, "deci");
+        got = builder_.CreateCall(runtime_["xag_deci_reads"],
+                                  {width, bytes, length, wide});
+        builder_.CreateStore(
+            builder_.CreateTrunc(builder_.CreateLoad(builder_.getInt128Ty(), wide),
+                                 typeFor(wanted)),
+            room);
+      } else if (named == Type::Bin128) {
+        got = builder_.CreateCall(runtime_["xag_bin128_reads"], {bytes, length, room});
+      } else {
+        auto *wide = builder_.CreateAlloca(builder_.getDoubleTy(), nullptr, "bin");
+        got = builder_.CreateCall(runtime_["xag_bin_reads"],
+                                  {bytes, length, width, wide});
+        builder_.CreateStore(
+            builder_.CreateFPCast(builder_.CreateLoad(builder_.getDoubleTy(), wide),
+                                  typeFor(wanted)),
+            room);
+      }
+
+      auto *there = builder_.CreateICmpNE(got, builder_.getInt32(0));
+      auto *held = builder_.CreateInsertValue(llvm::UndefValue::get(shell), there, 0);
+      return builder_.CreateInsertValue(held,
+                                        builder_.CreateLoad(typeFor(wanted), room), 1);
+    }
+
     if (value.callee == "count") {
       if (!value.operands.empty() && holdsMany(operandType(value.operands[0]))) {
         auto *whole = builder_.CreateLoad(many_, manyPointer(value.operands[0]));
@@ -873,10 +952,19 @@ private:
   }
 
   void emitMain() {
-    auto *type = llvm::FunctionType::get(builder_.getInt32Ty(), {}, false);
+    // `main` takes what it was given so the program can ask for it. The name it
+    // was run under is skipped: it is not something anybody passed.
+    auto *type = llvm::FunctionType::get(
+        builder_.getInt32Ty(), {builder_.getInt32Ty(), builder_.getPtrTy()}, false);
     auto *main = llvm::Function::Create(type, llvm::Function::ExternalLinkage, "main",
                                         module_);
     builder_.SetInsertPoint(llvm::BasicBlock::Create(context_, "entry", main));
+    auto *count = main->getArg(0);
+    auto *values = main->getArg(1);
+    auto *without = builder_.CreateSub(count, builder_.getInt32(1));
+    auto *past = builder_.CreateGEP(builder_.getPtrTy(), values, builder_.getInt64(1));
+    builder_.CreateCall(runtime_["xag_set_arguments"], {without, past});
+
     auto found = functions_.find("START");
     if (found != functions_.end())
       builder_.CreateCall(found->second, {});

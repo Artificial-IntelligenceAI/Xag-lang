@@ -184,6 +184,29 @@ int32_t xag_deci_compare(uint32_t width, XagDeci a, XagDeci b);
 int32_t xag_deci_reads(uint32_t width, const char *text, uint64_t length, XagDeci *out);
 void xag_print_deci(uint32_t width, XagDeci value);
 
+// ---- what comes in
+//
+// A line, without whatever ended it, and whether there was one at all. At the
+// end of the input there is no line rather than an empty one: an empty line is
+// something a program may legitimately read, and the two must not be the same.
+int32_t xag_read_line(XagStr *out);
+
+// Where reading comes from, as a `FILE *`. The mirror of `xag_set_output`, and
+// there for the same reason: a test has to be able to say what a program reads.
+void xag_set_input(void *file);
+void *xag_input_file(void);
+
+// What the program was given. `xagc` passes on whatever followed `--`; a
+// compiled program passes on its own. The name it was run under is not one of
+// them — it is not something anybody passed.
+void xag_set_arguments(int32_t count, char **values);
+void xag_arguments(XagMany *out); // a `many` of `XagStr`, the caller's to end
+
+// A whole number read out of text, which is where text stops being text. Answers
+// whether the whole of it was a number the width can hold.
+int32_t xag_int_reads(uint32_t width, int32_t is_signed, const char *text,
+                      uint64_t length, XagInt *out);
+
 // What is still held. A program that ends with anything outstanding has a drop
 // that did not happen, and one that goes negative has a drop that happened
 // twice — neither of which three engines agreeing would ever notice.

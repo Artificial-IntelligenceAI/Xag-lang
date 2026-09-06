@@ -38,6 +38,8 @@ void usage() {
                "    xagc build <file>   check it and write a program beside it\n"
                "    xagc llvm-smoke     prove the LLVM backend is reachable\n"
                "    xagc --help         this\n\n"
+               "    <file> -- a b c              what follows `--` is the\n"
+               "                                 program's, not xagc's\n\n"
                "    --out-of-range=stops|wraps   for this run only, over what\n"
                "    --decimal=software|hardware  Xag-Config.toml decided\n\n"
                "Nothing else is built yet.\n";
@@ -407,6 +409,17 @@ int main(int argc, char **argv) {
       continue;
     }
     ++i;
+  }
+  argv = args.data();
+  argc = static_cast<int>(args.size());
+
+  // Everything after `--` belongs to the program being run, not to `xagc`.
+  for (unsigned i = 1; i < args.size(); ++i) {
+    if (std::string(args[i]) != "--")
+      continue;
+    xag_set_arguments(static_cast<int32_t>(args.size() - i - 1), args.data() + i + 1);
+    args.resize(i);
+    break;
   }
   argv = args.data();
   argc = static_cast<int>(args.size());

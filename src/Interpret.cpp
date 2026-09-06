@@ -246,6 +246,11 @@ private:
     return written;
   }
 
+  // What is left of a spelled type once the `or-nothing` is off it.
+  static std::string withoutNothing(const std::string &spelled) {
+    return spelled.rfind("or-nothing ", 0) == 0 ? spelled.substr(11) : spelled;
+  }
+
   const std::string &typeOf(TypeRef type) const {
     static const std::string unknown = "?";
     const Body &body = *frames_.back().body;
@@ -550,6 +555,74 @@ private:
         endValue(piece);
       }
       return Value{};
+    }
+
+    if (value.callee == "read.stdin") {
+      Value answer;
+      XagStr line{nullptr, 0, 0};
+      if (!xag_read_line(&line))
+        return answer; // nothing left, which is not an empty line
+      answer.kind = Value::Kind::Text;
+      answer.text = line;
+      answer.owns = true;
+      return answer;
+    }
+
+    if (value.callee == "arguments") {
+      XagMany given{nullptr, 0};
+      xag_arguments(&given);
+      std::vector<Value> held;
+      const XagStr *from = static_cast<const XagStr *>(given.places);
+      for (uint64_t i = 0; i < given.length; ++i) {
+        Value one;
+        one.kind = Value::Kind::Text;
+        one.text = from[i];
+        one.owns = true; // taken from the runtime's array, which is let go below
+        held.push_back(one);
+      }
+      xag_many_drop(&given); // the places, not what was in them
+      return collected(std::move(held));
+    }
+
+    if (value.callee == "number") {
+      Value text = value.operands.empty() ? Value{} : read(value.operands[0]);
+      Value *at = behind(text);
+      const std::string had =
+          at && at->kind == Value::Kind::Text
+              ? std::string(at->text.bytes ? at->text.bytes : "", at->text.length)
+              : std::string();
+      const Type wanted = typeNamed(withoutNothing(typeOf(value.type)));
+      Value answer; // nothing, unless the whole of it reads as a number
+      if (at && at->kind == Value::Kind::Text) {
+        if (isWhole(wanted)) {
+          XagInt got = 0;
+          if (xag_int_reads(widthOf(wanted), isSigned(wanted) ? 1 : 0, had.data(),
+                            had.size(), &got)) {
+            answer.kind = Value::Kind::Number;
+            answer.number = got;
+          }
+        } else if (isDecimal(wanted)) {
+          XagDeci got = 0;
+          if (xag_deci_reads(widthOf(wanted), had.data(), had.size(), &got)) {
+            answer.kind = Value::Kind::Deci;
+            answer.wide = got;
+          }
+        } else if (wanted == Type::Bin128) {
+          XagBin128 got = 0;
+          if (xag_bin128_reads(had.data(), had.size(), &got)) {
+            answer.kind = Value::Kind::Wide;
+            answer.wide = got;
+          }
+        } else if (isBinary(wanted)) {
+          double got = 0;
+          if (xag_bin_reads(had.data(), had.size(), widthOf(wanted), &got)) {
+            answer.kind = Value::Kind::Real;
+            answer.real = got;
+          }
+        }
+      }
+      endValue(text);
+      return answer;
     }
 
     if (value.callee == "count") {

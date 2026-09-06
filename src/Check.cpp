@@ -275,6 +275,11 @@ private:
 
   void collect() {
     functions_["print.stdout"] = Signature{{}, Type::Nothing, true, Span{}};
+    // A line, or nothing left to read. The end of the input is not an empty
+    // line: an empty line is something a program may legitimately read, and
+    // telling the two apart is what the type is for.
+    functions_["read.stdin"] = Signature{{}, orNothingOf(Ty{Type::Str}), false, Span{}};
+    functions_["arguments"] = Signature{{}, many(Type::Str), false, Span{}};
     functions_["count"] = Signature{{Type::Str}, Type::Int64, false, Span{}};
 
     for (const Item &item : program_.items) {
@@ -548,6 +553,40 @@ private:
                  "`count` counts a `str` or a `many`, and this is a `" + name(got) + "`.",
                  {"nothing converts on its own"});
       return Type::Int64;
+    }
+
+    // A number out of text, which is where text stops being text. Which number
+    // is the question the chain beside it has already answered, the same way
+    // `fill` knows what it is filling.
+    if (path == "number") {
+      const Ty wanted = expected.mayBeNothing() ? expected.within() : expected;
+      if (!isNumber(wanted)) {
+        complain(e.span, "E0523",
+                 expected.kind == Type::Unknown
+                     ? "nothing here says what number this would be."
+                     : "`number` answers a number, and a `" + name(expected) +
+                           "` is not one.",
+                 {"a size is always written, and only sizes the standard defines"},
+                 {"text that is not a number has no number in it, so this answers "
+                  "`or-nothing` of whichever number was asked for — and the chain "
+                  "beside it is what asks."});
+        for (const Value &v : e.args.values)
+          (void)value(v, Ty{});
+        return Type::Unknown;
+      }
+      if (e.args.values.size() != 1)
+        complain(e.span, "E0505",
+                 "`number` is given " + std::to_string(e.args.values.size()) +
+                     " and wants 1.",
+                 {"a call gives a function what its parameters ask for"});
+      if (!e.args.values.empty()) {
+        const Ty got = value(e.args.values[0], Ty{Type::Str});
+        if (got != Ty{} && got != Ty{Type::Str})
+          complain(e.args.values[0].span, "E0506",
+                   "`number` reads text, and this is a `" + name(got) + "`.",
+                   {"nothing converts on its own"});
+      }
+      return orNothingOf(wanted);
     }
 
     // `fill` writes one value into every place, so it needs a value that can be

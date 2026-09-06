@@ -45,6 +45,9 @@ nothing with the test interpreter but the runtime, on purpose: two engines that
 borrow from each other agree about what they borrowed, and a vote between them
 proves nothing.
 
+A program reads with `read.stdin`, which answers a line or nothing, and is given
+its arguments by whatever follows `--`: `xagc run adder.xag -- 3 4`.
+
 `xagc build <file>` compiles a program ahead of time through LLVM at `-O3` and
 writes an executable beside it. `xagc ir <file>` prints the LLVM IR, and
 `xagc ir <file> --raw` prints it before the optimiser sees it.

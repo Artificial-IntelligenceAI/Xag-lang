@@ -31,6 +31,10 @@ struct Ran {
   int64_t leaked = 0;
 };
 
+// What a program reads, when a test says so. Empty means it reads nothing,
+// which is not the same as reading an empty line.
+std::string given;
+
 Ran run(const std::string &text) {
   Ran out;
   const xag::Source source("test.xag", text);
@@ -53,9 +57,18 @@ Ran run(const std::string &text) {
 
   const int64_t before = xag_live_allocations();
   std::FILE *sink = std::tmpfile();
+  std::FILE *reading = std::tmpfile();
+  if (!given.empty()) {
+    std::fwrite(given.data(), 1, given.size(), reading);
+    std::fflush(reading);
+    std::rewind(reading);
+  }
   xag_set_output(sink);
+  xag_set_input(reading);
   const xag::InterpretResult result = xag::interpret(built.mir);
   xag_set_output(nullptr);
+  xag_set_input(nullptr);
+  std::fclose(reading);
   out.leaked = xag_live_allocations() - before;
 
   std::fflush(sink);
@@ -348,6 +361,48 @@ void itHoldsSomethingOrNothing() {
        "  print.stdout[str:*fine* \\n]; }\n", "fine\n");
 }
 
+void itReadsWhatItIsGiven() {
+  given = "12\nhello\n-5\n";
+  SAYS("START {\n"
+       "  loop.while read.stdin[] holds 'line' {\n"
+       "    var.or-nothing.int64 'n' = [number['line']];\n"
+       "    when 'n' {\n"
+       "      is 'v'     { print.stdout[str:*read * 'v' \\n]; }\n"
+       "      is nothing { print.stdout[str:*not a number: * 'line' \\n]; } } } }\n",
+       "read 12\nnot a number: hello\nread -5\n");
+
+  // An empty line is a line. The end of the input is not one.
+  given = "\n\n";
+  SAYS("START { var.mut.int64 'lines' = [*0*];\n"
+       "  loop.while read.stdin[] holds 'line' { set 'lines' = ['lines' + *1*]; }\n"
+       "  print.stdout['lines' \\n]; }\n", "2\n");
+
+  given = "";
+  SAYS("START { when read.stdin[] {\n"
+       "    is 'l'     { print.stdout[str:*something* \\n]; }\n"
+       "    is nothing { print.stdout[str:*nothing left* \\n]; } } }\n",
+       "nothing left\n");
+
+  // A decimal read out of text keeps the places it was written with.
+  given = "1.10\n";
+  SAYS("START { loop.while read.stdin[] holds 'l' {\n"
+       "    var.or-nothing.deci64 'd' = [number['l']];\n"
+       "    when 'd' { is 'v' { print.stdout['v' \\n]; } is nothing { } } } }\n",
+       "1.10\n");
+  given = "";
+}
+
+void itKnowsWhatItWasGiven() {
+  char first[] = "alpha";
+  char second[] = "beta";
+  char *passed[] = {first, second};
+  xag_set_arguments(2, passed);
+  SAYS("START { var.many.str 'a' = [arguments[]];\n"
+       "  print.stdout[(count[ref 'a']) str:* * 'a'[*0*] str:* * 'a'[*1*] \\n]; }\n",
+       "2 alpha beta\n");
+  xag_set_arguments(0, nullptr);
+}
+
 } // namespace
 
 int main() {
@@ -371,6 +426,8 @@ int main() {
   itEndsEveryPlaceItHeld();
   itCountsWhatEachPlaceHolds();
   itHoldsSomethingOrNothing();
+  itReadsWhatItIsGiven();
+  itKnowsWhatItWasGiven();
 
   if (failures == 0)
     std::cout << "all interpreter tests passed\n";

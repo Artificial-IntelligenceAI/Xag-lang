@@ -169,6 +169,10 @@ private:
   void collect() {
     functions_["print.stdout"] = FnInfo{{}, Mode::Owned, true};
     functions_["count"] = FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false};
+    functions_["read.stdin"] = FnInfo{{}, Mode::Owned, false};
+    functions_["arguments"] = FnInfo{{}, Mode::Owned, false};
+    // Read where it stands, and the text goes on belonging to whoever had it.
+    functions_["number"] = FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false};
 
     for (const Item &item : program_.items) {
       if (item.kind != ItemKind::Function)

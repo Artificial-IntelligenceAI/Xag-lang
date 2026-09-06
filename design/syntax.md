@@ -660,6 +660,54 @@ There is no way to reach what is inside without asking first. Asking a `bool` is
 `E0519`, because a `bool` is never absent; using something that may be missing
 where a `bool` was wanted is `E0506`.
 
+## What comes in
+
+```
+loop.while read.stdin[] holds 'line' {
+    var.or-nothing.deci64 'read' = [number['line']];
+    when 'read' {
+        is 'value' { ... }
+        is nothing { print.stdout[str:*not a number: * 'line' \n]; }
+    }
+}
+```
+
+`read.stdin` answers a `str` **or nothing**. The end of the input is not an
+empty line — an empty line is something a program may legitimately read, and
+telling the two apart is what the type is for. Whatever ended the line is not
+part of it.
+
+`number` reads a number out of text, which is where text stops being text. It
+answers `or-nothing` of whichever number was asked for, because text that is not
+a number has no number in it. Which number is a question something else has to
+have answered, the same way `fill` knows what it is filling — so `number` on its
+own, with nothing beside it to say, is `E0523`:
+
+```text
+nothing here says what number this would be.
+
+  19 |         when number['line'] {
+     |              ^^^^^^^^^^^^^^ here
+
+Error code: E0523
+Rule(s) broken: a size is always written, and only sizes the standard defines
+```
+
+That is the size rule reaching input: a `when` asks for no particular number, so
+the answer is named before it is chosen between.
+
+`arguments` answers a `many.str` — what the program was given, without the name
+it was run under, which is not something anybody passed. `xagc` hands on
+whatever followed `--`:
+
+```
+xagc run adder.xag -- 3 4
+```
+
+Neither of these needed a rule of its own. Reading has no answer at the end and
+a parse has no answer when the text is not a number, and both of those are the
+same thing the type already says.
+
 ## Ownership
 
 A name owns its value until the value is moved, and then it holds nothing.

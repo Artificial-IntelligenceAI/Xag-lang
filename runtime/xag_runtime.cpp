@@ -11,8 +11,10 @@ namespace {
 
 int64_t live = 0;
 std::FILE *out = nullptr;
+std::FILE *in = nullptr;
 
 std::FILE *output() { return out ? out : stdout; }
+std::FILE *input() { return in ? in : stdin; }
 
 char *take(uint64_t bytes) {
   if (bytes == 0)
@@ -458,6 +460,82 @@ void xag_many_fill(XagMany *m, uint64_t stride, const void *one) {
   char *at = static_cast<char *>(m->places);
   for (uint64_t i = 0; i < m->length; ++i)
     std::memcpy(at + i * stride, one, stride);
+}
+
+// ---- what comes in
+
+void xag_set_input(void *file) { in = static_cast<std::FILE *>(file); }
+void *xag_input_file(void) { return input(); }
+
+int32_t xag_read_line(XagStr *out) {
+  char *line = nullptr;
+  std::size_t room = 0;
+  const auto got = ::getline(&line, &room, input());
+  if (got < 0) {
+    std::free(line);
+    out->bytes = nullptr;
+    out->length = 0;
+    out->capacity = 0;
+    return 0;
+  }
+  // Whatever ended the line is not part of it, and a line ended by the file
+  // running out was not ended by anything.
+  std::size_t length = static_cast<std::size_t>(got);
+  while (length && (line[length - 1] == '\n' || line[length - 1] == '\r'))
+    --length;
+  xag_str_from(out, line, length);
+  std::free(line);
+  return 1;
+}
+
+namespace {
+int32_t argumentCount = 0;
+char **argumentValues = nullptr;
+} // namespace
+
+void xag_set_arguments(int32_t count, char **values) {
+  argumentCount = count;
+  argumentValues = values;
+}
+
+void xag_arguments(XagMany *out) {
+  xag_many_new(out, static_cast<uint64_t>(argumentCount < 0 ? 0 : argumentCount),
+               sizeof(XagStr));
+  XagStr *held = static_cast<XagStr *>(out->places);
+  for (int32_t i = 0; i < argumentCount; ++i)
+    xag_str_from(&held[i], argumentValues[i], std::strlen(argumentValues[i]));
+}
+
+int32_t xag_int_reads(uint32_t width, int32_t is_signed, const char *text,
+                      uint64_t length, XagInt *out) {
+  if (length == 0)
+    return 0;
+  uint64_t at = 0;
+  const bool negative = text[0] == '-';
+  if (negative || text[0] == '+')
+    at = 1;
+  if (at == length || (negative && !is_signed))
+    return 0;
+
+  __uint128_t magnitude = 0;
+  const __uint128_t ceiling =
+      is_signed ? (static_cast<__uint128_t>(1) << (width - 1))
+                : (width == 128 ? ~static_cast<__uint128_t>(0)
+                                : (static_cast<__uint128_t>(1) << width) - 1);
+  for (; at < length; ++at) {
+    if (text[at] < '0' || text[at] > '9')
+      return 0;
+    const __uint128_t before = magnitude;
+    magnitude = magnitude * 10 + static_cast<unsigned>(text[at] - '0');
+    if (magnitude / 10 != before) // it went past what 128 bits hold
+      return 0;
+    if (is_signed ? magnitude > ceiling : magnitude > ceiling)
+      return 0;
+  }
+  if (is_signed && !negative && magnitude >= ceiling)
+    return 0;
+  *out = negative ? -static_cast<XagInt>(magnitude) : static_cast<XagInt>(magnitude);
+  return 1;
 }
 
 void xag_note_taken(void) { ++live; }

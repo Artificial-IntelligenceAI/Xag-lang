@@ -1,0 +1,36 @@
+# Adding up whatever is given, and saying so when something is not a number.
+#
+# `read.stdin` answers a `str` or nothing: the end of the input is not an empty
+# line, because an empty line is something a program may legitimately read.
+# `number` answers whichever number the chain beside it asked for, or nothing,
+# because text that is not a number has no number in it.
+
+START {
+    var.many.str 'given' = [arguments[]];
+    if (count[ref 'given']) > *0* {
+        print.stdout[str:*ignoring * (count[ref 'given']) str:* argument(s)* \n];
+    }
+
+    var.mut.deci64 'total' = [*0.00*];
+    var.mut.int64 'counted' = [*0*];
+    var.mut.int64 'refused' = [*0*];
+
+    loop.while read.stdin[] holds 'line' {
+        # `number` answers whichever number was asked for, so something has to
+        # ask. A `when` does not, which is why the answer is named first.
+        var.or-nothing.deci64 'read' = [number['line']];
+        when 'read' {
+            is 'value' {
+                set 'total' = ['total' + 'value'];
+                set 'counted' = ['counted' + *1*];
+            }
+            is nothing {
+                set 'refused' = ['refused' + *1*];
+                print.stdout[str:*not a number: * 'line' \n];
+            }
+        }
+    }
+
+    print.stdout[str:*added * 'counted' str:*, refused * 'refused' \n];
+    print.stdout[str:*total * 'total' \n];
+}
