@@ -153,6 +153,28 @@ else()
   message(STATUS "no python3 found, so decimal is not checked against libmpdec")
 endif()
 
+# The decimal unit itself, on a machine that has one. Nothing here has: this
+# cross-compiles a program with no operating system under it and hands it to
+# QEMU, which emulates POWER's decimal instructions. Only registered when the
+# three things it needs are present, because most machines have none of them.
+# Apple's clang has no PowerPC target; the LLVM this compiler is built against
+# does, and it is already found above.
+find_program(XAG_QEMU_PPC64 qemu-system-ppc64)
+find_program(XAG_LLD ld.lld HINTS ${LLVM_TOOLS_BINARY_DIR}
+             /opt/homebrew/opt/lld/bin /usr/local/opt/lld/bin)
+find_program(XAG_CROSS_CLANG clang HINTS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH)
+if(XAG_QEMU_PPC64 AND XAG_LLD AND XAG_CROSS_CLANG AND
+   LLVM_TARGETS_TO_BUILD MATCHES "PowerPC")
+  add_test(NAME power_decimal_unit
+           COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/power/run.sh)
+  set_tests_properties(power_decimal_unit PROPERTIES
+    ENVIRONMENT "CLANG=${XAG_CROSS_CLANG};LLD=${XAG_LLD};QEMU=${XAG_QEMU_PPC64};PATH=${LLVM_TOOLS_BINARY_DIR}:$ENV{PATH}"
+    TIMEOUT 120)
+else()
+  message(STATUS "no qemu-system-ppc64, ld.lld or PowerPC target, "
+                 "so the decimal unit is not asked")
+endif()
+
 # The decimal knob, asked of the compiler itself rather than of a library: what
 # a build has is a fact about the build, and the only way to ask it is to run it.
 add_test(NAME decimal_software
