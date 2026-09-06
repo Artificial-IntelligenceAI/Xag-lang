@@ -89,6 +89,10 @@ optimise = "speed"
 # back whichever is chosen, and a remainder or a power is built out of those
 # five either way — there is no instruction for either on any machine.
 #
+# Both answer every one of thirty thousand sums, differences, products and
+# quotients identically, at all three widths, cohorts included — which is
+# checked on every build that can reach a decimal unit. See `tests/power/`.
+#
 # Asking for `hardware` from a build that has none is refused rather than
 # quietly answered by the other one. Which a build has is decided when the
 # runtime is compiled: `cmake -DXAG_DECIMAL=hardware`, on a machine that has a

@@ -1,0 +1,10 @@
+// Enough of <cstring> for the same reason.
+#pragma once
+extern "C" {
+void *memcpy(void *to, const void *from, unsigned long count);
+int strcmp(const char *a, const char *b);
+}
+namespace std {
+using ::memcpy;
+using ::strcmp;
+} // namespace std

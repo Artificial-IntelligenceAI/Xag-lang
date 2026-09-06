@@ -1,40 +1,25 @@
-// The decimal unit's answers against ours, on the same questions.
+// The same runtime, built two ways, asked the same questions.
 //
-// The guest writes each case as a coefficient and a power of ten, which is what
-// a decimal *is* whatever encoding holds it — so neither side has to know the
-// other's. Ours is BID, with the coefficient as an ordinary binary integer; the
-// unit's is DPD, with it packed three digits to ten bits. Written this way the
-// two never have to meet.
-//
-// A cohort is compared, not just a value: `1.10` and `1.1` are equal and are
-// not the same, and an answer that lost its places would be a wrong answer.
+// The guest runs it with `XAG_DECIMAL_HARDWARE`: its arithmetic is the decimal
+// unit's instructions and its numbers are laid out the way the unit lays them
+// out. This runs the software build. Both read the same text and both write
+// their answer, so what is compared is what a program would actually see —
+// cohorts and all, because `1.10` and `1.1` are equal and are not the same.
 
 #include "xag_runtime.h"
 
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <string>
 
 namespace {
 
-int failures = 0;
-int checked = 0;
-
-XagDeci read(const std::string &coefficient, const std::string &power) {
-  const std::string text = coefficient + "e" + power;
-  XagDeci out = 0;
-  if (!xag_deci_reads(64, text.data(), text.size(), &out)) {
-    std::cerr << "could not read " << text << '\n';
-    ++failures;
-  }
-  return out;
-}
-
-std::string spelled(XagDeci value) {
+std::string spelled(uint32_t width, XagDeci value) {
   std::FILE *sink = std::tmpfile();
   xag_set_output(sink);
-  xag_print_deci(64, value);
+  xag_print_deci(width, value);
   xag_set_output(nullptr);
   std::fflush(sink);
   std::rewind(sink);
@@ -44,49 +29,47 @@ std::string spelled(XagDeci value) {
   return std::string(buffer, got);
 }
 
-// `1757771948286951e-17` into its two halves.
-bool split(const std::string &word, std::string &coefficient, std::string &power) {
-  const std::size_t at = word.find('e');
-  if (at == std::string::npos)
-    return false;
-  coefficient = word.substr(0, at);
-  power = word.substr(at + 1);
-  return true;
-}
-
 } // namespace
 
 int main() {
-  std::string left, op, right, equals, answer;
-  while (std::cin >> left) {
-    if (left == "end")
-      break;
-    if (!(std::cin >> op >> right >> equals >> answer))
+  unsigned width = 0;
+  std::string left, op, right, equals, theirs;
+  unsigned checked = 0, failures = 0;
+  std::map<std::string, unsigned> tally;
+
+  while (std::cin >> width) {
+    if (!(std::cin >> left >> op >> right >> equals >> theirs))
       break;
     if (equals != "=")
       continue;
 
-    std::string lc, lp, rc, rp, ac, ap;
-    if (!split(left, lc, lp) || !split(right, rc, rp) || !split(answer, ac, ap))
+    XagDeci a = 0, b = 0;
+    if (!xag_deci_reads(width, left.data(), left.size(), &a) ||
+        !xag_deci_reads(width, right.data(), right.size(), &b))
       continue;
 
-    const XagDeci a = read(lc, lp), b = read(rc, rp);
-    const XagDeci unit = read(ac, ap);
-    const XagDeci ours = op == "+"   ? xag_deci_add(64, a, b)
-                         : op == "-" ? xag_deci_sub(64, a, b)
-                         : op == "x" ? xag_deci_mul(64, a, b)
-                                     : xag_deci_div(64, a, b);
+    const XagDeci ours = op == "+"   ? xag_deci_add(width, a, b)
+                         : op == "-" ? xag_deci_sub(width, a, b)
+                         : op == "x" ? xag_deci_mul(width, a, b)
+                                     : xag_deci_div(width, a, b);
     ++checked;
-    if (ours != unit) {
-      if (failures < 12)
-        std::cout << left << ' ' << op << ' ' << right << '\n'
-                  << "    the unit says " << spelled(unit)
-                  << "    and we say " << spelled(ours) << '\n';
+    const std::string said = spelled(width, ours);
+    if (said != theirs) {
       ++failures;
+      tally["deci" + std::to_string(width) + " " + op] += 1;
+      if (failures <= 10)
+        std::cout << "deci" << width << ": " << left << ' ' << op << ' ' << right
+                  << "\n    the unit says " << theirs << "\n    and we say   " << said
+                  << '\n';
     }
   }
 
-  std::cout << checked << " case(s) against the decimal unit, " << failures
+  if (!tally.empty()) {
+    std::cout << "\nwhere they disagree:\n";
+    for (const auto &[what, count] : tally)
+      std::printf("  %6u  %s\n", count, what.c_str());
+  }
+  std::cout << '\n' << checked << " case(s) through the decimal unit, " << failures
             << " disagreement(s)\n";
   return failures ? 1 : 0;
 }

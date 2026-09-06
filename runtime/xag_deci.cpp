@@ -181,16 +181,13 @@ Running oneOver(const Running &value, unsigned digits) {
   return trimTo(out, digits);
 }
 
+// Declared before they are used, and written below where the layout is decided.
+XagDeci encodeFinite(const Shape &shape, int sign, __uint128_t held128, int32_t biased);
+Taken decodeBits(const Shape &shape, XagDeci bits);
+XagDeci encodeSpecial(const Shape &shape, int sign, bool notANumber);
+
 XagDeci packSpecial(uint32_t width, int sign, bool notANumber) {
-  const Shape shape = shapeOf(width);
-  XagDeci bits = 0;
-  const unsigned top = shape.bits - 1;
-  if (sign)
-    bits |= static_cast<XagDeci>(1) << top;
-  // 11110 says infinity; 11111 says not a number.
-  const XagDeci mark = notANumber ? 0x1F : 0x1E;
-  bits |= mark << (top - 5);
-  return bits;
+  return encodeSpecial(shapeOf(width), sign, notANumber);
 }
 
 // Put a coefficient and an exponent into the format, rounding to the digits it
@@ -247,6 +244,33 @@ XagDeci put(uint32_t width, int sign, U256 coefficient, int32_t exponent) {
   const __uint128_t held128 = xag::narrow(coefficient);
   const int32_t biased = exponent + shape.bias;
 
+  return encodeFinite(shape, sign, held128, biased);
+}
+
+// ---- how a decimal is laid out in bits, which is the one thing an
+// implementation is allowed to disagree about
+//
+// Everything above this line works in signs, coefficients and powers of ten,
+// which is what a decimal *is*. Only these three functions know how those are
+// written down — so a build that has a decimal unit can put them somewhere else
+// and change nothing else. See `xag_deci_power.h`.
+
+#ifndef XAG_DECIMAL_HARDWARE
+
+// BID: the coefficient as an ordinary binary integer, because the wide
+// arithmetic underneath already speaks that language.
+XagDeci encodeSpecial(const Shape &shape, int sign, bool notANumber) {
+  XagDeci bits = 0;
+  const unsigned top = shape.bits - 1;
+  if (sign)
+    bits |= static_cast<XagDeci>(1) << top;
+  // 11110 says infinity; 11111 says not a number.
+  const XagDeci mark = notANumber ? 0x1F : 0x1E;
+  bits |= mark << (top - 5);
+  return bits;
+}
+
+XagDeci encodeFinite(const Shape &shape, int sign, __uint128_t held128, int32_t biased) {
   XagDeci bits = 0;
   const unsigned top = shape.bits - 1;
   if (sign)
@@ -271,8 +295,7 @@ XagDeci put(uint32_t width, int sign, U256 coefficient, int32_t exponent) {
   return bits;
 }
 
-Taken take(uint32_t width, XagDeci bits) {
-  const Shape shape = shapeOf(width);
+Taken decodeBits(const Shape &shape, XagDeci bits) {
   const unsigned top = shape.bits - 1;
   Taken out;
   out.sign = static_cast<int>((bits >> top) & 1);
@@ -311,6 +334,14 @@ Taken take(uint32_t width, XagDeci bits) {
   if (xag::compare(xag::wide(coefficient), ceiling) >= 0)
     out.coefficient = 0;
   return out;
+}
+
+#else
+#include "xag_deci_power.h"
+#endif // XAG_DECIMAL_HARDWARE
+
+Taken take(uint32_t width, XagDeci bits) {
+  return decodeBits(shapeOf(width), bits);
 }
 
 // Bring two finite numbers to one exponent, without letting the scaling run

@@ -1,0 +1,7 @@
+// Enough of <cstdio> for the runtime to compile with no operating system under
+// it. The guest defines these; see `support.c`.
+#pragma once
+namespace std {
+typedef void FILE;
+int fputs(const char *text, FILE *where);
+} // namespace std

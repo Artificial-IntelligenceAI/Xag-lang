@@ -83,11 +83,17 @@ to QEMU where a kernel would go, and reads the answers back over the console —
 no disk image, no distribution, nothing downloaded. Twenty thousand sums,
 differences, products and quotients agree exactly, cohorts included.
 
-Neither side has to know the other's encoding: a case crosses as a coefficient
-and a power of ten, which is what a decimal *is*. Ours is BID, with the
-coefficient an ordinary binary integer; IBM's unit is DPD, with it packed three
-digits to ten bits. It runs when `qemu-system-ppc64` and `ld.lld` are present
-and stays out of the way otherwise.
+What runs in there is the runtime itself, built with `XAG_DECIMAL=hardware`: its
+arithmetic is the unit's instructions and its numbers are laid out the way the
+unit lays them out. Everything above the encoding seam is the same code that
+runs anywhere. Thirty thousand sums, differences, products and quotients at all
+three widths, against the software build, agreeing exactly — cohorts included.
+
+Neither build has to know the other's encoding: a case crosses as text, and a
+decimal is a sign, a coefficient and a power of ten whatever holds it. Ours is
+BID, with the coefficient an ordinary binary integer; IBM's unit is DPD, with it
+packed three digits to ten bits. It runs when `qemu-system-ppc64` and `ld.lld`
+are present and stays out of the way otherwise.
 
 ## The oracle
 
