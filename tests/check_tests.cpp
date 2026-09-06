@@ -48,6 +48,27 @@ std::string saidIn(const std::string &body) {
   return c.checked.diagnostics.empty() ? "" : c.checked.diagnostics.front().code;
 }
 
+// The first thing any pass of the front end says, whichever pass says it. What
+// is refused is often refused by the reader rather than the checker, and a test
+// that only asks one of them reads a refusal it cannot see as no refusal.
+std::string refused(const std::string &text) {
+  const xag::Source source("test.xag", text);
+  const xag::LexResult lexed = xag::lex(source);
+  if (!lexed.diagnostics.empty())
+    return lexed.diagnostics.front().code;
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  if (!parsed.diagnostics.empty())
+    return parsed.diagnostics.front().code;
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  if (!checked.diagnostics.empty())
+    return checked.diagnostics.front().code;
+  return "";
+}
+
+std::string refusedIn(const std::string &body) {
+  return refused("START {\n" + body + "\n}\n");
+}
+
 // The first code from the pass that runs once the middle layer is built, or ""
 // when it had nothing to say.
 std::string built(const std::string &text) {
@@ -387,6 +408,28 @@ void aNumberIsAskedToBecomeText() {
                 "    var.str 's' = [convert-to-str['n', 'n']];").code(0) == "E0505");
 }
 
+// What Xag has not got yet, written down as things it still refuses.
+//
+// These are not tests of a feature; they are the record of an absence, and a
+// failure here is good news wrongly reported: something in this list has
+// arrived, and whatever says so elsewhere — `design/syntax.md`, the website's
+// answer about what is missing — has just become wrong and needs the same
+// change. An absence that is only remembered goes stale on the ordinary
+// afternoon somebody removes it, and nothing about it looks broken.
+void whatIsNotHereYet() {
+  // No visibility, so no `export` and no more than one file.
+  CHECK(refused("export.fn.int64 'f' [] { give [*1*]; }\n") == "E0104");
+
+  // Nothing converts on its own. `convert-to-str` is how it is asked for; what
+  // is still refused is having it happen without being asked.
+  CHECK(refusedIn("var.int64 'n' = [*1*];\n    var.str 's' = ['n'];") == "E0506");
+
+  // A `many` is one level deep, and there is no way to show one.
+  CHECK(refusedIn("var.many.many.int64 'g' = [];") == "E0210");
+  CHECK(refusedIn("var.many.int64 'xs' = [*1*];\n"
+                  "    print.stdout['xs' \\n];") == "E0516");
+}
+
 void aPermCounterOutlivesItsLoop() {
   CHECK(inStart("loop.perm.range.int64 'i' = [*1*, *3*] { }\n"
                 "    print.stdout['i' \\n];").ok());
@@ -666,6 +709,7 @@ int main() {
   aLoopThatCannotFinishIsRefused();
   aNameMaySayItWraps();
   aNumberIsAskedToBecomeText();
+  whatIsNotHereYet();
   aCountedLoopSaysHowFarItGets();
   aPermCounterOutlivesItsLoop();
   theCounterIsInScopeOnlyInTheLoop();
