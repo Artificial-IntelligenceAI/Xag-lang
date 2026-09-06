@@ -274,6 +274,19 @@ private:
     return type.index < body.types.size() ? body.types[type.index] : unknown;
   }
 
+  // What a name holds, whether it holds it or only borrows it. A loan's spelled
+  // type is `ref int64`, which names no type at all — asking about that instead
+  // of what is behind it made a borrowed number print as `true`, and a borrowed
+  // decimal print as whatever a width of zero produces.
+  Type kindOf(TypeRef type) const {
+    const std::string &spelled = typeOf(type);
+    if (spelled.rfind("refmut ", 0) == 0)
+      return typeNamed(spelled.substr(7));
+    if (spelled.rfind("ref ", 0) == 0)
+      return typeNamed(spelled.substr(4));
+    return typeNamed(spelled);
+  }
+
   // ---- doing
 
   Value evaluate(const RValue &value) {
@@ -451,7 +464,7 @@ private:
     const std::string &op = value.op;
 
     if (a && b && a->kind == Value::Kind::Deci) {
-      const Type given = typeNamed(typeOf(value.operands[0].type));
+      const Type given = kindOf(value.operands[0].type);
       const uint32_t width = widthOf(given);
       const XagDeci x = a->wide, y = b->wide;
       if (op == "+" || op == "-" || op == "x" || op == "/" || op == "mod" ||
@@ -502,7 +515,7 @@ private:
       // not-a-number compares equal to nothing at all, itself included.
       const Type made = typeNamed(typeOf(value.type));
       const unsigned width = widthOf(isBinary(made) ? made
-                                                    : typeNamed(typeOf(value.operands[0].type)));
+                                                    : kindOf(value.operands[0].type));
       const double x = a->real, y = b->real;
       if (op == "+" || op == "-" || op == "x" || op == "/" || op == "mod" || op == "^") {
         answer.kind = Value::Kind::Real;
@@ -533,7 +546,7 @@ private:
       const XagInt x = a->number, y = b->number;
       // A comparison answers a `bool`, so what it was *given* decides how the
       // two sides are read; everything else answers with its own type.
-      const Type given = typeNamed(typeOf(value.operands[0].type));
+      const Type given = kindOf(value.operands[0].type);
       const Type made = typeNamed(typeOf(value.type));
       const Type arithmetic = isWhole(made) ? made : given;
       const unsigned width = widthOf(arithmetic);
@@ -598,13 +611,13 @@ private:
         if (at && at->kind == Value::Kind::Text)
           xag_print(&at->text);
         else if (at && at->kind == Value::Kind::Deci)
-          xag_print_deci(widthOf(typeNamed(typeOf(operand.type))), at->wide);
+          xag_print_deci(widthOf(kindOf(operand.type)), at->wide);
         else if (at && at->kind == Value::Kind::Wide)
           xag_print_bin128(at->wide);
         else if (at && at->kind == Value::Kind::Real)
-          xag_print_bin(at->real, widthOf(typeNamed(typeOf(operand.type))));
+          xag_print_bin(at->real, widthOf(kindOf(operand.type)));
         else if (at && at->kind == Value::Kind::Number) {
-          const Type named = typeNamed(typeOf(operand.type));
+          const Type named = kindOf(operand.type);
           if (isWhole(named))
             xag_print_int(at->number, widthOf(named), isSigned(named) ? 1 : 0);
           else
@@ -691,7 +704,7 @@ private:
       Value answer;
       answer.kind = Value::Kind::Text;
       answer.owns = true; // it is made here, so it is let go of here
-      const Type given = typeNamed(typeOf(value.operands[0].type));
+      const Type given = kindOf(value.operands[0].type);
       if (!at) {
         xag_str_from(&answer.text, "", 0);
       } else if (given == Type::Bool) {

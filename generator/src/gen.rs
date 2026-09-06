@@ -630,7 +630,8 @@ impl<'a> Writer<'a> {
             5..=6 => self.print(),
             7 => self.branch(),
             8 => self.counted_loop(),
-            9..=10 => self.lending(),
+            9 => self.lending(),
+            10 => self.lending_number(),
             11..=12 => self.array_declaration(),
             13 => self.array_set(),
             14 => self.array_read(),
@@ -676,6 +677,51 @@ impl<'a> Writer<'a> {
     /// The loan is closed before anything else happens to what it borrows from,
     /// because a program the region pass rightly refuses is this file's mistake
     /// and not a finding.
+    /// Lending a number and reading it through the loan.
+    ///
+    /// Every lending this wrote used to be text, so no generated program ever
+    /// printed a borrowed number — and printing one was wrong in two engines
+    /// for as long as printing has existed. Three engines cannot disagree about
+    /// a program nobody writes.
+    fn lending_number(&mut self) {
+        let mut seen: Vec<(String, Ty)> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none()
+                    && !var.moved && !var.lent {
+                    seen.push((var.name.clone(), var.ty));
+                }
+            }
+        }
+        if seen.is_empty() {
+            self.print();
+            return;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        let (borrowed, ty) = seen[at].clone();
+
+        let holder = self.fresh();
+        self.markLent(&borrowed, true);
+        self.pad();
+        self.out.push_str("var.ref.");
+        self.out.push_str(ty.written());
+        self.out.push_str(" '");
+        self.out.push_str(&holder);
+        self.out.push_str("' = [ref '");
+        self.out.push_str(&borrowed);
+        self.out.push_str("'];\n");
+
+        let looks = self.rng.below(3) + 1;
+        for _ in 0..looks {
+            self.pad();
+            self.out.push_str("print.stdout['");
+            self.out.push_str(&holder);
+            self.out.push_str("' \\n];\n");
+        }
+        // Nothing looks at the holder again, so the loan is done here.
+        self.markLent(&borrowed, false);
+    }
+
     fn lending(&mut self) {
         let writable = self.rng.chance(40);
         let borrowed = match self.lendable(writable) {

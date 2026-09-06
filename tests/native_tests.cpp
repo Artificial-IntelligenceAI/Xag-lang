@@ -354,6 +354,20 @@ void itWritesANumberIntoText() {
         "xag_str_drop");
 }
 
+// A borrowed number is read through the loan, not widened as a pointer — which
+// LLVM would not even build.
+void itLooksBehindALoan() {
+  EMITS("fn.nothing 'show' [ref.int64 'a', ref.deci64 'c'] {\n"
+        "  print.stdout['a' str:* * 'c' \\n]; }\n"
+        "START { var.int64 'a' = [*300*];\n  var.deci64 'c' = [*1.10*];\n"
+        "  show[ref 'a', ref 'c']; }\n",
+        "xag_print_int");
+  EMITS("fn.str 'spell' [ref.int64 'n'] { give [convert-to-str['n']]; }\n"
+        "START { var.int64 'n' = [*7*];\n"
+        "  print.stdout[(spell[ref 'n']) \\n]; }\n",
+        "xag_str_of_int");
+}
+
 } // namespace
 
 int main() {
@@ -369,6 +383,7 @@ int main() {
   dividingIsAnInstruction();
   aSettledPlaceIsNotAskedAgain();
   itWritesANumberIntoText();
+  itLooksBehindALoan();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";

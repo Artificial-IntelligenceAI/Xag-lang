@@ -480,6 +480,32 @@ void itWritesANumberIntoText() {
        "    print.stdout['s' \\n]; } }\n", "7\n7\n7\n");
 }
 
+// A borrowed number is a number. Its spelled type is `ref int64`, which names
+// no type at all — asking about that instead of what is behind it printed a
+// borrowed `int64` as `true` and a borrowed `deci64` as whatever a width of
+// zero produces. Both engines had it, and no generated program had ever printed
+// a borrowed number, so no vote between three of them ever noticed.
+void itLooksBehindALoan() {
+  SAYS("fn.nothing 'show' [ref.int64 'a', ref.int8 'b', ref.deci64 'c', ref.bin32 'd'] {\n"
+       "  print.stdout['a' str:* * 'b' str:* * 'c' str:* * 'd' \\n]; }\n"
+       "START { var.int64 'a' = [*300*];\n  var.int8 'b' = [*-5*];\n"
+       "  var.deci64 'c' = [*1.10*];\n  var.bin32 'd' = [*0.5*];\n"
+       "  show[ref 'a', ref 'b', ref 'c', ref 'd'];\n"
+       "  print.stdout['a' str:* * 'b' str:* * 'c' str:* * 'd' \\n]; }\n",
+       "300 -5 1.10 0.5\n300 -5 1.10 0.5\n");
+
+  // And the same through `convert-to-str`, which asked the same question.
+  SAYS("fn.str 'spell' [ref.int64 'n'] { give [convert-to-str['n']]; }\n"
+       "START { var.int64 'n' = [*7*];\n"
+       "  var.str 's' = [spell[ref 'n']];\n"
+       "  print.stdout['s' str:* * (count[ref 's']) \\n]; }\n",
+       "7 1\n");
+  SAYS("fn.str 'spell' [ref.deci64 'd'] { give [convert-to-str['d']]; }\n"
+       "START { var.deci64 'd' = [*1.10*];\n"
+       "  print.stdout[(spell[ref 'd']) \\n]; }\n",
+       "1.10\n");
+}
+
 void itReadsWhatItIsGiven() {
   given = "12\nhello\n-5\n";
   SAYS("START {\n"
@@ -547,6 +573,7 @@ int main() {
   itHoldsSomethingOrNothing();
   itHoldsAGroupOfNamedThings();
   itWritesANumberIntoText();
+  itLooksBehindALoan();
   itReadsWhatItIsGiven();
   itKnowsWhatItWasGiven();
 

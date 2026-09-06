@@ -444,6 +444,16 @@ private:
     return written;
   }
 
+  // What the operand holds, following a loan to the thing it points at. `read`
+  // answers the loan itself, which is a pointer — and widening a pointer to a
+  // number is not something LLVM will even build.
+  llvm::Value *behind(const Operand &operand) {
+    const std::string spelled = nameOf(operand.type);
+    if (!isLoan(spelled))
+      return read(operand);
+    return builder_.CreateLoad(typeFor(withoutLoan(spelled)), read(operand));
+  }
+
   llvm::Value *read(const Operand &operand) {
     const std::string &type = nameOf(operand.type);
     switch (operand.kind) {
@@ -1027,28 +1037,31 @@ private:
   llvm::Value *call(const RValue &value) {
     if (value.callee == "print.stdout") {
       for (const Operand &operand : value.operands) {
-        const std::string &type = nameOf(operand.type);
+        // What is behind the loan, not the loan: a borrowed number is a number,
+        // and asking `ref int64` what type it is answers nothing at all.
+        const std::string type = withoutLoan(nameOf(operand.type));
         const Type named = typeNamed(type);
         if (isDecimal(named))
           builder_.CreateCall(
               runtime_["xag_print_deci"],
               {builder_.getInt32(static_cast<int>(widthOf(named))),
-               builder_.CreateZExt(read(operand), builder_.getInt128Ty())});
+               builder_.CreateZExt(behind(operand), builder_.getInt128Ty())});
         else if (named == Type::Bin128)
-          builder_.CreateCall(runtime_["xag_print_bin128"], {read(operand)});
+          builder_.CreateCall(runtime_["xag_print_bin128"], {behind(operand)});
         else if (isBinary(named))
           builder_.CreateCall(
               runtime_["xag_print_bin"],
-              {builder_.CreateFPExt(read(operand), builder_.getDoubleTy()),
+              {builder_.CreateFPExt(behind(operand), builder_.getDoubleTy()),
                builder_.getInt32(widthOf(named))});
         else if (isWhole(named))
           builder_.CreateCall(runtime_["xag_print_int"],
-                              {widened(read(operand), named),
+                              {widened(behind(operand), named),
                                builder_.getInt32(widthOf(named)),
                                builder_.getInt32(isSigned(named) ? 1 : 0)});
         else if (type == "bool")
-          builder_.CreateCall(runtime_["xag_print_bool"],
-                              {builder_.CreateZExt(read(operand), builder_.getInt32Ty())});
+          builder_.CreateCall(
+              runtime_["xag_print_bool"],
+              {builder_.CreateZExt(behind(operand), builder_.getInt32Ty())});
         else if (auto *text = textPointer(operand))
           builder_.CreateCall(runtime_["xag_print"], {text});
       }
@@ -1132,9 +1145,9 @@ private:
     if (value.callee == "convert-to-str") {
       auto *out = builder_.CreateAlloca(str_, nullptr, "written");
       if (!value.operands.empty()) {
-        const std::string given = nameOf(value.operands[0].type);
+        const std::string given = withoutLoan(nameOf(value.operands[0].type));
         const Type named = typeNamed(given);
-        llvm::Value *held = read(value.operands[0]);
+        llvm::Value *held = behind(value.operands[0]);
         if (named == Type::Bool)
           builder_.CreateCall(runtime_["xag_str_of_bool"],
                               {out, builder_.CreateZExt(held, builder_.getInt32Ty())});
