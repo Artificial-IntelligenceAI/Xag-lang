@@ -1,6 +1,7 @@
 # Brief: optimise Xag's fast interpreter
 
-You are working on **Xag**, a compiled language in `/Users/ts/SafetyBolt language`.
+You are working on **Xag**, a compiled language. Your copy is at
+`/Users/ts/Xag-fast-interpreter` — a clone of its own, not a worktree.
 Your job is one thing: **make `src/Fast.cpp` faster without changing what any
 program answers.**
 
@@ -9,11 +10,13 @@ session is on `main` at the same time, adding to the front end; it will not touc
 `src/Fast.cpp`. Do not merge or rebase without saying so — ask first, because the
 two lines of work touch different files and there is no hurry.
 
-You are in your own git worktree, so nothing you do here disturbs the other
-session's files. What that also means is that **nothing built is here yet**:
-`build/` and `generator/target/` are both ignored by git, so a fresh worktree has
-neither the compiler nor the oracle. Both have to be built once before any of
-the commands below will run.
+Another session is working on `main` in a different folder entirely; it will not
+touch `src/Fast.cpp`, and you cannot disturb it. You share only the GitHub
+remote, so you meet when something is pushed and not before.
+
+**Nothing is built here yet.** `build/` and `generator/target/` are ignored by
+git, so a fresh clone has neither the compiler nor the oracle. Both have to be
+made once before any of the commands below will run.
 
 ---
 
