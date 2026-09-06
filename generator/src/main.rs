@@ -34,6 +34,16 @@ struct Answer {
     status: i32,
 }
 
+/// A program the compiler would not get through. Kept whole, because the ones
+/// worth catching here have been the ones that only happen under load — and a
+/// count of them is not something anybody can look into afterwards.
+struct Broke {
+    seed: u64,
+    step: &'static str,
+    program: String,
+    why: String,
+}
+
 struct Finding {
     seed: u64,
     program: String,
@@ -87,6 +97,7 @@ fn main() {
     let rejected = AtomicUsize::new(0);
     let skipped = AtomicUsize::new(0);
     let findings: Mutex<Vec<Finding>> = Mutex::new(Vec::new());
+    let broke: Mutex<Vec<Broke>> = Mutex::new(Vec::new());
     let started = Instant::now();
 
     println!(
@@ -96,8 +107,8 @@ fn main() {
 
     std::thread::scope(|scope| {
         for worker in 0..settings.jobs {
-            let (next, done, rejected, skipped, findings, settings) =
-                (&next, &done, &rejected, &skipped, &findings, &settings);
+            let (next, done, rejected, skipped, findings, broke, settings) =
+                (&next, &done, &rejected, &skipped, &findings, &broke, &settings);
             scope.spawn(move || {
                 // One directory per thread, so no two cases ever contend for a
                 // name and nothing has to be locked to write a file.
@@ -116,13 +127,24 @@ fn main() {
                         Verdict::Skipped => {
                             skipped.fetch_add(1, Ordering::Relaxed);
                         }
-                        Verdict::Rejected(why) => {
+                        Verdict::Refused(why) => {
                             rejected.fetch_add(1, Ordering::Relaxed);
                             if rejected.load(Ordering::Relaxed) <= 3 {
                                 eprintln!(
                                     "\nseed {seed}: the generator wrote something the \
                                      compiler would not take —\n{why}"
                                 );
+                            }
+                        }
+                        Verdict::Broke(step, why) => {
+                            broke.lock().unwrap().push(Broke {
+                                seed,
+                                step,
+                                program: program.clone(),
+                                why,
+                            });
+                            if !settings.keep_going {
+                                next.store(end, Ordering::Relaxed);
                             }
                         }
                         Verdict::Differed(answers) => {
@@ -174,10 +196,29 @@ fn main() {
         }
     );
 
+    // A program the compiler would not build is reported whole, and in its own
+    // right. It was once only counted, which meant an intermittent failure to
+    // build large programs under load could be seen twice and looked into
+    // never: by the time anybody read the number, the case was gone.
+    let stuck = broke.into_inner().unwrap();
+    for one in &stuck {
+        println!("\n──────── seed {} ────────", one.seed);
+        println!("{}", one.program);
+        println!(">>> {} did not finish. What it said:\n{}\n", one.step, one.why);
+    }
+
     let found = findings.into_inner().unwrap();
-    if found.is_empty() {
+    if found.is_empty() && stuck.is_empty() {
         println!("every engine agreed.");
         return;
+    }
+    if found.is_empty() {
+        println!(
+            "{} case(s) the compiler would not get through; no engine disagreed \
+             about the rest.",
+            stuck.len()
+        );
+        std::process::exit(1);
     }
     for finding in &found {
         println!("\n──────── seed {} ────────", finding.seed);
@@ -191,26 +232,37 @@ fn main() {
         }
     }
     println!("\n{} disagreement(s).", found.len());
+    if !stuck.is_empty() {
+        println!("{} case(s) the compiler would not get through.", stuck.len());
+    }
     std::process::exit(1);
 }
 
 enum Verdict {
     Agreed,
     Skipped,
-    Rejected(String),
+    /// The checker said no. That is the generator's fault — it wrote something
+    /// the language does not allow — and it says nothing about the compiler.
+    Refused(String),
+    /// A step of the compiler did not finish. That is the compiler's fault, and
+    /// it is worth as much as a disagreement: the engines cannot be compared on
+    /// a program one of them would not build, so a run that reports "every
+    /// engine agreed" while quietly counting these has not asked what it says
+    /// it asked.
+    Broke(&'static str, String),
     Differed(Vec<(&'static str, Answer)>),
 }
 
 /// One program, put to every engine.
 fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
     let source = room.join("case.xag");
-    if std::fs::write(&source, program).is_err() {
-        return Verdict::Rejected("the case could not be written".to_string());
+    if let Err(why) = std::fs::write(&source, program) {
+        return Verdict::Broke("writing the case out", why.to_string());
     }
 
     let interpreted = run(Command::new(&settings.xagc).arg("run").arg(&source));
     if interpreted.status != 0 && interpreted.said.contains("Rule(s) broken") {
-        return Verdict::Rejected(interpreted.said);
+        return Verdict::Refused(interpreted.said);
     }
     // A case that outstays its welcome, or that runs past what an engine will
     // follow, says nothing about whether they agree.
@@ -225,7 +277,7 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
 
     let built = run(Command::new(&settings.xagc).arg("build").arg(&source));
     if built.status != 0 {
-        return Verdict::Rejected(built.said);
+        return Verdict::Broke("xagc build", built.said);
     }
     let binary = room.join("case");
     let native = run(&mut Command::new(&binary));
