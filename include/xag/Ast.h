@@ -85,8 +85,11 @@ struct Branch {
   ExprPtr condition;
   // `if 'x' holds 'value' { … }` — the arm runs when the condition holds
   // something, and `holds` is the name that something is lent to inside it.
+  // A `when` arm uses the same two: `is 'value'` sets `holds`, and `is nothing`
+  // sets `matchesNothing`.
   std::string holds;
   Span holdsSpan;
+  bool matchesNothing = false;
   Block body;
 };
 
@@ -96,6 +99,7 @@ enum class StmtKind {
   If,        // if […] { } else-if […] { } else { }
   LoopRange, // loop.range.i64 'i' = [a, b] { }
   LoopWhile, // loop.while […] { }
+  When,      // when 'x' { is 'value' { } is nothing { } }
   Break,     // break;
   Give,      // give […];
   Call,      // print.stdout[…];
@@ -110,7 +114,7 @@ struct Stmt {
   std::string name;            //  "
   ExprPtr index;               // Set, when written `set 'xs'[*2*] = …`
   ValueList value;             // Declare, Set, LoopRange, Give
-  ExprPtr condition;           // LoopWhile
+  ExprPtr condition;           // LoopWhile, and the subject of a When
   std::string holds;           // LoopWhile, when written `loop.while … holds 'x'`
   Span holdsSpan;              //  "
   std::vector<Branch> branches;// If

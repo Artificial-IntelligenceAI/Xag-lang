@@ -298,6 +298,22 @@ void holdsLendsWhatIsThere() {
   CHECK(inStart("if 'a' holds text { }").code(0) == "E0101");
 }
 
+void whenIsMadeOfIs() {
+  const Parsed p = inStart("when 'x' {\n"
+                           "        is 'value' { print.stdout['value' \\n]; }\n"
+                           "        is nothing { break; }\n    }");
+  CHECK(p.ok());
+  CHECK(p.has("when\n"));
+  CHECK(p.has("is 'value'"));
+  CHECK(p.has("is nothing"));
+
+  // The subject is bounded by `when` and `{`, so it takes no brackets.
+  CHECK(!inStart("when ['x'] { is nothing { } }").parsed.ok());
+  // Nothing but `is` goes in one.
+  CHECK(inStart("when 'x' { else { } }").code(0) == "E0108");
+  CHECK(inStart("when 'x' { is value { } }").code(0) == "E0108");
+}
+
 } // namespace
 
 int main() {
@@ -325,6 +341,7 @@ int main() {
   chainsThatWereAlwaysGoodStillAre();
   aTypeMaySayItHoldsNothing();
   holdsLendsWhatIsThere();
+  whenIsMadeOfIs();
 
   if (failures == 0)
     std::cout << "all parser tests passed\n";

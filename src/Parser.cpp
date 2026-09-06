@@ -736,6 +736,53 @@ private:
       return s;
     }
 
+    // `when 'x' { is 'value' { … } is nothing { … } }`
+    //
+    // The subject is bounded by `when` on the left and `{` on the right, so it
+    // takes no brackets — the same reason an `if`'s condition takes none.
+    if (checkWord("when")) {
+      s->kind = StmtKind::When;
+      advance();
+      s->condition = item();
+      if (expect(TokenKind::LBrace, "`{`")) {
+        while (!check(TokenKind::RBrace) && !atEnd()) {
+          Branch arm;
+          arm.span.begin = peek().span.begin;
+          arm.hasCondition = false;
+          if (!checkWord("is")) {
+            complain(peek().span, "E0108", "a `when` is made of `is` and nothing else.",
+                     {"every case a `when` covers is written out"}, {},
+                     std::string("found ") + describe(peek().kind));
+            recover();
+            break;
+          }
+          advance();
+          if (check(TokenKind::Name)) {
+            const Token got = advance();
+            arm.holds = got.text;
+            arm.holdsSpan = got.span;
+          } else if (peek().kind == TokenKind::Word && peek().text == "nothing") {
+            arm.holdsSpan = advance().span;
+            arm.matchesNothing = true;
+          } else {
+            complain(peek().span, "E0108",
+                     "an `is` says either a name to lend what is there to, or "
+                     "`nothing`.",
+                     {"every case a `when` covers is written out"}, {},
+                     std::string("found ") + describe(peek().kind));
+            recover();
+            break;
+          }
+          arm.body = block();
+          arm.span.end = previous().span.end;
+          s->branches.push_back(std::move(arm));
+        }
+        expect(TokenKind::RBrace, "`}`");
+      }
+      s->span.end = previous().span.end;
+      return s;
+    }
+
     if (checkWord("if")) {
       s->kind = StmtKind::If;
       while (true) {

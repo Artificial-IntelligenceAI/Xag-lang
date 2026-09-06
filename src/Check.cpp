@@ -152,10 +152,10 @@ private:
 
   void complain(Span span, std::string code, std::string message,
                 std::vector<std::string> rules, std::vector<std::string> tips = {},
-                std::string label = "here") {
+                std::string label = "here", std::vector<Note> notes = {}) {
     result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
                                              std::move(label), std::move(rules),
-                                             std::move(tips), {}});
+                                             std::move(tips), std::move(notes)});
   }
 
   // ---- names
@@ -772,6 +772,56 @@ private:
         }
       }
       onlyValueChecked(s.value, want, s.span);
+      break;
+    }
+
+    case StmtKind::When: {
+      // Every case, once each. The compiler insisting on that is the whole
+      // reason to write a `when` rather than an `if` — a case nobody wrote is a
+      // case nobody thought about, and it would be found by the program running
+      // rather than by reading it.
+      const Ty subject = s.condition ? expr(*s.condition, Ty{}) : Ty{};
+      if (subject != Ty{} && !subject.mayBeNothing()) {
+        complain(s.condition->span, "E0520",
+                 "a `" + name(subject) + "` is only ever one thing, so there is "
+                 "nothing here to choose between.",
+                 {"a `when` chooses between the things a value could be"},
+                 {"`or-nothing` in the chain is what gives a value a second shape; "
+                  "without it there is one case and an `if` says it better."});
+      }
+
+      const Branch *held = nullptr;
+      const Branch *absent = nullptr;
+      for (const Branch &arm : s.branches) {
+        const Branch *&already = arm.matchesNothing ? absent : held;
+        if (already) {
+          complain(arm.holdsSpan, "E0521",
+                   arm.matchesNothing
+                       ? "this `when` already says what to do with nothing."
+                       : "this `when` already says what to do with something.",
+                   {"every case a `when` covers is written once"},
+                   {}, "again here", {Note{already->holdsSpan, "and here first"}});
+        } else {
+          already = &arm;
+        }
+
+        scopes_.emplace_back();
+        if (!arm.matchesNothing && subject.mayBeNothing())
+          declare(arm.holds, Symbol{subject.within(), false, arm.holdsSpan});
+        for (const StmtPtr &inner : arm.body.stmts)
+          statement(*inner);
+        scopes_.pop_back();
+      }
+
+      if (subject.mayBeNothing() && (!held || !absent))
+        complain(s.span, "E0522",
+                 std::string("this `when` says nothing about what to do with ") +
+                     (held ? "nothing." : "something."),
+                 {"a `when` covers every case a value could be"},
+                 {held ? "`is nothing` is the case that is missing."
+                       : "`is 'name'` is the case that is missing, and the name is "
+                         "what it lends you."},
+                 "this leaves a case out");
       break;
     }
 

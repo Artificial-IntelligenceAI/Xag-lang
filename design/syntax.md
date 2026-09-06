@@ -602,6 +602,43 @@ is no mark for an absence and nothing else it could mean. It takes its type from
 what was expected of it: a missing `str` and a missing `int64` do not look
 different, so something has to have said which (`E0518`).
 
+### Choosing between the cases
+
+```
+when half['i'] {
+    is 'value'  { print.stdout['value' \n]; }
+    is nothing  { print.stdout[str:*none* \n]; }
+}
+```
+
+A `when` is made of `is` and nothing else, and the compiler insists that every
+case is written and each of them once. A case nobody wrote is a case nobody
+thought about, and leaving it out would be found by the program running rather
+than by reading it:
+
+```text
+this `when` says nothing about what to do with nothing.
+
+  3 |     when 's' { is 't' { print.stdout['t' \n]; } }
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this leaves a case out
+
+Error code: E0522
+Rule(s) broken: a `when` covers every case a value could be
+Tip(s): `is nothing` is the case that is missing.
+```
+
+Saying one twice is `E0521`, and it points at both. Asking it about something
+with only one shape is `E0520` — there is nothing to choose between, and an `if`
+says it better.
+
+The subject takes no brackets, because `when` bounds it on the left and `{` on
+the right — the same reason a condition takes none.
+
+Two cases is all there is to choose between today. The construct is not built
+for two: what it lowers to is the middle layer's `switch`, which carries a value
+per target rather than a true-or-false pair, and was written that way from the
+start so that a decision tree could use it unchanged.
+
 ### Getting at it lends, and cannot be skipped
 
 ```
@@ -780,10 +817,10 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 - **Turning a number into text, and text into a number.** Pieces side by side
   join, and nothing converts on its own, so something has to do it and be named.
   Now that a type can say it holds nothing, the failing half has somewhere to go.
-- **Choosing between more than two cases.** `holds` answers one question about
-  one kind of absence. `when`, with the compiler insisting every case is covered,
-  is what makes that general — and what a type with more than two shapes would
-  need.
+- **A type with more than two shapes.** `when` covers every case a value could
+  be, and today a value can be two things. A type that could be several — with
+  its own names and its own contents — is what would make the construct earn
+  itself, and the middle layer is already shaped for it.
 - **A `many` that grows.** `many` is a fixed length, settled when it is made.
   Growing is a second type rather than a mode of this one, because growing may
   move what is held and a loan of it would then point at nowhere — a rule

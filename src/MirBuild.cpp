@@ -544,6 +544,46 @@ private:
       break;
     }
 
+    case StmtKind::When: {
+      // Straight onto the switch terminator, which carries a value per target
+      // rather than a true/false pair and was written general from the start
+      // for exactly this. Two shapes today; a decision tree uses it unchanged.
+      const unsigned after = addBlock();
+      if (!s.condition) {
+        finish(Terminator{TerminatorKind::Goto, s.span, {}, {}, {after}, false, {}});
+        current_ = after;
+        break;
+      }
+
+      const unsigned subject = lower(*s.condition);
+      const std::string carried = body_.types[body_.locals[subject].type.index];
+      const unsigned answer = temporary(typeRef("bool"), true);
+      emit(Statement{StatementKind::Assign, s.condition->span, answer, {},
+                     RValue{RValueKind::Holds, {}, {}, 0,
+                            {Operand{OperandKind::Copy, subject, {},
+                                     body_.locals[subject].type}},
+                            typeRef("bool")}});
+
+      const unsigned something = addBlock();
+      const unsigned none = addBlock();
+      finish(Terminator{TerminatorKind::Switch, s.span,
+                        Operand{OperandKind::Copy, answer, {}, typeRef("bool")},
+                        {"true"}, {something, none}, false, {}});
+
+      for (const Branch &arm : s.branches) {
+        current_ = arm.matchesNothing ? none : something;
+        openScope();
+        if (!arm.matchesNothing)
+          bindHeld(arm.holds, subject, carried, arm.holdsSpan);
+        for (const StmtPtr &inner : arm.body.stmts)
+          statement(*inner);
+        closeScope();
+        finish(Terminator{TerminatorKind::Goto, arm.span, {}, {}, {after}, false, {}});
+      }
+      current_ = after;
+      break;
+    }
+
     case StmtKind::If: {
       const unsigned after = addBlock();
       for (const Branch &branch : s.branches) {

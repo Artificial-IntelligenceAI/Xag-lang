@@ -188,6 +188,20 @@ void onHoldingNothing() {
         "  if 'xs' holds 'held' { print.stdout[(count[ref 'held']) \\n]; } }\n");
 }
 
+void onChoosingBetweenCases() {
+  AGREE("fn.or-nothing.int64 half [int64 'n'] {\n"
+        "  if 'n' == *0* { give [nothing]; }\n"
+        "  give ['n' / *2*]; }\n"
+        "START { loop.range.int64 'i' = [*0*, *4*] {\n"
+        "  when half['i'] {\n"
+        "    is 'v'     { print.stdout['i' str:* -> * 'v' \\n]; }\n"
+        "    is nothing { print.stdout['i' str:* -> none* \\n]; } } } }\n");
+  AGREE("START { var.or-nothing.str 's' = [*text*];\n"
+        "  when 's' {\n"
+        "    is nothing { print.stdout[str:*none* \\n]; }\n"
+        "    is 't'     { print.stdout['t' str:* * (count['t']) \\n]; } } }\n");
+}
+
 } // namespace
 
 int main() {
@@ -196,6 +210,7 @@ int main() {
   onCallsAndBorrows();
   onHoldingSeveralValues();
   onHoldingNothing();
+  onChoosingBetweenCases();
 
   if (failures == 0)
     std::cout << "the two interpreters agree everywhere asked\n";

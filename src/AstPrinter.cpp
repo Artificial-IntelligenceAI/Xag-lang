@@ -82,6 +82,16 @@ struct Printer {
       }
       values(s.value, depth + 1);
       break;
+    case StmtKind::When:
+      out << "when\n";
+      if (s.condition)
+        expr(*s.condition, depth + 1);
+      for (const Branch &arm : s.branches) {
+        indent(depth + 1);
+        out << (arm.matchesNothing ? "is nothing\n" : "is '" + arm.holds + "'\n");
+        block(arm.body, depth + 2);
+      }
+      break;
     case StmtKind::If:
       out << "if\n";
       for (const Branch &branch : s.branches) {

@@ -326,6 +326,40 @@ void whatIsHeldIsTheTypeWithoutTheAbsence() {
                 "    var.int64 'm' = ['n' + *1*];").code(0) == "E0506");
 }
 
+void aWhenCoversEveryCase() {
+  CHECK(inStart("var.or-nothing.str 's' = [*hi*];\n"
+                "    when 's' { is 't' { print.stdout['t' \\n]; } is nothing { } }").ok());
+
+  // A case nobody wrote is a case nobody thought about.
+  CHECK(inStart("var.or-nothing.str 's' = [*hi*];\n"
+                "    when 's' { is 't' { } }").code(0) == "E0522");
+  CHECK(inStart("var.or-nothing.str 's' = [*hi*];\n"
+                "    when 's' { is nothing { } }").code(0) == "E0522");
+
+  // And each case once.
+  CHECK(inStart("var.or-nothing.str 's' = [*hi*];\n"
+                "    when 's' { is 't' { } is 'u' { } is nothing { } }").code(0) ==
+        "E0521");
+  CHECK(inStart("var.or-nothing.str 's' = [*hi*];\n"
+                "    when 's' { is 't' { } is nothing { } is nothing { } }").code(0) ==
+        "E0521");
+
+  // Something with one shape has nothing to choose between.
+  CHECK(inStart("var.int64 'n' = [*1*];\n"
+                "    when 'n' { is 'v' { } is nothing { } }").code(0) == "E0520");
+}
+
+void aWhenArmLendsWhatWasThere() {
+  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { var.or-nothing.int64 'n' = [*2*];\n"
+            "  when 'n' { is 'v' { print.stdout[twice['v'] \\n]; } is nothing { } } }\n")
+            .ok());
+  // The name belongs to its arm and nowhere else.
+  CHECK(inStart("var.or-nothing.int64 'n' = [*2*];\n"
+                "    when 'n' { is 'v' { } is nothing { } }\n"
+                "    print.stdout['v' \\n];").code(0) == "E0501");
+}
+
 } // namespace
 
 int main() {
@@ -361,6 +395,8 @@ int main() {
   aValueGoesInWithoutAWord();
   holdsAsksSomethingThatMayBeMissing();
   whatIsHeldIsTheTypeWithoutTheAbsence();
+  aWhenCoversEveryCase();
+  aWhenArmLendsWhatWasThere();
 
   if (failures == 0)
     std::cout << "all check tests passed\n";

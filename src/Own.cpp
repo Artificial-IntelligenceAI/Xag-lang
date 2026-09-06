@@ -471,6 +471,33 @@ private:
       break;
     }
 
+    case StmtKind::When: {
+      // Each arm is a way the program could go, so a name given away down one
+      // is gone after all of them — the same reading as an `if`.
+      if (s.condition)
+        read(*s.condition);
+      const auto before = snapshot();
+      std::vector<std::pair<Binding *, Span>> movedSomewhere;
+      for (const Branch &arm : s.branches) {
+        restore(before);
+        scopes_.emplace_back();
+        if (!arm.matchesNothing && !arm.holds.empty())
+          scopes_.back()[arm.holds] = heldBinding(arm.holdsSpan);
+        for (const StmtPtr &inner : arm.body.stmts)
+          statement(*inner);
+        scopes_.pop_back();
+        for (const auto &[binding, was] : before)
+          if (!was && binding->moved)
+            movedSomewhere.emplace_back(binding, binding->movedAt);
+      }
+      restore(before);
+      for (const auto &[binding, where] : movedSomewhere) {
+        binding->moved = true;
+        binding->movedAt = where;
+      }
+      break;
+    }
+
     case StmtKind::If: {
       // A name given away down any arm is gone afterwards, because the compiler
       // does not get to assume which arm ran.
