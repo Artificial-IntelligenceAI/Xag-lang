@@ -35,6 +35,9 @@ enum class Op : uint8_t {
   Halt,
   LoadWhole, LoadReal, LoadWide, LoadText, LoadNothing,
   CopySlot, MoveSlot, MakeLoan, StoreThrough, Drop, DropIf,
+  // A copy of a plain number, which is the number and nothing else: no claim,
+  // no loan, no absence to carry across with it.
+  CopyWhole, CopyReal,
   IntAdd, IntSub, IntMul, IntDiv, IntMod, IntPow,
   IntLt, IntGt, IntLe, IntGe, IntEq, IntNe,
   // The same, with the right-hand side a written number read straight from
@@ -389,8 +392,16 @@ private:
         emit(Code{Op::StoreThrough, s.place, from, 0, 0});
       } else if (borrowed) {
         // A loan copied into a loan travels whole; anything else is the value
-        // behind it, read where it stands.
-        emit(Code{Op::CopySlot, s.place, from, 0, isLoan(kept) ? 1u : 0u});
+        // behind it, read where it stands. A plain number read into a place
+        // of the same plain type is only the number.
+        const Type plain = typeNamed(kept);
+        const bool number = isWhole(plain) || plain == Type::Bool ||
+                            isBinary(plain) || isDecimal(plain);
+        if (number && behind(spelled(value.operands[0].type)) == kept)
+          emit(Code{isBinary(plain) && plain != Type::Bin128 ? Op::CopyReal : Op::CopyWhole,
+                    s.place, from, 0, 0});
+        else
+          emit(Code{Op::CopySlot, s.place, from, 0, isLoan(kept) ? 1u : 0u});
       } else {
         // Made here, so it is handed over rather than looked at.
         emit(Code{Op::MoveSlot, s.place, from, 0, 0});
@@ -854,6 +865,14 @@ private:
         }
         break;
       }
+      case Op::CopyWhole:
+        end(to);
+        to.whole = read(one.a).whole;
+        break;
+      case Op::CopyReal:
+        end(to);
+        to.real = read(one.a).real;
+        break;
       case Op::MoveSlot: {
         Slot keep = slots[one.a];
         slots[one.a] = Slot{};
@@ -1186,12 +1205,12 @@ private:
           continue;
         }
         break;
-      case Op::ReturnValue: {
-        Slot keep = slots[one.a];
+      case Op::ReturnValue:
+        // The answer's slot is below this frame, so it can be written before
+        // the one it came from is emptied.
+        answer = slots[one.a];
         slots[one.a] = Slot{};
-        answer = keep;
         goto finished;
-      }
       case Op::Return:
       case Op::Halt:
         goto finished;
