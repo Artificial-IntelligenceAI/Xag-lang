@@ -9,8 +9,11 @@ session is on `main` at the same time, adding to the front end; it will not touc
 `src/Fast.cpp`. Do not merge or rebase without saying so — ask first, because the
 two lines of work touch different files and there is no hurry.
 
-Use **your own build directory**, not `build/`: that one belongs to the other
-session and reconfiguring it would pull the ground out from under them.
+You are in your own git worktree, so nothing you do here disturbs the other
+session's files. What that also means is that **nothing built is here yet**:
+`build/` and `generator/target/` are both ignored by git, so a fresh worktree has
+neither the compiler nor the oracle. Both have to be built once before any of
+the commands below will run.
 
 ---
 
@@ -25,9 +28,20 @@ A change that makes the fast interpreter quicker and wrong is worse than no
 change, and the whole project is built around catching exactly that. Before and
 after every change:
 
+First time only, in this worktree:
+
 ```bash
-cmake --build /tmp/rel -j8 && (cd /tmp/rel && ctest)      # 15 suites
-./generator/target/release/xag-oracle --xagc /tmp/rel/xagc \
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build -j8
+(cd generator && cargo build --release)
+```
+
+`cmake` finds LLVM 23.1.0 through Homebrew; if it complains about the compiler,
+it wants Apple clang rather than the Homebrew one. Then, before and after every
+change:
+
+```bash
+cmake --build build -j8 && (cd build && ctest)            # 15 suites
+./generator/target/release/xag-oracle --xagc ./build/xagc \
     --cases 150 --seed $RANDOM --size 150                 # "every engine agreed"
 ```
 
@@ -53,11 +67,7 @@ disagreement, you broke something — do not proceed.
 **5x, with no code change.** Every profile taken against `build/` is a profile of
 unoptimised code and will point at the wrong things. Make your own:
 
-```bash
-cmake -S . -B /tmp/rel -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build /tmp/rel -j8
-```
-
-(Ignore the first run of any freshly linked binary — macOS scans it, which costs
+Build it `RelWithDebInfo`, as above. (Ignore the first run of any freshly linked binary — macOS scans it, which costs
 about a second and is not your code.)
 
 ---
@@ -120,10 +130,8 @@ vote between them proves nothing. Keep it that way.
 
 ## Where to start
 
-1. Build `RelWithDebInfo` **into your own directory** (`cmake -S . -B /tmp/rel
-   -DCMAKE_BUILD_TYPE=RelWithDebInfo`). Confirm `ctest` and the oracle are clean
-   *before* you change anything, so a later failure is definitely yours — and
-   note that `ctest` must then be run from `/tmp/rel`, not `build/`.
+1. Build both, as above. Confirm `ctest` and the oracle are clean *before* you
+   change anything, so a later failure is definitely yours.
 2. Profile the three benchmark shapes above. `/tmp/bench.xag`, `/tmp/bench2.xag`
    and `/tmp/bench3.xag` exist, or write your own.
 3. Change one thing. Measure. Run `ctest` and the oracle. Keep or revert.
