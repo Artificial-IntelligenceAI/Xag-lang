@@ -852,6 +852,14 @@ impl<'a> Writer<'a> {
         if mutable {
             self.out.push_str("mut.");
         }
+        // Everything written here means to wrap: the expected answers are
+        // worked out by the engines themselves, which wrap. Saying so keeps the
+        // compiler from remarking on it — and a remark would otherwise land on
+        // stderr, which is part of what the engines are compared on, while the
+        // built program's own output has none of it.
+        if Self::numeric(ty) && !matches!(ty, Ty::Real(_) | Ty::Deci(_)) {
+            self.out.push_str("wrapping.");
+        }
         self.out.push_str(ty.written());
         self.out.push_str(" '");
         self.out.push_str(&name);

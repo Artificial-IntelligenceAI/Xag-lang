@@ -166,6 +166,14 @@ struct Symbol {
   Ty type;
   bool changeable = false;
   Span span;
+  // Said `wrapping` where it was declared: a sum that does not fit is meant to
+  // come round, so nothing is said about it.
+  bool wraps = false;
+  // What it was given, when that was a number written down and nothing has been
+  // set into it since. It is what lets a loop be counted forward from a
+  // starting point rather than guessed at.
+  bool knownStart = false;
+  __int128 start = 0;
 };
 
 struct Signature {
@@ -208,6 +216,14 @@ private:
     result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
                                              std::move(label), std::move(rules),
                                              std::move(tips), std::move(notes)});
+  }
+
+  // Said rather than refused: what the compiler could not settle either way.
+  void warn(Span span, std::string code, std::string message,
+            std::vector<std::string> rules, std::vector<std::string> tips = {}) {
+    result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
+                                             "here", std::move(rules), std::move(tips),
+                                             {}, Severity::Warning});
   }
 
   // ---- names
@@ -317,6 +333,216 @@ private:
   static bool keepsCounter(const Chain &chain) {
     for (const ChainSegment &seg : chain.segments)
       if (!seg.isName && seg.text == "perm")
+        return true;
+    return false;
+  }
+
+  // The most and least a whole type holds.
+  static __int128 mostOf(Type type) {
+    const unsigned width = widthOf(type);
+    if (isSigned(type))
+      return width >= 128 ? ~(static_cast<__int128>(1) << 127)
+                          : (static_cast<__int128>(1) << (width - 1)) - 1;
+    return width >= 128 ? -1 : (static_cast<__int128>(1) << width) - 1;
+  }
+
+  static __int128 leastOf(Type type) {
+    if (!isSigned(type))
+      return 0;
+    const unsigned width = widthOf(type);
+    return width >= 128 ? (static_cast<__int128>(1) << 127)
+                        : -(static_cast<__int128>(1) << (width - 1));
+  }
+
+  // Multiplying without leaving the room the answer is worked out in. A count
+  // this large is not one anybody wrote down, so it is read as unknowable
+  // rather than as a number.
+  static bool timesWithin(__int128 a, __int128 b, __int128 &out) {
+    if (a == 0 || b == 0) {
+      out = 0;
+      return true;
+    }
+    const __int128 ceiling = ~(static_cast<__int128>(1) << 127);
+    if (a > ceiling / (b < 0 ? -b : b) || a < -(ceiling / (b < 0 ? -b : b)))
+      return false;
+    out = a * b;
+    return true;
+  }
+
+  // Brackets say what order to read in and nothing about the value, so they are
+  // stepped through rather than stopped at.
+  static const Expr &inside(const Expr &e) {
+    const Expr *at = &e;
+    while (at->kind == ExprKind::Group && at->children.size() == 1)
+      at = at->children[0].get();
+    return *at;
+  }
+
+  // What a name is added to by, once round the loop: a number written down, or
+  // the counter itself, whose largest step the loop's own bounds already say.
+  bool stepOf(const Stmt &set, const std::string &counter, __int128 most,
+              __int128 &step, bool &plus) const {
+    if (set.value.values.size() != 1 || set.value.values[0].items.size() != 1)
+      return false;
+    const Expr &only = inside(*set.value.values[0].items[0]);
+    if (only.kind != ExprKind::Binary || only.children.size() != 2)
+      return false;
+    if (only.text != "+" && only.text != "-")
+      return false;
+    const Expr &left = inside(*only.children[0]);
+    const Expr &right = inside(*only.children[1]);
+    if (left.kind != ExprKind::Name || left.text != set.name)
+      return false;
+    plus = only.text == "+";
+    if (right.kind == ExprKind::Written && looksLikeWholeNumber(right.text)) {
+      step = wholeValue(right.text);
+      return true;
+    }
+    // The counter never goes past where the loop stops, so its largest step is
+    // the largest number the loop counts to — and the same times a written
+    // number is that many times as far.
+    if (right.kind == ExprKind::Name && right.text == counter) {
+      step = most < 0 ? -most : most;
+      return true;
+    }
+    // A remainder never reaches what it was taken against, whatever it was taken
+    // from — so this one is bounded without knowing the left side at all.
+    if (right.kind == ExprKind::Binary && right.text == "mod" &&
+        right.children.size() == 2) {
+      const Expr &by = inside(*right.children[1]);
+      if (by.kind == ExprKind::Written && looksLikeWholeNumber(by.text)) {
+        const __int128 against = wholeValue(by.text);
+        if (against != 0) {
+          step = (against < 0 ? -against : against) - 1;
+          return true;
+        }
+      }
+    }
+    // The counter divided by a written number gets no further than the largest
+    // it counts to, divided by the same.
+    if (right.kind == ExprKind::Binary && right.text == "/" &&
+        right.children.size() == 2) {
+      const Expr &over = inside(*right.children[0]);
+      const Expr &by = inside(*right.children[1]);
+      if (over.kind == ExprKind::Name && over.text == counter &&
+          by.kind == ExprKind::Written && looksLikeWholeNumber(by.text)) {
+        const __int128 against = wholeValue(by.text);
+        if (against != 0) {
+          step = (most < 0 ? -most : most) / (against < 0 ? -against : against);
+          return true;
+        }
+      }
+    }
+    if (right.kind == ExprKind::Binary && right.text == "x" &&
+        right.children.size() == 2) {
+      const Expr &one = inside(*right.children[0]);
+      const Expr &other = inside(*right.children[1]);
+      const Expr *named = one.kind == ExprKind::Name ? &one : &other;
+      const Expr *number = named == &one ? &other : &one;
+      if (named->kind == ExprKind::Name && named->text == counter &&
+          number->kind == ExprKind::Written && looksLikeWholeNumber(number->text)) {
+        const __int128 by = wholeValue(number->text);
+        return timesWithin(most < 0 ? -most : most, by < 0 ? -by : by, step);
+      }
+    }
+    return false;
+  }
+
+  // A counted loop with both ends written down runs a known number of times, so
+  // what it adds up is a number rather than a guess.
+  void countingUp(const Stmt &s, Ty counted) {
+    if (!isWhole(counted) || s.value.values.size() != 2)
+      return;
+    __int128 first = 0;
+    __int128 last = 0;
+    if (!wholeItemOf1(s.value.values[0], first) || !wholeItemOf1(s.value.values[1], last))
+      return;
+    if (last < first)
+      return; // it runs no times, and adds nothing up
+    const __int128 trips = last - first + 1;
+    const __int128 widest = (first < 0 ? -first : first) > (last < 0 ? -last : last)
+                                ? (first < 0 ? -first : first)
+                                : (last < 0 ? -last : last);
+
+    for (const StmtPtr &inner : s.body.stmts) {
+      if (inner->kind != StmtKind::Set || !inner->fields.empty() || inner->index)
+        continue;
+      const Symbol *held = lookup(inner->name);
+      if (!held || held->wraps || !isWhole(held->type))
+        continue;
+
+      __int128 step = 0;
+      bool plus = true;
+      const bool known = stepOf(*inner, s.name, widest, step, plus);
+      __int128 total = 0;
+      if (!known || !held->knownStart || !timesWithin(trips, step, total)) {
+        // Something is being added up here that cannot be followed. Saying
+        // nothing would let it come round in silence; refusing would turn away
+        // a program that is very likely fine.
+        if (known || held->knownStart)
+          warn(inner->span, "W0001",
+               "`'" + inner->name + "'` is added to here, and I cannot work out how "
+               "far it gets.",
+               {"a sum that does not fit comes round, and that is rarely what was "
+                "wanted"},
+               {"`wrapping` on the declaration says it is meant to, and then nothing "
+                "is said about it."});
+        continue;
+      }
+      const __int128 reach = plus ? held->start + total : held->start - total;
+      if (reach > mostOf(held->type.kind) || reach < leastOf(held->type.kind))
+        complain(inner->span, "E0534",
+                 "`'" + inner->name + "'` reaches past what a `" +
+                     std::string(name(held->type)) + "` holds.",
+                 {"a sum that does not fit comes round, and that is rarely what was "
+                  "wanted"},
+                 {"the loop's ends are written down, so how far this gets is settled "
+                  "before the program runs; `wrapping` says it is meant to come "
+                  "round."});
+    }
+  }
+
+  static bool wholeItemOf1(const Value &v, __int128 &out) {
+    if (v.items.size() != 1)
+      return false;
+    const Expr &only = *v.items[0];
+    if (only.kind != ExprKind::Written || !looksLikeWholeNumber(only.text))
+      return false;
+    out = wholeValue(only.text);
+    return true;
+  }
+
+  // A value that is one whole number written down, and nothing else.
+  static bool wholeItemOf(const ValueList &list, __int128 &out) {
+    if (list.values.size() != 1 || list.values[0].items.size() != 1)
+      return false;
+    const Expr &only = *list.values[0].items[0];
+    if (only.kind != ExprKind::Written || !looksLikeWholeNumber(only.text))
+      return false;
+    out = wholeValue(only.text);
+    return true;
+  }
+
+  static __int128 wholeValue(std::string_view text) {
+    const bool negative = !text.empty() && text[0] == '-';
+    __int128 magnitude = 0;
+    for (unsigned i = negative ? 1 : 0; i < text.size(); ++i)
+      magnitude = magnitude * 10 + (text[i] - '0');
+    return negative ? -magnitude : magnitude;
+  }
+
+  Symbol *lookupToChange(const std::string &name) {
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+      auto found = scope->find(name);
+      if (found != scope->end())
+        return &found->second;
+    }
+    return nullptr;
+  }
+
+  static bool wrapsChain(const Chain &chain) {
+    for (const ChainSegment &seg : chain.segments)
+      if (!seg.isName && seg.text == "wrapping")
         return true;
     return false;
   }
@@ -991,11 +1217,21 @@ private:
       const Ty type = typeOfChain(s.chain);
       result_.declarations[&s] = type;
       onlyValueChecked(s.value, type, s.span);
-      declare(s.name, Symbol{type, changeable(s.chain), s.nameSpan});
+      Symbol made{type, changeable(s.chain), s.nameSpan, wrapsChain(s.chain)};
+      if (isWhole(type)) {
+        __int128 given = 0;
+        if (wholeItemOf(s.value, given)) {
+          made.knownStart = true;
+          made.start = given;
+        }
+      }
+      declare(s.name, made);
       break;
     }
 
     case StmtKind::Set: {
+      if (Symbol *held = lookupToChange(s.name))
+        held->knownStart = false;
       const Symbol *symbol = lookup(s.name);
       if (!symbol) {
         complain(s.nameSpan, "E0501", "`'" + s.name + "'` is not declared.",
@@ -1168,6 +1404,10 @@ private:
       scopes_.emplace_back();
       if (!keeps)
         declare(s.name, Symbol{type, false, s.nameSpan});
+      // Before the body is walked, not after: a `set` in it is what says the
+      // name no longer holds what it was given, and this is asking where it
+      // started from.
+      countingUp(s, type);
       ++loopDepth_;
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);

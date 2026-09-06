@@ -41,6 +41,13 @@ Checked run(const std::string &text) {
 
 Checked inStart(const std::string &body) { return run("START {\n" + body + "\n}\n"); }
 
+// The first thing said about a body, refusal or not, so a warning can be asked
+// about as easily as a refusal.
+std::string saidIn(const std::string &body) {
+  const Checked c = inStart(body);
+  return c.checked.diagnostics.empty() ? "" : c.checked.diagnostics.front().code;
+}
+
 // The first code from the pass that runs once the middle layer is built, or ""
 // when it had nothing to say.
 std::string built(const std::string &text) {
@@ -291,6 +298,52 @@ void aLoopThatCannotFinishIsRefused() {
 void aNameMaySayItWraps() {
   CHECK(inStart("var.mut.wrapping.int8 'sum' = [*0*];").ok());
   CHECK(inStart("var.wrapping.int8 'n' = [*1*];").ok());
+}
+
+// A counted loop with both ends written down runs a known number of times, so
+// what it adds up is a number rather than a guess.
+void aCountedLoopSaysHowFarItGets() {
+  // Provably past what the type holds: certain, so refused.
+  CHECK(saidIn("var.mut.int8 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + *20*]; }")
+        == "E0534");
+  // Provably inside it: nothing is said.
+  CHECK(saidIn("var.mut.int8 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *5*] { set 'sum' = ['sum' + *20*]; }")
+        == "");
+  // Said to be meant, so nothing is said.
+  CHECK(saidIn("var.mut.wrapping.int8 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + *20*]; }")
+        == "");
+
+  // The counter's own largest step is what the loop counts to, and the shapes
+  // built out of it are bounded too — these are what real programs write, and
+  // a warning on every one of them would be worth nothing.
+  CHECK(saidIn("var.mut.int64 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + 'i']; }")
+        == "");
+  CHECK(saidIn("var.mut.int64 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + ('i' x *3*)]; }")
+        == "");
+  CHECK(saidIn("var.mut.int64 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + ('i' mod *7*)]; }")
+        == "");
+  CHECK(saidIn("var.mut.int64 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + ('i' / *7*)]; }")
+        == "");
+  // A remainder is bounded by what it is taken against, so an `int8` that
+  // cannot hold ten of them is still caught.
+  CHECK(saidIn("var.mut.int8 'sum' = [*0*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + ('i' mod *100*)]; }")
+        == "E0534");
+
+  // A step it cannot follow is a warning, not a refusal: the program builds.
+  CHECK(saidIn("var.mut.int8 'sum' = [*0*];\n    var.int8 'step' = [*3*];\n"
+               "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + 'step']; }")
+        == "W0001");
+  CHECK(inStart("var.mut.int8 'sum' = [*0*];\n    var.int8 'step' = [*3*];\n"
+                "    loop.range.int64 'i' = [*1*, *10*] { set 'sum' = ['sum' + 'step']; }")
+        .ok());
 }
 
 void aPermCounterOutlivesItsLoop() {
@@ -571,6 +624,7 @@ int main() {
   whatIsWrittenDownIsWorkedOut();
   aLoopThatCannotFinishIsRefused();
   aNameMaySayItWraps();
+  aCountedLoopSaysHowFarItGets();
   aPermCounterOutlivesItsLoop();
   theCounterIsInScopeOnlyInTheLoop();
   aManyHoldsSeveralOfOneType();

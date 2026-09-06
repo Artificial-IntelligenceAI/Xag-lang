@@ -780,6 +780,46 @@ Lending one of them lends the struct, because what the loan points at lives
 inside it and goes wherever it goes — so handing the struct over while a field is
 lent is `E0408`, and writing that field behind the loan's back is `E0409`.
 
+## A sum that does not fit
+
+A sum that does not fit comes round, as a processor does it. That is rarely what
+was meant, so the compiler works out how far a counted loop gets and says so
+when it can:
+
+```
+var.mut.int8 'sum' = [*0*];
+loop.range.int64 'i' = [*1*, *10*] {
+    set 'sum' = ['sum' + *20*];      # E0534 — this reaches 200
+}
+```
+
+Both ends of the loop are written down, so how many times it runs is settled
+before the program runs, and so is where the sum gets to. That is certain rather
+than suspected, and it is refused.
+
+Where it cannot be worked out, it is said rather than refused (`W0001`), and the
+program still builds. Refusing there would turn away a correct program because
+the compiler was not clever enough, and saying nothing would let a wrong answer
+through in silence.
+
+### `wrapping` says it is meant
+
+```
+var.mut.wrapping.int8 'sum' = [*0*];
+```
+
+Then nothing is said about it, ever. A checksum is meant to come round, and the
+word says so where the name is declared rather than at every loop that touches
+it. Nothing about the machine changes: sums came round before this word existed
+and still do. What changes is whether the compiler mentions it.
+
+### What it can follow
+
+The counter never passes where the loop stops, so anything built out of it is
+bounded too — `'i'`, `'i' x *3*`, `'i' / *7*`, and `'i' mod *7*`, which never
+reaches 7 whatever it was taken from. These are the shapes real programs write,
+and a warning on every one of them would be a warning nobody reads.
+
 ## What comes in
 
 ```

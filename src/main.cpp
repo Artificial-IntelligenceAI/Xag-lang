@@ -262,49 +262,37 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   if (!readSource(path, text))
     return false;
   const xag::Source source(path, text);
+  // Every pass is reported whether or not it refused. A warning shown only when
+  // something else already went wrong is a warning nobody ever reads.
   const xag::LexResult lexed = xag::lex(source);
-  if (!lexed.ok()) {
-    status = report(source, lexed.diagnostics);
+  if (report(source, lexed.diagnostics) != 0)
     return false;
-  }
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
-  if (!parsed.ok()) {
-    status = report(source, parsed.diagnostics);
+  if (report(source, parsed.diagnostics) != 0)
     return false;
-  }
   const xag::CheckResult checked = xag::check(source, parsed.program);
-  if (!checked.ok()) {
-    status = report(source, checked.diagnostics);
+  if (report(source, checked.diagnostics) != 0)
     return false;
-  }
   const xag::OwnResult owned = xag::own(source, parsed.program);
-  if (!owned.ok()) {
-    status = report(source, owned.diagnostics);
+  if (report(source, owned.diagnostics) != 0)
     return false;
-  }
   built = xag::build(source, parsed.program, checked, settingsUsed(path));
-  if (!built.ok()) {
-    status = report(source, built.diagnostics);
+  if (report(source, built.diagnostics) != 0)
     return false;
-  }
   xag::elaborate(built.mir);
 
   // What is already written down is worked out here, once, rather than by every
   // engine on every run — and what is written down and certainly wrong is
   // refused rather than left to stop when it is reached.
   const xag::FoldResult folded = xag::fold(source, built.mir);
-  if (!folded.ok()) {
-    status = report(source, folded.diagnostics);
+  if (report(source, folded.diagnostics) != 0)
     return false;
-  }
 
   // How long a loan lasts is a question the graph answers, so it is asked here
   // rather than of the tree.
   const xag::RegionResult held = xag::regions(source, built.mir);
-  if (!held.ok()) {
-    status = report(source, held.diagnostics);
+  if (report(source, held.diagnostics) != 0)
     return false;
-  }
   status = 0;
   return true;
 }
