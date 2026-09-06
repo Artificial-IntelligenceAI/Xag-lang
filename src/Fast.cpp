@@ -945,15 +945,15 @@ private:
       switch (one.op) {
       case Op::LoadWhole:
         end(to);
-        to.whole = routine.pool[one.aux].whole;
+        to.whole = pool[one.aux].whole;
         break;
       case Op::LoadReal:
         end(to);
-        to.real = routine.pool[one.aux].real;
+        to.real = pool[one.aux].real;
         break;
       case Op::LoadWide:
         end(to);
-        to.whole = routine.pool[one.aux].whole;
+        to.whole = pool[one.aux].whole;
         break;
       case Op::LoadText: {
         // A view of the pool, held for as long as the machine is, rather than
