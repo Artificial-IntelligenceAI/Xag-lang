@@ -110,6 +110,67 @@ private:
   std::vector<std::string> names_;
   const Body *body_ = nullptr;
   Routine *out_ = nullptr;
+  // How often each local is read and written across the whole body, so that a
+  // temporary made by one step and read by the next can be seen for what it is.
+  std::vector<unsigned> reads_;
+  std::vector<unsigned> writes_;
+  unsigned blockStart_ = 0; // where the code of the block being compiled began
+
+  void countUses(const Body &body) {
+    reads_.assign(body.locals.size(), 0);
+    writes_.assign(body.locals.size(), 0);
+    auto read = [&](const Operand &operand) {
+      if (operand.kind != OperandKind::Written && operand.local < reads_.size())
+        ++reads_[operand.local];
+    };
+    for (const BasicBlock &block : body.blocks) {
+      for (const Statement &s : block.statements) {
+        if (s.kind == StatementKind::Assign) {
+          if (s.place < writes_.size())
+            ++writes_[s.place];
+        } else if (s.place < reads_.size()) {
+          ++reads_[s.place]; // a drop ends it, a store reaches into it
+        }
+        if (s.kind == StatementKind::Store)
+          read(s.at);
+        if (s.conditional && s.flag < reads_.size())
+          ++reads_[s.flag];
+        if (s.value.kind == RValueKind::Ref && s.value.local < reads_.size())
+          ++reads_[s.value.local];
+        for (const Operand &operand : s.value.operands)
+          read(operand);
+      }
+      const Terminator &end = block.terminator;
+      if (end.kind == TerminatorKind::Switch)
+        read(end.condition);
+      if (end.kind == TerminatorKind::Return && end.answers)
+        read(end.answer);
+    }
+  }
+
+  // The steps that write a number and nothing else into `to`, and so can be
+  // pointed at any slot of that number's type.
+  static bool producesNumber(Op op) {
+    switch (op) {
+    case Op::LoadWhole: case Op::LoadReal: case Op::LoadWide:
+    case Op::CopyWhole: case Op::CopyReal:
+    case Op::IntAdd: case Op::IntSub: case Op::IntMul: case Op::IntDiv: case Op::IntMod:
+    case Op::IntPow: case Op::IntLt: case Op::IntGt: case Op::IntLe: case Op::IntGe:
+    case Op::IntEq: case Op::IntNe: case Op::IntAddK: case Op::IntSubK: case Op::IntMulK:
+    case Op::IntLtK: case Op::IntGtK: case Op::IntLeK: case Op::IntGeK: case Op::IntEqK:
+    case Op::IntNeK: case Op::RealAdd: case Op::RealSub: case Op::RealMul: case Op::RealDiv:
+    case Op::RealMod: case Op::RealPow: case Op::RealLt: case Op::RealGt: case Op::RealLe:
+    case Op::RealGe: case Op::RealEq: case Op::RealNe: case Op::WideAdd: case Op::WideSub:
+    case Op::WideMul: case Op::WideDiv: case Op::WideMod: case Op::WidePow:
+    case Op::WideCompare: case Op::DeciAdd: case Op::DeciSub: case Op::DeciMul:
+    case Op::DeciDiv: case Op::DeciMod: case Op::DeciPow: case Op::DeciCompare:
+    case Op::TextCompare: case Op::TextCount: case Op::HoldsSomething:
+    case Op::Not: case Op::And: case Op::Or: case Op::Order:
+      return true;
+    default:
+      return false;
+    }
+  }
 
   const std::string &spelled(TypeRef type) const {
     static const std::string unknown = "?";
@@ -250,6 +311,7 @@ private:
     routine.name = body.name;
     routine.parameters = body.parameters;
     routine.answers = spelled(body.result) != "nothing";
+    countUses(body);
 
     // Slots: one per local, then room above for the working ones.
     unsigned scratch = static_cast<unsigned>(body.locals.size());
@@ -266,6 +328,7 @@ private:
     for (size_t which = 0; which < body.blocks.size(); ++which) {
       const BasicBlock &block = body.blocks[which];
       starts[block.id] = static_cast<unsigned>(routine.code.size());
+      blockStart_ = starts[block.id];
       scratch = static_cast<unsigned>(body.locals.size());
       // A jump to the block laid out next lands where the code would have gone
       // anyway, so it is not emitted. A loop's test block is followed by its
@@ -275,12 +338,7 @@ private:
         return nextIs && body.blocks[which + 1].id == target;
       };
 
-      // Where the code of the block's last statement begins, so that the
-      // terminator can tell whether the instruction before it is that
-      // statement's, and fuse with it if it is.
-      unsigned lastStart = static_cast<unsigned>(routine.code.size());
       for (const Statement &s : block.statements) {
-        lastStart = static_cast<unsigned>(routine.code.size());
         if (s.kind == StatementKind::Drop) {
           emit(s.conditional ? Code{Op::DropIf, s.place, s.flag, 0, 0}
                              : Code{Op::Drop, s.place, 0, 0, 0});
@@ -309,9 +367,11 @@ private:
       } else if (end.kind == TerminatorKind::Switch) {
         const unsigned taken = end.targets.empty() ? 0 : end.targets[0];
         const unsigned otherwise = end.targets.size() > 1 ? end.targets.back() : taken;
-        // When the block's last statement compared two whole numbers into the
-        // very truth the switch reads, the compare does the switch's work too.
-        const Op fused = !block.statements.empty() && routine.code.size() > lastStart &&
+        // When the block's last step compared two whole numbers into the very
+        // truth the switch reads, the compare does the switch's work too. The
+        // step has to be this block's: another block's would be a compare on
+        // the way in, and there may be more than one way in.
+        const Op fused = routine.code.size() > blockStart_ &&
                                  end.condition.kind == OperandKind::Copy &&
                                  routine.code.back().to == end.condition.local
                              ? fusedWithJump(routine.code.back().op)
@@ -414,11 +474,22 @@ private:
         const Type plain = typeNamed(kept);
         const bool number = isWhole(plain) || plain == Type::Bool ||
                             isBinary(plain) || isDecimal(plain);
-        if (number && behind(spelled(value.operands[0].type)) == kept)
+        const bool same = number && behind(spelled(value.operands[0].type)) == kept;
+        // A temporary that the step just before made, that is read here and
+        // nowhere else, and that nothing else writes, need not exist at all:
+        // that step writes here instead. The step has to be this block's, so
+        // that no other way into the block arrives with the copy undone.
+        const bool once = from < reads_.size() && reads_[from] == 1 && writes_[from] == 1 &&
+                          body_->locals[from].name.empty();
+        if (same && once && out_->code.size() > blockStart_ &&
+            out_->code.back().to == from && producesNumber(out_->code.back().op)) {
+          out_->code.back().to = s.place;
+        } else if (same) {
           emit(Code{isBinary(plain) && plain != Type::Bin128 ? Op::CopyReal : Op::CopyWhole,
                     s.place, from, 0, 0});
-        else
+        } else {
           emit(Code{Op::CopySlot, s.place, from, 0, isLoan(kept) ? 1u : 0u});
+        }
       } else {
         // Made here, so it is handed over rather than looked at.
         emit(Code{Op::MoveSlot, s.place, from, 0, 0});
