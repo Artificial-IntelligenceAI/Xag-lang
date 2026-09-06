@@ -564,6 +564,7 @@ private:
   // machine rather than one per frame: a call takes its arguments off the top
   // before it pushes any of its own, so the frames never see each other's.
   std::vector<uint32_t> arguments_;
+  std::vector<XagStr> pieces_; // the texts a join is putting side by side
   std::string trouble_;
   Settings settings_;
   uint64_t steps_ = 0;
@@ -693,13 +694,15 @@ private:
   }
 
   [[gnu::noinline]] void joinText(Slot &to, unsigned count) {
-    std::vector<XagStr> pieces;
-    pieces.reserve(count);
+    // The pieces are gathered into a list kept from one join to the next, so
+    // that joining does not take and give back a list's worth of memory every
+    // time on top of the text's.
+    pieces_.clear();
     for (unsigned i = 0; i < count; ++i)
-      pieces.push_back(behind(stack_[arguments_[arguments_.size() - count + i]]).text);
+      pieces_.push_back(behind(stack_[arguments_[arguments_.size() - count + i]]).text);
     arguments_.resize(arguments_.size() - count);
     XagStr joined{nullptr, 0, 0};
-    xag_str_join(&joined, pieces.data(), pieces.size());
+    xag_str_join(&joined, pieces_.data(), pieces_.size());
     end(to);
     to.text = joined;
     to.owns = true;
