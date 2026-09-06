@@ -566,6 +566,23 @@ private:
   uint64_t steps_ = 0;
   unsigned depth_ = 0;
 
+  // A sum cut down to its width, wrapping as a machine would: the bits above
+  // the width are shifted off the top and the top one that remains is shifted
+  // back down as the sign, or zeros are, for a uint. This is what xag_int_fit
+  // answers, done here because the call to ask it cost more than the add. The
+  // widths it does not cover are still its to answer.
+  static XagInt narrow(XagInt value, uint32_t aux) {
+    const unsigned width = aux >> 1;
+    if (width == 128)
+      return value;
+    if (width == 0)
+      return xag_int_fit(value, width, aux & 1);
+    const unsigned drop = 128 - width;
+    const __uint128_t raised = static_cast<__uint128_t>(value) << drop;
+    return (aux & 1) ? static_cast<XagInt>(raised) >> drop
+                     : static_cast<XagInt>(raised >> drop);
+  }
+
   // Following a loan to the slot it names.
   Slot &behind(Slot &slot) {
     Slot *at = &slot;
@@ -712,19 +729,19 @@ private:
         break;
 
       case Op::IntAdd:
-        to.whole = xag_int_fit(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) +
-                                                  static_cast<__uint128_t>(read(one.b).whole)),
-                               one.aux >> 1, one.aux & 1);
+        to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) +
+                                              static_cast<__uint128_t>(read(one.b).whole)),
+                          one.aux);
         break;
       case Op::IntSub:
-        to.whole = xag_int_fit(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) -
-                                                  static_cast<__uint128_t>(read(one.b).whole)),
-                               one.aux >> 1, one.aux & 1);
+        to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) -
+                                              static_cast<__uint128_t>(read(one.b).whole)),
+                          one.aux);
         break;
       case Op::IntMul:
-        to.whole = xag_int_fit(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) *
-                                                  static_cast<__uint128_t>(read(one.b).whole)),
-                               one.aux >> 1, one.aux & 1);
+        to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) *
+                                              static_cast<__uint128_t>(read(one.b).whole)),
+                          one.aux);
         break;
       case Op::IntDiv:
         to.whole = xag_int_div(read(one.a).whole, read(one.b).whole, one.aux >> 1, one.aux & 1);
