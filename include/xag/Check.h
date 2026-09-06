@@ -52,30 +52,45 @@ unsigned widthOf(Type type); // bits; 0 for the types that have no size
 struct Ty {
   Type kind = Type::Unknown;
   Type element = Type::Unknown; // only when kind is Many
+  // Whether this may hold nothing instead. It stands outside the rest, so
+  // `or-nothing.many.int64` is one of these and `many.or-nothing.int64` is not
+  // — an array of maybes wants a table of types rather than a pair, which is
+  // the same wall `many.many` stands at.
+  bool orNothing = false;
 
   constexpr Ty() = default;
   constexpr Ty(Type k) : kind(k) {}
   constexpr Ty(Type k, Type e) : kind(k), element(e) {}
+  constexpr Ty(Type k, Type e, bool n) : kind(k), element(e), orNothing(n) {}
 
   constexpr bool holds() const { return kind == Type::Many; }
+  constexpr bool mayBeNothing() const { return orNothing; }
+  // What is inside, once the `or-nothing` is taken off.
+  constexpr Ty within() const { return Ty{kind, element, false}; }
 };
 
 constexpr bool operator==(Ty a, Ty b) {
-  return a.kind == b.kind && a.element == b.element;
+  return a.kind == b.kind && a.element == b.element && a.orNothing == b.orNothing;
 }
 constexpr bool operator!=(Ty a, Ty b) { return !(a == b); }
 
 constexpr Ty many(Type element) { return Ty{Type::Many, element}; }
+constexpr Ty orNothingOf(Ty inside) {
+  return Ty{inside.kind, inside.element, true};
+}
 
 // `many int64`, spelled the way it is written apart from the dots — which is
 // also how the middle layer holds it, so nothing has to translate.
 std::string name(Ty type);
 
-inline bool isWhole(Ty t) { return !t.holds() && isWhole(t.kind); }
-inline bool isSigned(Ty t) { return !t.holds() && isSigned(t.kind); }
-inline bool isBinary(Ty t) { return !t.holds() && isBinary(t.kind); }
-inline bool isDecimal(Ty t) { return !t.holds() && isDecimal(t.kind); }
-inline bool isNumber(Ty t) { return !t.holds() && isNumber(t.kind); }
+// A thing that may hold nothing is not a number, however numeric what it holds
+// would be: arithmetic on one has no answer when it holds none, which is the
+// whole reason the type exists.
+inline bool isWhole(Ty t) { return !t.holds() && !t.orNothing && isWhole(t.kind); }
+inline bool isSigned(Ty t) { return !t.holds() && !t.orNothing && isSigned(t.kind); }
+inline bool isBinary(Ty t) { return !t.holds() && !t.orNothing && isBinary(t.kind); }
+inline bool isDecimal(Ty t) { return !t.holds() && !t.orNothing && isDecimal(t.kind); }
+inline bool isNumber(Ty t) { return !t.holds() && !t.orNothing && isNumber(t.kind); }
 inline unsigned widthOf(Ty t) { return t.holds() ? 0 : widthOf(t.kind); }
 
 struct CheckResult {

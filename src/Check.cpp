@@ -41,9 +41,9 @@ const char *name(Type type) {
 }
 
 std::string name(Ty type) {
-  if (!type.holds())
-    return name(type.kind);
-  return std::string("many ") + name(type.element);
+  const std::string inside =
+      type.holds() ? std::string("many ") + name(type.element) : name(type.kind);
+  return type.orNothing ? "or-nothing " + inside : inside;
 }
 
 Type typeNamed(std::string_view word) {
@@ -198,19 +198,35 @@ private:
                {"a size is always written, and only sizes the standard defines"});
       return Type::Unknown;
     }
-    // `many` stands with the type and says the name holds several of it. The
-    // parser has already refused a second level, so one step back is all there is.
+    // `many` stands with the type and says the name holds several of it, and
+    // `or-nothing` stands outside that and says the whole of it may be missing.
+    // The parser has already refused a second level of either.
     const std::size_t n = chain.segments.size();
-    if (n >= 2 && !chain.segments[n - 2].isName && chain.segments[n - 2].text == "many") {
-      if (type == Type::Nothing) {
-        complain(chain.segments[n - 2].span, "E0503",
-                 "there is no holding several of `nothing`.",
-                 {"`nothing` is an answer, and not a value to keep"});
-        return Type::Unknown;
-      }
-      return many(type);
+    std::size_t at = n - 1;
+    bool several = false, orNothing = false;
+    if (at > 0 && !chain.segments[at - 1].isName &&
+        chain.segments[at - 1].text == "many") {
+      several = true;
+      --at;
     }
-    return type;
+    if (at > 0 && !chain.segments[at - 1].isName &&
+        chain.segments[at - 1].text == "or-nothing") {
+      orNothing = true;
+      --at;
+    }
+
+    if ((several || orNothing) && type == Type::Nothing) {
+      complain(chain.segments[at].span, "E0503",
+               several ? "there is no holding several of `nothing`."
+                       : "`nothing` is already nothing, and cannot be it twice.",
+               {"`nothing` is an answer, and not a value to keep"});
+      return Type::Unknown;
+    }
+
+    Ty settled = several ? many(type) : Ty{type};
+    if (orNothing)
+      settled = orNothingOf(settled);
+    return settled;
   }
 
   // An expression whose type is its own, whatever was expected of it. It is
@@ -383,6 +399,22 @@ private:
     case ExprKind::Binary:
       return binary(e, expected);
 
+    case ExprKind::Nothing:
+      // An absence takes its type from what was expected of it, the way a
+      // written value does: there is no telling a missing `str` from a missing
+      // `int64` by looking at it.
+      if (!expected.mayBeNothing()) {
+        complain(e.span, "E0518",
+                 expected.kind == Type::Unknown
+                     ? "nothing here says what this `nothing` would be instead of."
+                     : "a `" + name(expected) + "` is always something.",
+                 {"a type says whether it may hold nothing"},
+                 {"`or-nothing` in the chain is what makes room for this; without it "
+                  "there is no absence for the name to be in."});
+        return Type::Unknown;
+      }
+      return expected;
+
     case ExprKind::Index:
       return element(e);
 
@@ -421,6 +453,31 @@ private:
                  {"`count` answers an `int64`, and two sizes never meet on their own."});
     }
     return Ty{symbol->type.element};
+  }
+
+  // What a condition has to be, which depends on whether a name is being lent
+  // what it holds. Without `holds` it is a `bool`; with it, a thing that may
+  // hold nothing — and asking a `bool` to hold something is its own mistake,
+  // because a `bool` is never absent.
+  Ty asked(const Expr &condition, const std::string &holds, Span where,
+           const char *what) {
+    if (holds.empty()) {
+      const Ty type = expr(condition, Type::Bool);
+      if (type != Ty{} && type != Ty{Type::Bool})
+        complain(condition.span, "E0506",
+                 std::string(what) + " asks a `bool`, and this is a `" + name(type) + "`.",
+                 {"nothing converts on its own"});
+      return type;
+    }
+    const Ty type = expr(condition, Ty{});
+    if (type != Ty{} && !type.mayBeNothing())
+      complain(where, "E0519",
+               "`holds` lends what may not be there, and a `" + name(type) +
+                   "` is always something.",
+               {"a type says whether it may hold nothing"},
+               {"without `or-nothing` there is no absence to ask about, so the arm "
+                "would run every time and lend the same value every time."});
+    return type;
   }
 
   Ty binary(const Expr &e, Ty expected) {
@@ -576,6 +633,38 @@ private:
   // are text — except in a print, which writes them one after another and builds
   // nothing.
   Ty value(const Value &v, Ty expected) {
+    // A `str` where a `str`-or-nothing was wanted is that `str`, held. Nothing
+    // else it could mean, so nothing is written — the same reason `give` takes
+    // no word.
+    if (expected.mayBeNothing()) {
+      if (v.items.size() == 1) {
+        const Expr &only = *v.items[0];
+        if (only.kind == ExprKind::Nothing) {
+          (void)expr(only, expected);
+          return expected;
+        }
+        // A lone item that already may hold nothing is the whole of it, the
+        // same way a lone `many` is the whole array rather than one place.
+        if (selfTyped(only)) {
+          const Ty got = expr(only, expected);
+          if (got == expected || got == Ty{} || got == expected.within())
+            return expected;
+          complain(only.span, "E0506",
+                   "this is a `" + name(got) + "`, and a `" + name(expected) +
+                       "` holds a `" + name(expected.within()) + "`.",
+                   {"nothing converts on its own"});
+          return expected;
+        }
+      }
+      const Ty got = value(v, expected.within());
+      if (got == Ty{} || got == expected.within())
+        return expected;
+      complain(v.span, "E0506",
+               "this is a `" + name(got) + "`, and a `" + name(expected) +
+                   "` holds a `" + name(expected.within()) + "`.",
+               {"nothing converts on its own"});
+      return expected;
+    }
     if (expected.holds())
       return collected(v, expected);
     if (v.items.empty())
@@ -688,14 +777,17 @@ private:
 
     case StmtKind::If:
       for (const Branch &branch : s.branches) {
-        if (branch.condition) {
-          const Ty type = expr(*branch.condition, Type::Bool);
-          if (type != Type::Unknown && type != Type::Bool)
-            complain(branch.condition->span, "E0506",
-                     "an `if` asks a `bool`, and this is a `" + std::string(name(type)) + "`.",
-                     {"nothing converts on its own"});
+        if (!branch.condition) {
+          block(branch.body);
+          continue;
         }
-        block(branch.body);
+        const Ty type = asked(*branch.condition, branch.holds, branch.holdsSpan, "an `if`");
+        scopes_.emplace_back();
+        if (!branch.holds.empty() && type.mayBeNothing())
+          declare(branch.holds, Symbol{type.within(), false, branch.holdsSpan});
+        for (const StmtPtr &inner : branch.body.stmts)
+          statement(*inner);
+        scopes_.pop_back();
       }
       break;
 
@@ -722,14 +814,12 @@ private:
     }
 
     case StmtKind::LoopWhile: {
-      if (s.condition) {
-        const Ty type = expr(*s.condition, Type::Bool);
-        if (type != Type::Unknown && type != Type::Bool)
-          complain(s.condition->span, "E0506",
-                   "a `loop.while` asks a `bool`, and this is a `" +
-                       std::string(name(type)) + "`.",
-                   {"nothing converts on its own"});
-      }
+      Ty carried;
+      if (s.condition)
+        carried = asked(*s.condition, s.holds, s.holdsSpan, "a `loop.while`");
+      scopes_.emplace_back();
+      if (!s.holds.empty() && carried.mayBeNothing())
+        declare(s.holds, Symbol{carried.within(), false, s.holdsSpan});
       ++loopDepth_;
       block(s.body);
       --loopDepth_;

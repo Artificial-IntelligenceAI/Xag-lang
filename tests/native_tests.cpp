@@ -109,6 +109,27 @@ void itEmitsAMany() {
         "  print.stdout['xs'[*3*] \\n]; }\n", "xag_many_fill");
 }
 
+void itEmitsSomethingOrNothing() {
+  // A written value would be folded into a constant on the way in, so this
+  // holds something the optimiser cannot see the far side of.
+  EMITS("fn.int64 three [] { give [*3*]; }\n"
+        "START { var.or-nothing.int64 'n' = [three[]];\n"
+        "  if 'n' holds 'v' { print.stdout['v' \\n]; } }\n", "insertvalue");
+  // What may be missing lets go of what is inside only when there is something.
+  EMITS("START { var.or-nothing.str 's' = [*hi*];\n"
+        "  if 's' holds 't' { print.stdout['t' \\n]; } }\n", "xag_str_drop");
+}
+
+void aLoanPassedOnIsTheLoan() {
+  // Lending something already borrowed passes the loan along rather than making
+  // a loan of the pointer. Every borrow through two functions read rubbish
+  // before this, and no vote between the interpreters would have said so.
+  EMITS("fn.int64 size [ref.str 't'] { give [count['t']]; }\n"
+        "fn.int64 outer [ref.str 'u'] { give [size[ref 'u']]; }\n"
+        "START { var.str 's' = [*hello*]; print.stdout[(outer[ref 's']) \\n]; }\n",
+        "xag_str_count");
+}
+
 } // namespace
 
 int main() {
@@ -117,6 +138,8 @@ int main() {
   itEmitsControlFlow();
   itGuardsAConditionalDrop();
   itEmitsAMany();
+  itEmitsSomethingOrNothing();
+  aLoanPassedOnIsTheLoan();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";

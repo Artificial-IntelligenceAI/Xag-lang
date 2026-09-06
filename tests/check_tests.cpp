@@ -289,6 +289,43 @@ void aManyTravelsWhole() {
   CHECK(run("fn.int64 g [ref.many.int64 'xs'] { give ['xs'[*0*]]; }\n").ok());
 }
 
+void nothingNeedsSomewhereToBe() {
+  CHECK(inStart("var.or-nothing.str 's' = [nothing];").ok());
+  CHECK(inStart("var.str 's' = [nothing];").code(0) == "E0518");
+  CHECK(inStart("print.stdout[nothing \\n];").code(0) == "E0518");
+}
+
+void aValueGoesInWithoutAWord() {
+  // No choice about what it could mean, so nothing is written.
+  CHECK(inStart("var.or-nothing.str 's' = [*hi*];").ok());
+  CHECK(inStart("var.or-nothing.int64 'n' = [*3*];").ok());
+  CHECK(run("fn.or-nothing.int64 f [] { give [*3*]; }\n").ok());
+  // But it still has to be the thing it holds.
+  CHECK(inStart("var.or-nothing.int64 'n' = [*hi*];").code(0) == "E0509");
+}
+
+void holdsAsksSomethingThatMayBeMissing() {
+  CHECK(run("fn.or-nothing.int64 f [] { give [nothing]; }\n"
+            "START { var.or-nothing.int64 'n' = [f[]];\n"
+            "  if 'n' holds 'v' { print.stdout['v' \\n]; } }\n").ok());
+
+  // A `bool` is never absent, so there is nothing to ask about.
+  CHECK(inStart("var.bool 'b' = [*true*];\n"
+                "    if 'b' holds 'x' { }").code(0) == "E0519");
+  // And without `holds`, a thing that may hold nothing is not a condition.
+  CHECK(inStart("var.or-nothing.int64 'n' = [*1*];\n"
+                "    if 'n' { }").code(0) == "E0506");
+}
+
+void whatIsHeldIsTheTypeWithoutTheAbsence() {
+  CHECK(run("fn.int64 twice [int64 'n'] { give ['n' + 'n']; }\n"
+            "START { var.or-nothing.int64 'n' = [*2*];\n"
+            "  if 'n' holds 'v' { print.stdout[twice['v'] \\n]; } }\n").ok());
+  // Arithmetic on the whole thing has no answer when it holds none.
+  CHECK(inStart("var.or-nothing.int64 'n' = [*1*];\n"
+                "    var.int64 'm' = ['n' + *1*];").code(0) == "E0506");
+}
+
 } // namespace
 
 int main() {
@@ -320,6 +357,10 @@ int main() {
   fillNeedsAValueThatCopies();
   showingAManyIsRefused();
   aManyTravelsWhole();
+  nothingNeedsSomewhereToBe();
+  aValueGoesInWithoutAWord();
+  holdsAsksSomethingThatMayBeMissing();
+  whatIsHeldIsTheTypeWithoutTheAbsence();
 
   if (failures == 0)
     std::cout << "all check tests passed\n";

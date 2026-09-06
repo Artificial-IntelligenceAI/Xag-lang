@@ -36,6 +36,8 @@ bool isLoan(const std::string &type) {
   return type.rfind("ref ", 0) == 0 || type.rfind("refmut ", 0) == 0;
 }
 
+bool mayBeNothing(const std::string &type);
+
 std::string withoutLoan(const std::string &type) {
   if (type.rfind("refmut ", 0) == 0)
     return type.substr(7);
@@ -46,6 +48,25 @@ std::string withoutLoan(const std::string &type) {
 
 bool holdsMany(const std::string &type) {
   return withoutLoan(type).rfind("many ", 0) == 0;
+}
+
+bool mayBeNothing(const std::string &type) {
+  return withoutLoan(type).rfind("or-nothing ", 0) == 0;
+}
+
+// A value handed over by being copied, which is everything but text and the
+// things that hold it.
+bool copiesNamed(const std::string &type) {
+  if (type == "bool")
+    return true;
+  const Type named = typeNamed(type);
+  return isNumber(named);
+}
+
+// What is left once the `or-nothing` is off it.
+std::string within(const std::string &type) {
+  const std::string bare = withoutLoan(type);
+  return bare.rfind("or-nothing ", 0) == 0 ? bare.substr(11) : bare;
 }
 
 std::string elementOf(const std::string &type) {
@@ -123,6 +144,12 @@ private:
       return str_;
     if (isLoan(spelled))
       return builder_.getPtrTy();
+    if (mayBeNothing(spelled))
+      // Whether it is there, and what it is. Two fields, because a `str` that
+      // is absent and a `str` that is empty are different things and no bit
+      // pattern of one is free to mean the other.
+      return llvm::StructType::get(context_,
+                                   {builder_.getInt1Ty(), typeFor(within(spelled))});
     if (holdsMany(spelled))
       return many_;
     const Type named = typeNamed(spelled);
@@ -230,6 +257,9 @@ private:
         builder_.CreateStore(llvm::Constant::getNullValue(str_), slots_[local.id]);
       else if (holdsMany(held) && !isLoan(held))
         builder_.CreateStore(llvm::Constant::getNullValue(many_), slots_[local.id]);
+      else if (mayBeNothing(held) && !isLoan(held))
+        builder_.CreateStore(llvm::Constant::getNullValue(typeFor(held)),
+                             slots_[local.id]);
     }
 
     unsigned i = 0;
@@ -279,6 +309,11 @@ private:
     const std::string &type = nameOf(operand.type);
     switch (operand.kind) {
     case OperandKind::Written: {
+      if (operand.written == "nothing" && mayBeNothing(type)) {
+        auto *shell = typeFor(type);
+        auto *none = llvm::Constant::getNullValue(shell);
+        return none; // the flag is false, and what it does not hold is not read
+      }
       if (type == "bool")
         return builder_.getInt1(operand.written == "true");
       const Type named = typeNamed(type);
@@ -381,6 +416,30 @@ private:
 
     if (s.kind == StatementKind::Drop) {
       const std::string held = localType(s.place);
+
+      // Something that may hold nothing lets go of what is inside only when
+      // there is something inside. The flag is in the value rather than in a
+      // local beside it, so the branch is read from the value itself.
+      if (mayBeNothing(held)) {
+        const std::string inner = within(held);
+        if (copiesNamed(inner) || inner == "nothing")
+          return;
+        llvm::Function *function = builder_.GetInsertBlock()->getParent();
+        auto *letGo = llvm::BasicBlock::Create(context_, "letgo", function);
+        auto *after = llvm::BasicBlock::Create(context_, "kept", function);
+        auto *whole = builder_.CreateLoad(typeFor(held), slots_[s.place]);
+        builder_.CreateCondBr(builder_.CreateExtractValue(whole, 0), letGo, after);
+        builder_.SetInsertPoint(letGo);
+        auto *at = builder_.CreateStructGEP(typeFor(held), slots_[s.place], 1);
+        builder_.CreateCall(runtime_[inner == "str" ? "xag_str_drop"
+                                    : elementOf(inner) == "str" ? "xag_many_drop_str"
+                                                                : "xag_many_drop"],
+                            {at});
+        builder_.CreateBr(after);
+        builder_.SetInsertPoint(after);
+        return;
+      }
+
       if (held != "str" && !holdsMany(held))
         return;
       const char *how = held == "str"          ? "xag_str_drop"
@@ -405,6 +464,17 @@ private:
     llvm::Value *value = evaluate(s.value);
     if (!value)
       return;
+
+    // A value going into something that may hold nothing is that value, held.
+    // The absence writes itself; everything else has to be wrapped on the way.
+    const std::string &into = localType(s.place);
+    if (mayBeNothing(into) && !mayBeNothing(nameOf(s.value.type))) {
+      auto *shell = llvm::UndefValue::get(typeFor(into));
+      auto *held = builder_.CreateInsertValue(shell, builder_.getInt1(true), 0);
+      builder_.CreateStore(builder_.CreateInsertValue(held, value, 1),
+                           slots_[s.place]);
+      return;
+    }
     // Writing to a name that holds a loan writes through it.
     if (isLoan(localType(s.place)) && nameOf(s.value.type) == "str") {
       auto *through = builder_.CreateLoad(builder_.getPtrTy(), slots_[s.place]);
@@ -523,7 +593,15 @@ private:
       return value.operands.empty() ? nullptr : read(value.operands[0]);
 
     case RValueKind::Ref:
-      return slots_[value.local];
+      // Lending something that is itself a loan passes the loan along; it does
+      // not make a loan of the pointer. Taking the address here handed the
+      // callee somewhere to find an `XagStr` rather than the `XagStr`, and
+      // every borrow passed through two functions read rubbish. Both
+      // interpreters follow a chain of loans, which is why only this engine
+      // was wrong and no vote between the other two would have said so.
+      return isLoan(localType(value.local))
+                 ? builder_.CreateLoad(builder_.getPtrTy(), slots_[value.local])
+                 : slots_[value.local];
 
     case RValueKind::Unary:
       return builder_.CreateNot(read(value.operands[0]));
@@ -543,6 +621,21 @@ private:
       builder_.CreateCall(runtime_["xag_str_join"],
                           {out, array, builder_.getInt64(count)});
       return builder_.CreateLoad(str_, out);
+    }
+
+    case RValueKind::Holds: {
+      auto *whole = read(value.operands[0]);
+      return builder_.CreateExtractValue(whole, 0);
+    }
+
+    case RValueKind::Inside: {
+      // Lent where what is inside has an owner, read out where it has not.
+      const std::string held = within(operandType(value.operands[0]));
+      auto *where = slots_[value.operands[0].local];
+      auto *at = builder_.CreateStructGEP(typeFor(operandType(value.operands[0])),
+                                          where, 1);
+      return copiesNamed(held) ? builder_.CreateLoad(typeFor(held), at)
+                               : static_cast<llvm::Value *>(at);
     }
 
     case RValueKind::Call:

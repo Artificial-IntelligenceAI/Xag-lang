@@ -149,6 +149,11 @@ private:
   }
 
   // A parameter's type is written on its chain, loan and all: `ref str`.
+  // What is left of a spelled type once `or-nothing` is off it.
+  static std::string within(const std::string &spelled) {
+    return spelled.rfind("or-nothing ", 0) == 0 ? spelled.substr(11) : spelled;
+  }
+
   static std::string chainType(const Chain &chain) {
     std::string mode;
     for (const ChainSegment &seg : chain.segments) {
@@ -160,9 +165,17 @@ private:
     if (chain.segments.empty())
       return mode + "?";
     const std::size_t n = chain.segments.size();
-    if (n >= 2 && !chain.segments[n - 2].isName && chain.segments[n - 2].text == "many")
-      return mode + "many " + chain.type().text;
-    return mode + chain.type().text;
+    std::size_t at = n - 1;
+    std::string built = chain.type().text;
+    if (at > 0 && !chain.segments[at - 1].isName &&
+        chain.segments[at - 1].text == "many") {
+      built = "many " + built;
+      --at;
+    }
+    if (at > 0 && !chain.segments[at - 1].isName &&
+        chain.segments[at - 1].text == "or-nothing")
+      built = "or-nothing " + built;
+    return mode + built;
   }
 
   // What is left of a spelled type once its loan word is off, and what one of
@@ -344,6 +357,18 @@ private:
       return into;
     }
 
+    case ExprKind::Nothing: {
+      // An absence is a value like any other, written down where it stands.
+      const std::string spelled = spell(type);
+      const unsigned into = owningTemporary(typeRef(spelled));
+      emit(Statement{StatementKind::Assign, e.span, into, {},
+                     RValue{RValueKind::Use, {}, {}, 0,
+                            {Operand{OperandKind::Written, 0, "nothing",
+                                     typeRef(spelled)}},
+                            typeRef(spelled)}});
+      return into;
+    }
+
     case ExprKind::Call: {
       std::string callee;
       for (const std::string &part : e.path)
@@ -409,8 +434,13 @@ private:
 
   void assignInto(unsigned place, const ValueList &list, Span span) {
     const std::string spelled = body_.types[body_.locals[place].type.index];
-    if (withoutLoan(spelled).rfind("many ", 0) == 0) {
-      collectInto(place, list, span, spelled);
+    // Past the `or-nothing` as well as the loan: a name that may hold nothing
+    // may hold a `many`, and the items still belong in its places rather than
+    // joined into one. Stopping at the loan sent `or-nothing.many.int64` down
+    // the joining path and made three numbers into the text "123".
+    const std::string held = within(withoutLoan(spelled));
+    if (held.rfind("many ", 0) == 0) {
+      collectInto(place, list, span, held);
       return;
     }
     if (list.values.empty())
@@ -445,6 +475,42 @@ private:
   }
 
   // ---- statements
+
+  // A condition that lends what it holds: the test is whether there is anything
+  // there, and the name is bound to it inside the arm. Written once, because
+  // `if` and `loop.while` ask it the same way.
+  Operand testing(const Expr &condition, const std::string &holds,
+                  unsigned &carried, std::string &held) {
+    if (holds.empty())
+      return operandOf(condition);
+    carried = lower(condition);
+    held = body_.types[body_.locals[carried].type.index];
+    const unsigned answer = temporary(typeRef("bool"), true);
+    emit(Statement{StatementKind::Assign, condition.span, answer, {},
+                   RValue{RValueKind::Holds, {}, {}, 0,
+                          {Operand{OperandKind::Copy, carried, {},
+                                   body_.locals[carried].type}},
+                          typeRef("bool")}});
+    return Operand{OperandKind::Copy, answer, {}, typeRef("bool")};
+  }
+
+  // Inside the arm, the name stands for what was there. It is lent rather than
+  // taken, so nothing is dropped through it.
+  void bindHeld(const std::string &holds, unsigned carried, const std::string &spelled,
+                Span where) {
+    if (holds.empty())
+      return;
+    const std::string inner = within(spelled);
+    const bool copies = copiesNamed(inner);
+    const std::string as = copies ? inner : "ref " + inner;
+    const unsigned into = addLocal(holds, typeRef(as), copies);
+    emit(Statement{StatementKind::Assign, where, into, {},
+                   RValue{RValueKind::Inside, {}, {}, 0,
+                          {Operand{OperandKind::Copy, carried, {},
+                                   body_.locals[carried].type}},
+                          typeRef(as)}});
+    names_.back()[holds] = into;
+  }
 
   void statement(const Stmt &s) {
     switch (s.kind) {
@@ -490,13 +556,17 @@ private:
           current_ = after;
           return;
         }
-        const Operand condition = operandOf(*branch.condition);
+        unsigned carried = 0;
+        std::string held;
+        const Operand condition =
+            testing(*branch.condition, branch.holds, carried, held);
         const unsigned taken = addBlock();
         const unsigned otherwise = addBlock();
         finish(Terminator{TerminatorKind::Switch, branch.span, condition,
                           {"true"}, {taken, otherwise}, false, {}});
         current_ = taken;
         openScope();
+        bindHeld(branch.holds, carried, held, branch.holdsSpan);
         for (const StmtPtr &inner : branch.body.stmts)
           statement(*inner);
         closeScope();
@@ -570,14 +640,18 @@ private:
       finish(Terminator{TerminatorKind::Goto, s.span, {}, {}, {header}, false, {}});
 
       current_ = header;
+      unsigned carried = 0;
+      std::string held;
       const Operand condition =
-          s.condition ? operandOf(*s.condition) : Operand{OperandKind::Written, 0, "true", typeRef("bool")};
+          s.condition ? testing(*s.condition, s.holds, carried, held)
+                      : Operand{OperandKind::Written, 0, "true", typeRef("bool")};
       finish(Terminator{TerminatorKind::Switch, s.span, condition, {"true"},
                         {inside, after}, false, {}});
 
       current_ = inside;
       loops_.push_back(Loop{header, after});
       openScope();
+      bindHeld(s.holds, carried, held, s.holdsSpan);
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);
       closeScope();

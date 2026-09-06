@@ -77,6 +77,19 @@ struct Binding {
   Span movedAt;
 };
 
+// What `holds` lends: a borrow of what was there, so it is read where it stands
+// and never handed over. The type is only wanted to know whether it is the sort
+// of thing that copies.
+Binding heldBinding(Span where) {
+  Binding out;
+  out.mode = Mode::Ref;
+  out.copies = false;
+  out.elementCopies = true;
+  out.changes = false;
+  out.span = where;
+  return out;
+}
+
 // `mut` on what a name owns, `refmut` on what it borrows. Either way the name
 // may be written through, and nothing else may.
 bool changeable(const Chain &chain) {
@@ -467,7 +480,12 @@ private:
         restore(before);
         if (branch.condition)
           read(*branch.condition);
-        block(branch.body);
+        scopes_.emplace_back();
+        if (!branch.holds.empty())
+          scopes_.back()[branch.holds] = heldBinding(branch.holdsSpan);
+        for (const StmtPtr &inner : branch.body.stmts)
+          statement(*inner);
+        scopes_.pop_back();
         for (const auto &[binding, was] : before)
           if (!was && binding->moved)
             movedSomewhere.emplace_back(binding, binding->movedAt);
@@ -489,6 +507,8 @@ private:
         for (const ExprPtr &item : value.items)
           read(*item);
       scopes_.emplace_back();
+      if (!s.holds.empty())
+        scopes_.back()[s.holds] = heldBinding(s.holdsSpan);
       if (s.kind == StmtKind::LoopRange)
         scopes_.back()[s.name] =
             Binding{Mode::Owned, copyChain(s.chain), copyType(s.chain.type().text),

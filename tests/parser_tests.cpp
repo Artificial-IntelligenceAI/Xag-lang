@@ -277,6 +277,27 @@ void chainsThatWereAlwaysGoodStillAre() {
   CHECK(inStart("var.refmut.str 's' = [refmut 'other'];").ok());
 }
 
+void aTypeMaySayItHoldsNothing() {
+  CHECK(inStart("var.or-nothing.str 's' = [*hi*];").ok());
+  CHECK(inStart("var.or-nothing.many.int64 'xs' = [*1*];").ok());
+  CHECK(run("fn.or-nothing.int64 f [] { give [nothing]; }\n").ok());
+
+  // One absence is every absence.
+  CHECK(inStart("var.or-nothing.or-nothing.str 's' = [*hi*];").code(0) == "E0211");
+  // `many` of them wants a table of types rather than a pair of words.
+  CHECK(inStart("var.many.or-nothing.int64 'xs' = [*1*];").code(0) == "E0209");
+}
+
+void holdsLendsWhatIsThere() {
+  const Parsed p = inStart("if 'a' holds 'text' { print.stdout['text' \\n]; }");
+  CHECK(p.ok());
+  CHECK(p.has("name 'text'"));
+
+  CHECK(inStart("loop.while 'a' holds 'line' { break; }").ok());
+  // It lends to a name, and a word is not one.
+  CHECK(inStart("if 'a' holds text { }").code(0) == "E0101");
+}
+
 } // namespace
 
 int main() {
@@ -302,6 +323,8 @@ int main() {
   anElementIsReadAndWritten();
   manyStandsWithTheType();
   chainsThatWereAlwaysGoodStillAre();
+  aTypeMaySayItHoldsNothing();
+  holdsLendsWhatIsThere();
 
   if (failures == 0)
     std::cout << "all parser tests passed\n";

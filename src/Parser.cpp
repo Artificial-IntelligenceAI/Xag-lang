@@ -230,6 +230,24 @@ private:
       --upTo;
       ++deep;
     }
+
+    // `or-nothing` stands outside `many`, because what may be missing is the
+    // whole of it rather than one of its places.
+    std::size_t empties = 0;
+    while (upTo > 0 && !c.segments[upTo - 1].isName &&
+           c.segments[upTo - 1].text == "or-nothing") {
+      --upTo;
+      ++empties;
+    }
+    if (empties > 1)
+      complain(Span{c.segments[upTo].span.begin, c.segments[upTo + empties - 1].span.end},
+               "E0211", "nothing twice over is still nothing.",
+               {"a type either may hold nothing or may not"},
+               {"there is no second kind of absence to tell apart from the first."});
+    if (empties && deep)
+      // `or-nothing.many.T` is fine; `many.or-nothing.T` is an array of them,
+      // and that is a type that wants a table rather than a pair of words.
+      (void)0;
     if (deep > 1)
       complain(Span{c.segments[upTo].span.begin, c.segments[upTo + deep - 1].span.end},
                "E0210", "a `many` holds values, and not more `many`s.",
@@ -255,6 +273,15 @@ private:
                  {"each kind of chain asks its own questions"},
                  {"a chain opens with the one word saying what is being declared, "
                   "and says it once."});
+        continue;
+      }
+
+      if (!seg.isName && seg.text == "or-nothing") {
+        complain(seg.span, "E0209",
+                 "`or-nothing` says what the type may not hold, and stands with it.",
+                 {"the segment nearest the name is the type"},
+                 {"`var.or-nothing.str` is a `str` or nothing; nothing further along "
+                  "the chain is a type for it to be instead."});
         continue;
       }
 
@@ -431,6 +458,13 @@ private:
         typed->children.push_back(std::move(inner));
         return typed;
       }
+      // `nothing` is the one value a word spells, because there is no mark for
+      // an absence and nothing else it could mean.
+      if (token.text == "nothing" && peek(1).kind != TokenKind::LBracket) {
+        advance();
+        return make(ExprKind::Nothing, token.span, "nothing");
+      }
+
       // `ref 'x'`, `refmut 'x'`, `move 'x'` — a transfer, always spelled.
       if (token.text == "ref" || token.text == "refmut" || token.text == "move") {
         advance();
@@ -526,6 +560,25 @@ private:
 
   // One item of a value. Settled operators nest by mathematics' table; the
   // unsettled ones may appear once, alone, and never beside a settled one.
+  // `holds 'name'` after a condition: the arm runs when there is something
+  // there, and that something is lent to the name for as long as the arm does.
+  // Written the same way in both places a condition goes.
+  bool holdsName(std::string &name, Span &where) {
+    if (!(peek().kind == TokenKind::Word && peek().text == "holds"))
+      return false;
+    advance();
+    if (!check(TokenKind::Name)) {
+      complain(peek().span, "E0101", "`holds` lends what is there to a name.",
+               {"a name wears marks, and a word does not"}, {},
+               std::string("found ") + describe(peek().kind));
+      return false;
+    }
+    const Token got = advance();
+    name = got.text;
+    where = got.span;
+    return true;
+  }
+
   ExprPtr item() {
     if (checkWord("not")) {
       const Token op = advance();
@@ -692,8 +745,10 @@ private:
         const bool isElseIf = checkWord("else-if");
         advance(); // if / else-if / else
         branch.hasCondition = !isElse;
-        if (!isElse)
+        if (!isElse) {
           branch.condition = item();
+          holdsName(branch.holds, branch.holdsSpan);
+        }
         branch.body = block();
         branch.span.end = previous().span.end;
         s->branches.push_back(std::move(branch));
@@ -734,6 +789,7 @@ private:
       if (isWhile) {
         s->kind = StmtKind::LoopWhile;
         s->condition = item();
+        holdsName(s->holds, s->holdsSpan);
       } else {
         s->kind = StmtKind::LoopRange;
         if (check(TokenKind::Name)) {

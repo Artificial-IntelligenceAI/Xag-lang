@@ -197,6 +197,10 @@ private:
       } else if (type == "bool") {
         value.kind = Value::Kind::Number;
         value.number = operand.written == "true" ? 1 : 0;
+      } else if (operand.written == "nothing" &&
+                 type.rfind("or-nothing ", 0) == 0) {
+        // Holding none of whatever it may hold.
+        value.kind = Value::Kind::Nothing;
       } else {
         value.kind = Value::Kind::Text;
         std::string written = unescape(operand.written);
@@ -345,6 +349,25 @@ private:
         answer = viewOf((*at->places)[place]);
       endValue(array);
       endValue(where);
+      return answer;
+    }
+
+    case RValueKind::Holds: {
+      Value held = read(value.operands[0]);
+      Value *at = behind(held);
+      Value answer;
+      answer.kind = Value::Kind::Number;
+      answer.number = at && at->kind != Value::Kind::Nothing ? 1 : 0;
+      endValue(held);
+      return answer;
+    }
+
+    case RValueKind::Inside: {
+      // Lent, not taken: what holds it goes on holding it.
+      Value held = read(value.operands[0]);
+      Value *at = behind(held);
+      Value answer = at ? viewOf(*at) : Value{};
+      endValue(held);
       return answer;
     }
 

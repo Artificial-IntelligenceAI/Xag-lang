@@ -33,6 +33,7 @@ struct Printer {
     case ExprKind::Typed:   out << "typed " << e.text << '\n'; break;
     case ExprKind::Borrow:  out << "transfer " << e.text << '\n'; break;
     case ExprKind::Index:   out << "element of '" << e.text << "'\n"; break;
+    case ExprKind::Nothing: out << "nothing\n"; break;
     case ExprKind::Unary:   out << "unary " << e.text << '\n'; break;
     case ExprKind::Binary:  out << "binary " << e.text << '\n'; break;
     case ExprKind::Group:   out << "group\n"; break;

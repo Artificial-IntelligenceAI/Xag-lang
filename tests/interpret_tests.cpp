@@ -328,6 +328,26 @@ void itCountsWhatEachPlaceHolds() {
        "4 1\n");
 }
 
+void itHoldsSomethingOrNothing() {
+  SAYS("fn.or-nothing.str pick [int64 'n'] {\n"
+       "  if 'n' > *0* { give [*yes*]; }\n"
+       "  give [nothing]; }\n"
+       "START {\n"
+       "  var.or-nothing.str 'a' = [pick[*1*]];\n"
+       "  if 'a' holds 't' { print.stdout['t' \\n]; }\n"
+       "  var.or-nothing.str 'b' = [pick[*0*]];\n"
+       "  if 'b' holds 't' { print.stdout[str:*wrong* \\n]; }\n"
+       "  print.stdout[str:*done* \\n]; }\n",
+       "yes\ndone\n");
+
+  // An absence that holds text lets go of it, and one that holds none has
+  // nothing to let go of — both have to leave the balance clear.
+  SAYS("START { var.or-nothing.str 'a' = [*held*];\n"
+       "  if 'a' holds 't' { print.stdout[(count['t']) \\n]; } }\n", "4\n");
+  SAYS("START { var.or-nothing.str 'a' = [nothing];\n"
+       "  print.stdout[str:*fine* \\n]; }\n", "fine\n");
+}
+
 } // namespace
 
 int main() {
@@ -350,6 +370,7 @@ int main() {
   itHoldsSeveralValues();
   itEndsEveryPlaceItHeld();
   itCountsWhatEachPlaceHolds();
+  itHoldsSomethingOrNothing();
 
   if (failures == 0)
     std::cout << "all interpreter tests passed\n";

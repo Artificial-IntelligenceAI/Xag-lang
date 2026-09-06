@@ -51,6 +51,7 @@ enum class ExprKind {
   Typed,   // str:*hello*               text is the type, one child
   Borrow,  // ref 'x' / refmut / move   text is the word, one child
   Index,   // 'xs'[*2*]                 text is the name, one child: the index
+  Nothing, // nothing                   what an `or-nothing` holds when it holds none
   Call,    // print.stdout[…]           path is the dotted callee, args
   Unary,   // not 'x'                   text is the word, one child
   Binary,  // 'a' + 'b'                 text is the operator, two children
@@ -82,6 +83,10 @@ struct Branch {
   Span span;
   bool hasCondition = true;
   ExprPtr condition;
+  // `if 'x' holds 'value' { … }` — the arm runs when the condition holds
+  // something, and `holds` is the name that something is lent to inside it.
+  std::string holds;
+  Span holdsSpan;
   Block body;
 };
 
@@ -106,6 +111,8 @@ struct Stmt {
   ExprPtr index;               // Set, when written `set 'xs'[*2*] = …`
   ValueList value;             // Declare, Set, LoopRange, Give
   ExprPtr condition;           // LoopWhile
+  std::string holds;           // LoopWhile, when written `loop.while … holds 'x'`
+  Span holdsSpan;              //  "
   std::vector<Branch> branches;// If
   Block body;                  // loops
   ExprPtr call;                // Call

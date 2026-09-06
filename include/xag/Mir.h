@@ -48,6 +48,8 @@ enum class RValueKind {
   Collect, // pieces side by side, kept as several — a `many`
   Element, // two operands: a `many`, and which of its places
   Fill,    // two operands: what to put in every place, and how many places
+  Holds,   // one operand: whether something that may hold nothing holds anything
+  Inside,  // one operand: what it holds, which the caller has already asked about
 };
 
 struct RValue {

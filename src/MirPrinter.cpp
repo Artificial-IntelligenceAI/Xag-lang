@@ -53,6 +53,10 @@ struct Printer {
     case RValueKind::Fill:
       text = "fill(";
       break;
+    case RValueKind::Holds:
+      return "holds(" + operand(v.operands[0]) + ")";
+    case RValueKind::Inside:
+      return "inside(" + operand(v.operands[0]) + ")";
     }
     for (unsigned i = 0; i < v.operands.size(); ++i)
       text += (i ? ", " : "") + operand(v.operands[i]);

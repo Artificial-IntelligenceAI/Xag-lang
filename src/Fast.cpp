@@ -22,6 +22,9 @@ struct Slot {
   // A `many`: the places, held the way text is. One owner ends them, and
   // everything reading them holds a view with no claim.
   std::vector<Slot> *places = nullptr;
+  // Whether this is the absence rather than a value. Only a slot whose type may
+  // hold nothing is ever asked, so the flag costs the others nothing.
+  bool empty = false;
 };
 
 enum class Op : uint8_t {
@@ -36,6 +39,7 @@ enum class Op : uint8_t {
   DeciAdd, DeciSub, DeciMul, DeciDiv, DeciMod, DeciPow, DeciCompare,
   TextCompare, TextJoin, TextCount,
   MakeMany, FillMany, ElementAt, StoreAt,
+  LoadNone, HoldsSomething, TakeInside,
   Not, And, Or,
   Order, // turn a -1/0/1 into a truth, by the test in `aux`
   PushArg, Call, PrintWhole, PrintReal, PrintWide, PrintDeci, PrintText, PrintBool,
@@ -164,6 +168,9 @@ private:
                     &read);
       value.real = read;
       how = Op::LoadReal;
+    } else if (operand.written == "nothing" &&
+               spelled(operand.type).rfind("or-nothing ", 0) == 0) {
+      how = Op::LoadNone;
     } else {
       value.text = unescape(operand.written);
       how = Op::LoadText;
@@ -283,6 +290,18 @@ private:
       const uint32_t what = into(value.operands[0], scratch);
       const uint32_t places = into(value.operands[1], scratch);
       emit(Code{Op::FillMany, s.place, what, places, 0});
+      return;
+    }
+
+    case RValueKind::Holds: {
+      const uint32_t of = into(value.operands[0], scratch);
+      emit(Code{Op::HoldsSomething, s.place, of, 0, 0});
+      return;
+    }
+
+    case RValueKind::Inside: {
+      const uint32_t of = into(value.operands[0], scratch);
+      emit(Code{Op::TakeInside, s.place, of, 0, 0});
       return;
     }
 
@@ -517,6 +536,10 @@ private:
   }
 
   void end(Slot &slot) {
+    if (slot.empty) {
+      slot = Slot{};
+      return;
+    }
     if (slot.owns && slot.places) {
       for (Slot &held : *slot.places)
         end(held);
@@ -712,6 +735,22 @@ private:
       case Op::TextCompare:
         to.whole = xag_str_compare(&read(one.a).text, &read(one.b).text);
         break;
+      case Op::LoadNone:
+        end(to);
+        to.empty = true;
+        break;
+      case Op::HoldsSomething:
+        to.whole = read(one.a).empty ? 0 : 1;
+        break;
+      case Op::TakeInside: {
+        // Lent, not taken.
+        Slot seen = read(one.a);
+        seen.owns = false;
+        end(to);
+        to = seen;
+        break;
+      }
+
       case Op::TextCount: {
         Slot &of = read(one.a);
         to.whole = of.places ? static_cast<XagInt>(of.places->size())

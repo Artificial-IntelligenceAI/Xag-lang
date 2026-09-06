@@ -239,6 +239,14 @@ void lendingAnElementLendsTheWholeArray() {
                     "    print.stdout['ws'[*0*] \\n];").code(0) != "(none)");
 }
 
+void whatHoldsLendsIsNotYoursToGiveAway() {
+  CHECK(withHelpers("var.or-nothing.str 's' = [*hi*];\n"
+                    "    if 's' holds 'text' { keep[move 'text']; }").code(0) == "E0404");
+  // Reading it and lending it are both fine.
+  CHECK(withHelpers("var.or-nothing.str 's' = [*hi*];\n"
+                    "    if 's' holds 'text' { print.stdout[(look[ref 'text']) \n]; }").ok());
+}
+
 } // namespace
 
 int main() {
@@ -258,6 +266,7 @@ int main() {
   everyPlaceIsFilledOnce();
   nothingIsTakenOutOfAMany();
   lendingAnElementLendsTheWholeArray();
+  whatHoldsLendsIsNotYoursToGiveAway();
 
   if (failures == 0)
     std::cout << "all ownership tests passed\n";

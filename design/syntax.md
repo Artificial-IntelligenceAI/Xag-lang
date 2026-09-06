@@ -566,6 +566,63 @@ whole body of `total` at `-O3`:
 A load, an add, an increment and the loop's own test. Nothing of the check is
 left in it.
 
+## A type may say it holds nothing
+
+Some things have no answer. Reading when there is nothing left to read, turning
+text that is not a number into one — and until there was somewhere to put that,
+the only answers were to stop the program or to settle it once in a file. Now a
+type can say it.
+
+```
+var.or-nothing.str 'line' = [nothing];
+
+fn.or-nothing.int64 half [int64 'n'] {
+    if 'n' == *0* { give [nothing]; }
+    give ['n' / *2*];
+}
+```
+
+`or-nothing` stands with the type, as `many` does, and outside it: an
+`or-nothing.many.int64` is an array or nothing. An array *of* them is not
+written yet (`E0209`), and neither is `or-nothing.or-nothing` (`E0211`), because
+one absence is every absence.
+
+### Putting something in takes no word
+
+There is no choice about what a `str` means where a `str`-or-nothing is wanted,
+and a word is written where there is a choice — the same reason `give` has none:
+
+```
+var.or-nothing.str 's' = [*hi*];        # held
+var.or-nothing.str 'e' = [nothing];     # not
+```
+
+`nothing` is the one value spelled as a word rather than marked, because there
+is no mark for an absence and nothing else it could mean. It takes its type from
+what was expected of it: a missing `str` and a missing `int64` do not look
+different, so something has to have said which (`E0518`).
+
+### Getting at it lends, and cannot be skipped
+
+```
+if 'h' holds 'value' {
+    print.stdout['value' \n];
+}
+
+loop.while read.stdin[] holds 'line' {
+    print.stdout['line' \n];
+}
+```
+
+`holds` runs the arm when there is something there, and lends it to the name for
+as long as the arm runs. Lends, not gives: what held it goes on holding it, and
+taking it away is `E0404` — the same answer as taking an element out of a `many`,
+for the same reason.
+
+There is no way to reach what is inside without asking first. Asking a `bool` is
+`E0519`, because a `bool` is never absent; using something that may be missing
+where a `bool` was wanted is `E0506`.
+
 ## Ownership
 
 A name owns its value until the value is moved, and then it holds nothing.
@@ -720,8 +777,13 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **Turning a number into text.** Pieces side by side join, and nothing converts on
-  its own, so something has to do it and be named.
+- **Turning a number into text, and text into a number.** Pieces side by side
+  join, and nothing converts on its own, so something has to do it and be named.
+  Now that a type can say it holds nothing, the failing half has somewhere to go.
+- **Choosing between more than two cases.** `holds` answers one question about
+  one kind of absence. `when`, with the compiler insisting every case is covered,
+  is what makes that general — and what a type with more than two shapes would
+  need.
 - **A `many` that grows.** `many` is a fixed length, settled when it is made.
   Growing is a second type rather than a mode of this one, because growing may
   move what is held and a loan of it would then point at nowhere — a rule
