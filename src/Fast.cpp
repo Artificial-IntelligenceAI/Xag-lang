@@ -711,12 +711,6 @@ private:
   // competes with the code pointer and the frame for a register, and once
   // those spill to the stack every step pays to fetch them back.
 
-  [[gnu::noinline]] void loadText(Slot &to, const Constant &value) {
-    end(to);
-    xag_str_from(&to.text, value.text.data(), value.text.size());
-    to.owns = true;
-  }
-
   [[gnu::noinline]] void makeMany(Slot &to, unsigned count) {
     auto *held = new std::vector<Slot>();
     held->reserve(count);
@@ -845,7 +839,18 @@ private:
         end(to);
         to.whole = routine.pool[one.aux].whole;
         break;
-      case Op::LoadText: loadText(to, routine.pool[one.aux]); break;
+      case Op::LoadText: {
+        // A view of the pool, held for as long as the machine is, rather than
+        // a copy taken and given back on every pass through a loop. Nothing
+        // writes into text in place, so a view reads the same as a copy; and
+        // wherever this travels, it travels as a view, which nothing ends.
+        const std::string &written = pool[one.aux].text;
+        end(to);
+        to.text = XagStr{written.empty() ? nullptr : const_cast<char *>(written.data()),
+                         written.size(), 0};
+        to.owns = false;
+        break;
+      }
       case Op::LoadNothing:
         end(to);
         break;
