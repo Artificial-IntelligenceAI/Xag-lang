@@ -586,7 +586,7 @@ private:
                  {"nothing converts on its own"},
                  {"`count` answers an `int64`, and two sizes never meet on their own."});
     }
-    return Ty{symbol->type.element};
+    return elementOf(symbol->type);
   }
 
   // What a condition has to be, which depends on whether a name is being lent
@@ -731,7 +731,7 @@ private:
           (void)value(v, Ty{});
         return Type::Unknown;
       }
-      const Ty holds{expected.element};
+      const Ty holds = elementOf(expected);
       if (e.args.values.size() != 2)
         complain(e.span, "E0505",
                  "`fill` is given " + std::to_string(e.args.values.size()) +
@@ -859,7 +859,7 @@ private:
   // gives — a lone item that is already the whole array is the whole array,
   // because with one level of `many` nothing can be read both ways.
   Ty collected(const Value &v, Ty want) {
-    const Ty holds{want.element};
+    const Ty holds = elementOf(want);
     if (v.items.empty())
       return want;
     if (v.items.size() == 1 && selfTyped(*v.items[0])) {
@@ -994,7 +994,7 @@ private:
                    {"a name holding one value is that value, and there is no first of it."});
           want = Type::Unknown;
         } else {
-          want = Ty{symbol->type.element};
+          want = elementOf(symbol->type);
         }
       }
       onlyValueChecked(s.value, want, s.span);

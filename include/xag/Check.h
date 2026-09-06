@@ -90,6 +90,15 @@ constexpr Ty structNamed(unsigned which) {
   return Ty{Type::Struct, Type::Unknown, false, which};
 }
 
+// One of the things a `many` holds. Which struct it is has to come along:
+// building the element as `Ty{array.element}` said `Type::Struct` and left the
+// number behind, so every `many` of a struct resolved to whichever struct was
+// declared first, and only a program with one of them looked right.
+constexpr Ty elementOf(Ty array) {
+  return array.element == Type::Struct ? structNamed(array.named)
+                                       : Ty{array.element};
+}
+
 // `many int64`, spelled the way it is written apart from the dots — which is
 // also how the middle layer holds it, so nothing has to translate.
 std::string name(Ty type);

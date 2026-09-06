@@ -394,6 +394,22 @@ void aStructIsAGroupOfNamedThings() {
             "    var.line 'l' = [move 'a' move 'b'];\n"
             "    print.stdout['l'.to.x \\n];\n}\n").ok());
 
+  // Which struct a `many` holds has to survive being asked for. Every one of
+  // these resolved to whichever struct was declared first, so a program with
+  // only one of them could not tell.
+  CHECK(run("struct point [int64 'x', int64 'y']\nstruct tag [str 'name']\n"
+            "START {\n    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
+            "    var.many.tag 'ts' = [move 'a' move 'b'];\n"
+            "    print.stdout['ts'[*1*].name \\n];\n}\n").ok());
+  CHECK(run("struct tag [str 'name']\nstruct point [int64 'x', int64 'y']\n"
+            "START {\n    var.point 'a' = [*1* *2*];\n    var.point 'b' = [*3* *4*];\n"
+            "    var.many.point 'ps' = [move 'a' move 'b'];\n"
+            "    print.stdout['ps'[*0*].y \\n];\n}\n").ok());
+  // And the wrong one is still refused, rather than quietly allowed.
+  CHECK(run("struct point [int64 'x', int64 'y']\nstruct tag [str 'name']\n"
+            "START {\n    var.point 'p' = [*1* *2*];\n"
+            "    var.many.tag 'ts' = [move 'p'];\n}\n").code(0) == "E0506");
+
   // A name is a name, whichever kind it is.
   CHECK(run("struct point [int64 'x']\nstruct point [int64 'y']\n").code(0) == "E0502");
   CHECK(run("struct point [int64 'x', int64 'x']\n").code(0) == "E0502");

@@ -401,6 +401,12 @@ void itHoldsAGroupOfNamedThings() {
        "  when 't' {\n"
        "    is 'one'   { print.stdout['one'.name \\n]; }\n"
        "    is nothing { print.stdout[str:*none* \\n]; } } }\n", "ada\n");
+  // With more than one struct declared, a `many` still holds the one it says.
+  SAYS("struct point [int64 'x', int64 'y']\nstruct tag [str 'name']\n"
+       "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
+       "  var.many.tag 'ts' = [move 'a' move 'b'];\n"
+       "  print.stdout['ts'[*1*].name \\n]; }\n", "bob\n");
+
   // A struct that holds a struct that holds text.
   SAYS("struct tag [str 'name']\nstruct pair [tag 'one', int64 'n']\n"
        "START { var.tag 'a' = [*ada*];\n"
