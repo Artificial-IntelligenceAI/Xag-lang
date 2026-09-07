@@ -156,6 +156,47 @@ A diagnostic that points at the wrong thing, or names a rule the program did not
 break, is a bug of the same kind as miscompiling — the compiler is telling the
 reader something untrue either way.
 
+## Credits
+
+**Tankun Sriket designs Xag. Claude writes the code.** The language, the syntax
+and what the project is for are his; the compiler, the runtime, the engines, the
+oracle and the tests are written by Anthropic's Claude under his direction. That
+is the arrangement as it stands, and this line changes when it does.
+
+### What this repository is written in
+
+| | |
+| --- | --- |
+| **C++** | 35 `.cpp` and 21 `.h` — the front end, the middle layer, both interpreters, the native backend and the runtime |
+| **Xag** | 11 files — the examples, and programs the tests run |
+| **C** | 5 files — three benchmarks written for comparison, and two for the POWER decimal test |
+| **Rust** | 3 files — the generator and the oracle, which share no code with the compiler on purpose |
+| **Python** | 2 files — the benchmark runner, and the decimal reference the tests are checked against |
+| **Assembly** | 2 `.S` — POWER's decimal instructions, and a freestanding entry point for testing them |
+| **Shell** | `tests/power/run.sh`, which drives that test |
+| | plus CMake, a linker script, TOML and Markdown |
+
+### What it leans on
+
+- **LLVM**, 23 or newer — the native backend is written against its C++ API, and
+  `xagc build` goes through it at `-O3`. Its licence is where this project's
+  came from.
+- **CMake** (3.20+) and **Ninja** to build.
+- The **Unicode Character Database**, version 17.0.0, which the character tables
+  are generated from and whose 766 conformance cases the tests run.
+- **libmpdec**, by Stefan Krah, reached through Python's `decimal` — an
+  independent implementation of the same IBM specification, used to disagree
+  with our decimal rather than to agree with it.
+- **QEMU** (`qemu-system-ppc64`) and **ld.lld**, when they are there, to run the
+  decimal tests against POWER's own hardware unit.
+- **IEEE 754** and IBM's decimal arithmetic specification, which the arithmetic
+  is written against rather than borrowed from.
+
+Python and QEMU are needed only by tests; a build wants none of them.
+
+The website is a separate repository with credits of its own, and it is
+licensed differently — see it rather than assuming it matches this.
+
 ## License
 
 Copyright 2026 Tankun Sriket
