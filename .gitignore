@@ -4,3 +4,9 @@ compile_commands.json
 .DS_Store
 generator/target/
 bench/out/
+
+# What `xagc build` leaves beside an example: the program itself, named after
+# the source with the `.xag` taken off. Eight of them were committed once, by a
+# check that built every example and a `git add -A` that believed it.
+examples/*
+!examples/*.xag

@@ -84,12 +84,28 @@ std::vector<Circle> circlesIn(const Body &body) {
   return found;
 }
 
-// Whether a type is one a value can be written down as and handed back whole.
-// Everything else has something behind it that the loop does not own.
-bool plainlyANumber(const MirType &type) {
-  if (type.isLoan() || type.orNothing || type.many)
+// Whether an assignment can be made again somewhere else, out of what is
+// written in it and nothing else.
+//
+// This is what decides whether a loop can be taken out, and it is about the
+// *value* rather than the type. A `many` of written numbers can be built again
+// — the loop then owns a copy of its own and shares nothing with the program it
+// came from, which was the whole worry. A `many` that was read, or worked out,
+// or handed over from somewhere cannot.
+bool canBeMadeAgain(const Statement &s) {
+  if (s.kind != StatementKind::Assign || !s.parts.empty())
     return false;
-  return isNumber(type.held) || type.held == Type::Bool;
+  const RValue &value = s.value;
+  const bool shapes = value.kind == RValueKind::Use || value.kind == RValueKind::Collect ||
+                      value.kind == RValueKind::Group || value.kind == RValueKind::Fill;
+  if (!shapes)
+    return false;
+  if (value.kind == RValueKind::Use && value.operands.size() != 1)
+    return false;
+  for (const Operand &one : value.operands)
+    if (one.kind != OperandKind::Written)
+      return false;
+  return !value.operands.empty();
 }
 
 void readsOf(const Operand &operand, std::vector<unsigned> &out) {
@@ -104,15 +120,54 @@ void readsOf(const RValue &value, std::vector<unsigned> &out) {
     readsOf(one, out);
 }
 
-// Whether an assignment is a value written down in the source rather than
-// worked out from something.
-const std::string *writtenBy(const Statement &s) {
-  if (s.kind != StatementKind::Assign || !s.parts.empty())
-    return nullptr;
-  if (s.value.kind != RValueKind::Use || s.value.operands.size() != 1)
-    return nullptr;
-  const Operand &only = s.value.operands[0];
-  return only.kind == OperandKind::Written ? &only.written : nullptr;
+// The one assignment to a local outside the loop, and how many there were.
+// More than one and no single value reaches the loop; none and there is nothing
+// to put back.
+const Statement *onlyOneOutside(const Body &body, const std::set<unsigned> &loop,
+                                unsigned id, unsigned &howMany) {
+  const Statement *only = nullptr;
+  howMany = 0;
+  for (const BasicBlock &block : body.blocks) {
+    if (loop.count(block.id))
+      continue;
+    for (const Statement &s : block.statements)
+      if (s.kind == StatementKind::Assign && s.place == id) {
+        ++howMany;
+        only = &s;
+      }
+  }
+  return only;
+}
+
+// The statement that would put a local back the way the loop finds it.
+//
+// Usually the assignment itself. Sometimes the thing was built into a temporary
+// and handed over — `_6 = fill(*10*, *4*)` and then `_5'xs' = move _6`, which is
+// how `fill` and every other list is written down — and then it is the
+// statement that built it, aimed at where it was going.
+bool putBack(const Body &body, const std::set<unsigned> &loop, unsigned id,
+             Statement &out) {
+  unsigned howMany = 0;
+  const Statement *only = onlyOneOutside(body, loop, id, howMany);
+  if (howMany != 1 || !only)
+    return false;
+  if (canBeMadeAgain(*only)) {
+    out = *only;
+    return true;
+  }
+  if (only->parts.empty() && only->value.kind == RValueKind::Use &&
+      only->value.operands.size() == 1 &&
+      only->value.operands[0].kind != OperandKind::Written) {
+    unsigned again = 0;
+    const Statement *built =
+        onlyOneOutside(body, loop, only->value.operands[0].local, again);
+    if (again == 1 && built && canBeMadeAgain(*built)) {
+      out = *built;
+      out.place = id;
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace
@@ -169,34 +224,20 @@ std::vector<Lifted> loopsThatStandAlone(const Mir &mir) {
       }
       if (!plain)
         continue;
-      for (unsigned id : touched)
-        if (id >= body.locals.size() ||
-            !plainlyANumber(body.typed[body.locals[id].type.index]))
-          plain = false;
-      if (!plain)
-        continue;
 
       // What each of those is entered with: one assignment outside the loop,
-      // and that assignment a value written down.
+      // and that assignment one that can be made again out of what is written
+      // in it. One assignment outside means no other value can reach the loop,
+      // which settles it without working out which paths run.
       std::vector<Statement> entering;
       bool known = true;
       for (unsigned id : needed) {
-        const Statement *only = nullptr;
-        unsigned howMany = 0;
-        for (const BasicBlock &block : body.blocks) {
-          if (circle.blocks.count(block.id))
-            continue;
-          for (const Statement &s : block.statements)
-            if (s.kind == StatementKind::Assign && s.place == id) {
-              ++howMany;
-              only = &s;
-            }
-        }
-        if (howMany != 1 || !only || !writtenBy(*only)) {
+        Statement again;
+        if (!putBack(body, circle.blocks, id, again)) {
           known = false;
           break;
         }
-        entering.push_back(*only);
+        entering.push_back(std::move(again));
       }
       if (!known || entering.empty())
         continue;
@@ -260,12 +301,18 @@ std::vector<Lifted> loopsThatStandAlone(const Mir &mir) {
         if (!circle.blocks.count(to))
           lifted.leaves = to;
       for (unsigned id : touched) {
-        bool assignedInside = false;
+        // Everything the loop changes, and writing one place of a `many` is
+        // changing it. Counting only whole assignments meant a loop that filled
+        // an array in was one whose answer looked like nothing had happened —
+        // which would have been safe only for as long as no such loop could be
+        // taken out at all.
+        bool changedInside = false;
         for (unsigned at : circle.blocks)
           for (const Statement &s : body.blocks[at].statements)
-            if (s.kind == StatementKind::Assign && s.place == id)
-              assignedInside = true;
-        if (!assignedInside)
+            if ((s.kind == StatementKind::Assign || s.kind == StatementKind::Store) &&
+                s.place == id)
+              changedInside = true;
+        if (!changedInside)
           continue;
         bool seenOutside = false;
         for (const BasicBlock &block : body.blocks) {

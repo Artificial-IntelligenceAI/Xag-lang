@@ -396,6 +396,61 @@ void aLoopBeforeAReadIsAnswered() {
   CHECK(settle(after, agrees()).code(0) == "W0001");
 }
 
+
+// A loop walking a `many` was the wall: it could not be taken out, because
+// everything it touched had to be a plain number. What actually mattered was
+// never the type — it was whether the value could be made again out of what is
+// written in it. A `many` of written numbers can, and the loop then owns a copy
+// of its own and shares nothing with the program it came from.
+void aLoopOverAWrittenManyStandsAlone() {
+  const std::string walking =
+      "START {\n"
+      "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n"
+      "    var.many.int8 'xs' = [*10* *20* *30* *40*];\n"
+      "    var.mut.int8 'sum' = [*0*];\n"
+      "    loop.range.int64 'i' = [*0*, *3*] {\n"
+      "        set 'sum' = ['sum' + 'xs'['i']];\n"
+      "    }\n}\n";
+  // The bounds cannot follow `'xs'['i']`, and the loop is past a read, so
+  // nothing but lifting it could ever answer.
+  CHECK(settle(walking).held.size() == 1);
+  CHECK(!settle(walking).held.empty() && settle(walking).held[0].code == "W0001");
+  CHECK(settle(walking, agrees()).said.empty());
+
+  // A `many` that came from somewhere rather than being written down cannot be
+  // made again, so that loop still cannot be taken out.
+  const std::string filled =
+      "START {\n"
+      "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n"
+      "    var.many.int8 'xs' = [fill[*10*, *4*]];\n"
+      "    var.mut.int8 'sum' = [*0*];\n"
+      "    loop.range.int64 'i' = [*0*, *3*] {\n"
+      "        set 'sum' = ['sum' + 'xs'['i']];\n"
+      "    }\n}\n";
+  CHECK(settle(filled, agrees()).said.empty()); // `fill` is written down too
+}
+
+// A loop that writes into a `many` changes something no written answer can say,
+// so it is not written away. Counting only whole assignments as changes would
+// have folded it into an array that was never filled in.
+void aLoopThatFillsAnArrayIsNotWrittenAway() {
+  const std::string filling =
+      "START {\n"
+      "    var.mut.many.int64 'xs' = [*0* *0* *0* *0*];\n"
+      "    loop.range.int64 'i' = [*0*, *3*] {\n"
+      "        set 'xs'['i'] = ['i' x *11*];\n"
+      "    }\n"
+      "    print.stdout[str:*b = * 'xs'[*3*] \\n];\n}\n";
+  const xag::Source source("test.xag", filling);
+  const xag::LexResult lexed = xag::lex(source);
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+  xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::elaborate(built.mir);
+  CHECK(xag::writeInWhatTheLoopsAnswer(built.mir) == 0);
+}
+
 } // namespace
 
 int main() {
@@ -404,6 +459,8 @@ int main() {
   aWarningTheRunAnswersGoesAway();
   aLoopAfterAReadStandsOnItsOwn();
   aLoopBeforeAReadIsAnswered();
+  aLoopOverAWrittenManyStandsAlone();
+  aLoopThatFillsAnArrayIsNotWrittenAway();
   aProgramThatReadsIsRunUpToTheRead();
   aProgramThatStopsIsSaidSo();
   aLoopWithAnAnswerIsWrittenAsItsAnswer();

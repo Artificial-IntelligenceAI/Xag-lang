@@ -51,12 +51,20 @@ public:
     const Body *start = find("START");
     if (!start)
       return InterpretResult{false, "there is no START to run"};
+    // What was already outstanding when this run began, rather than nothing.
+    //
+    // The check is about *this* program ending holding something, and it used
+    // to ask whether anything at all was outstanding — which was the same
+    // question for as long as a process ran one program. The compiler now runs
+    // several while compiling one, so anything an earlier run left behind was
+    // being read as this one's fault.
+    const int64_t already = xag_live_allocations();
     Value answer;
     call(*start, {}, answer);
     endValue(answer);
-    if (trouble_.empty() && !xag_balance_is_clear())
+    if (trouble_.empty() && xag_live_allocations() != already)
       trouble_ = "the program ended still holding " +
-                 std::to_string(xag_live_allocations()) + " thing(s)";
+                 std::to_string(xag_live_allocations() - already) + " thing(s)";
     return InterpretResult{trouble_.empty(), trouble_, cameRound_, whereNow_,
                            false,             ended_,   wouldRead_, reached_};
   }
@@ -982,12 +990,14 @@ InterpretResult runHandingBackStops(Machine &&machine) {
     // — divided by zero, or reached past the end of a `many`. This engine
     // giving up never comes through here; it sets its own trouble and returns.
     out.theirFault = true;
-    // What this run had in hand is lost, and the count would go on counting it.
-    // The next run would then be told it ended holding what this one dropped.
-    xag_forget_allocations(held);
   }
   xag_hand_back_stops(nullptr);
   whereTheRunIs = nullptr;
+  // Whatever this run is still holding is nobody else's, and the run is being
+  // thrown away. Left alone, the next one in this process — another loop, or
+  // the program itself under `xagc run` — is told it ended holding what this
+  // one did.
+  xag_forget_allocations(held);
   return out;
 }
 
