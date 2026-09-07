@@ -192,6 +192,16 @@ private:
     if (value.kind == RValueKind::Collect && assignments_[s.place] == 1)
       lengths_[s.place] = static_cast<std::int64_t>(value.operands.size());
 
+    // Lending something puts it beyond what is known about it. A `refmut` is
+    // written through, so what the name held before says nothing about what it
+    // holds after — and a `ref` is not written through, but reading one out is
+    // not worth the risk of being wrong about which. This was missing, and a
+    // number lent for writing kept the value it was given: the compiler folded
+    // `print.stdout['t']` to the `*0*` it started as, while the interpreters,
+    // which are handed the program unrewritten, printed what it became.
+    if (value.kind == RValueKind::Ref)
+      known_.erase(value.local);
+
     if (value.kind == RValueKind::Element)
       moved = element(s) || moved;
     if (value.kind == RValueKind::Join)
@@ -325,18 +335,20 @@ private:
     else
       return false; // a comparison answers a `bool`, and is left alone for now
 
-    // Worked out either way, so that a name holding the answer is followed
-    // whichever engine this is for. Written back into the program only when the
-    // program is being rewritten.
+    // Worked out, and then not written down.
+    //
+    // Following a written number to where it is used is what catches a reach
+    // past the end of a `many` or a division by a written zero, so the working
+    // out earns its place. Putting the answer back into the program does not:
+    // LLVM folds `*8* x *7* + *1*` to 57 with no help, and since the
+    // interpreters are given the program as written they would not see it
+    // either. It was work nobody was going to use, and one more thing that
+    // could have been wrong.
     if (worthKnowing(s.place))
       known_[s.place] = folded;
     else
       known_.erase(s.place);
-    if (rewriting_ == Rewriting::No)
-      return false;
-    Operand answer{OperandKind::Written, 0, folded, value.type};
-    value = RValue{RValueKind::Use, {}, {}, 0, {std::move(answer)}, value.type};
-    return true;
+    return false;
   }
 };
 

@@ -245,6 +245,11 @@ private:
     builder_.SetInsertPoint(done);
   }
 
+  const MirType &shapeOf(TypeRef type) const {
+    static const MirType nothing;
+    return type.index < body_->typed.size() ? body_->typed[type.index] : nothing;
+  }
+
   llvm::Type *typeFor(const std::string &spelled) {
     if (spelled == "bool")
       return builder_.getInt1Ty();
@@ -370,8 +375,31 @@ private:
     const std::string &result = nameOf(body.result);
     llvm::Type *answer = result == "nothing" ? builder_.getVoidTy() : typeFor(result);
     auto *type = llvm::FunctionType::get(answer, params, false);
-    functions_[body.name] = llvm::Function::Create(
+    llvm::Function *made = llvm::Function::Create(
         type, llvm::Function::InternalLinkage, symbolFor(body.name), module_);
+
+    // What the borrow rules already promise, said in the one language the
+    // optimiser reads. These are the facts LLVM can never work out for itself:
+    // it sees two pointers and must assume the worst of them, where the region
+    // pass has already refused every program in which the worst is possible.
+    //
+    // A `refmut` is the only loan of what it points at while it lasts — lending
+    // the same thing twice for writing, or for writing and reading at once, is
+    // `E0410`. So it cannot alias anything else the function was handed.
+    //
+    // A `ref` may share with other `ref`s, so it is not `noalias`. Nothing is
+    // ever written through one, so it is `readonly`.
+    for (unsigned i = 1; i <= body.parameters && i < body.locals.size(); ++i) {
+      const MirType &held = shapeOf(body.locals[i].type);
+      if (!held.isLoan())
+        continue;
+      const unsigned at = i - 1;
+      if (held.writesThrough())
+        made->addParamAttr(at, llvm::Attribute::NoAlias);
+      else
+        made->addParamAttr(at, llvm::Attribute::ReadOnly);
+    }
+    functions_[body.name] = made;
   }
 
   // ---- defining
@@ -621,10 +649,23 @@ private:
                            slots_[s.place]);
       return;
     }
-    // Writing to a name that holds a loan writes through it.
-    if (isLoan(localType(s.place)) && nameOf(s.value.type) == "str") {
+    // Writing to a name that holds a loan writes through it — whatever it
+    // lends. Only text was ever asked here, so writing through a loan of a
+    // number stored the number *over the loan* and the next read of it followed
+    // a pointer that was a `3`.
+    // Writing *through* a loan, not making one. `_3 = refmut 't'` puts the
+    // address of `'t'` into `_3`; `set 't' = […]` through that loan puts a value
+    // where `_3` points. Telling them apart is what the value's own type says:
+    // a loan going in is a loan being made. Getting this wrong stored through a
+    // slot that had nothing in it yet.
+    if (isLoan(localType(s.place)) && !isLoan(nameOf(s.value.type)) &&
+        s.value.kind != RValueKind::Ref) {
+      const std::string lent = withoutLoan(localType(s.place));
       auto *through = builder_.CreateLoad(builder_.getPtrTy(), slots_[s.place]);
-      builder_.CreateCall(runtime_["xag_str_drop"], {through});
+      // What was there is let go of first: putting a value in does not make
+      // room by forgetting the one it replaces.
+      if (lent == "str")
+        builder_.CreateCall(runtime_["xag_str_drop"], {through});
       builder_.CreateStore(value, through);
       return;
     }
@@ -851,8 +892,11 @@ private:
 
   llvm::Value *binary(const RValue &value) {
     const std::string &op = value.op;
-    const std::string &leftType = nameOf(value.operands[0].type);
-    const bool onText = leftType == "str" || isLoan(leftType);
+    // What the loan lends, not the loan. Every loan used to be taken for a loan
+    // of text, because for a long time every loan was one — so `refmut int64`
+    // came in here and two pointers-to-a-number went to `xag_str_compare`.
+    const std::string leftType = withoutLoan(nameOf(value.operands[0].type));
+    const bool onText = leftType == "str";
 
     if (onText) {
       auto *seen = builder_.CreateCall(
@@ -868,8 +912,9 @@ private:
       return nullptr;
     }
 
-    auto *left = read(value.operands[0]);
-    auto *right = read(value.operands[1]);
+    // Read through the loan: what is being added is the number it lends.
+    auto *left = behind(value.operands[0]);
+    auto *right = behind(value.operands[1]);
 
     if (op == "and") return builder_.CreateAnd(left, right);
     if (op == "or") return builder_.CreateOr(left, right);

@@ -685,11 +685,13 @@ impl<'a> Writer<'a> {
     /// a program nobody writes.
     fn lending_number(&mut self) {
         let mut seen: Vec<(String, Ty)> = Vec::new();
+        let mut mutable: Vec<bool> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
                 if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none()
                     && !var.moved && !var.lent {
                     seen.push((var.name.clone(), var.ty));
+                    mutable.push(var.mutable);
                 }
             }
         }
@@ -699,6 +701,15 @@ impl<'a> Writer<'a> {
         }
         let at = self.rng.below(seen.len() as u32) as usize;
         let (borrowed, ty) = seen[at].clone();
+
+        // Written through as well as read, when the name allows it. Reading one
+        // was wrong in two engines; writing through one was wrong in two
+        // engines and differently, and neither had ever been generated.
+        let writable = mutable[at] && self.rng.chance(50);
+        if writable {
+            self.writing_through(&borrowed, ty);
+            return;
+        }
 
         let holder = self.fresh();
         self.markLent(&borrowed, true);
@@ -720,6 +731,47 @@ impl<'a> Writer<'a> {
         }
         // Nothing looks at the holder again, so the loan is done here.
         self.markLent(&borrowed, false);
+    }
+
+    /// `var.refmut.int64 'h' = [refmut 'v']; set 'h' = ['h' + *3*];`
+    ///
+    /// Writing a number through a loan. Native stored the value over the loan
+    /// itself and then followed it as a pointer; the fast engine answered with
+    /// the number the name started as. Both for the same reason: every loan
+    /// anybody had ever generated was a loan of text.
+    fn writing_through(&mut self, borrowed: &str, ty: Ty) {
+        let holder = self.fresh();
+        self.markLent(borrowed, true);
+        self.pad();
+        self.out.push_str("var.refmut.");
+        self.out.push_str(ty.written());
+        self.out.push_str(" '");
+        self.out.push_str(&holder);
+        self.out.push_str("' = [refmut '");
+        self.out.push_str(borrowed);
+        self.out.push_str("'];\n");
+
+        let times = self.rng.below(3) + 1;
+        for _ in 0..times {
+            self.pad();
+            self.out.push_str("set '");
+            self.out.push_str(&holder);
+            self.out.push_str("' = ['");
+            self.out.push_str(&holder);
+            self.out.push_str("' + ");
+            self.literal(ty);
+            self.out.push_str("];\n");
+            self.pad();
+            self.out.push_str("print.stdout['");
+            self.out.push_str(&holder);
+            self.out.push_str("' \\n];\n");
+        }
+        self.markLent(borrowed, false);
+        // What it holds now is whatever was written through the loan.
+        self.pad();
+        self.out.push_str("print.stdout['");
+        self.out.push_str(borrowed);
+        self.out.push_str("' \\n];\n");
     }
 
     fn lending(&mut self) {
