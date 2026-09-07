@@ -54,6 +54,15 @@ struct MirType {
     return out;
   }
 
+  // Two types are the same when every part of them is. Comparing spellings did
+  // this before, which worked only because one type had one spelling.
+  bool operator==(const MirType &other) const {
+    return lending == other.lending && orNothing == other.orNothing &&
+           many == other.many && held == other.held &&
+           (held != Type::Struct || named == other.named);
+  }
+  bool operator!=(const MirType &other) const { return !(*this == other); }
+
   MirType element() const {
     MirType out = within();
     out.many = false;

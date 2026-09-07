@@ -182,21 +182,30 @@ private:
     }
   }
 
-  const std::string &spelled(TypeRef type) const {
-    static const std::string unknown = "?";
-    return type.index < body_->types.size() ? body_->types[type.index] : unknown;
+  // The type as the middle layer took it apart. Asking the spelling and pulling
+  // it apart again is what `binary()` did from this file's first version, and
+  // what four other bugs across the other two engines were as well: a loan
+  // taken for the thing it lends.
+  const MirType &typing(TypeRef type) const {
+    static const MirType nothing;
+    return type.index < body_->typed.size() ? body_->typed[type.index] : nothing;
   }
 
-  static bool isLoan(const std::string &type) {
-    return type.rfind("ref ", 0) == 0 || type.rfind("refmut ", 0) == 0;
+  static bool isLoan(const MirType &type) { return type.isLoan(); }
+
+  // Plain text: not lent, not absent, not several.
+  // The one type this is, when it is one thing and not several or maybe-none.
+  // A `many` and an `or-nothing` are neither, and every branch that asks about
+  // a family wants to fall past them — which the spellings used to arrange by
+  // accident, `typeNamed("or-nothing int64")` being nothing at all.
+  static Type plainly(const MirType &type) {
+    if (type.many || type.orNothing || type.isLoan())
+      return Type::Unknown;
+    return type.held;
   }
 
-  static std::string behind(const std::string &type) {
-    if (type.rfind("refmut ", 0) == 0)
-      return type.substr(7);
-    if (type.rfind("ref ", 0) == 0)
-      return type.substr(4);
-    return type;
+  static bool isText(const MirType &type) {
+    return !type.isLoan() && !type.many && !type.orNothing && type.held == Type::Str;
   }
 
   unsigned findRoutine(const std::string &name) const {
@@ -228,10 +237,10 @@ private:
 
   // A written value, made ready before anything runs.
   uint32_t constantFor(const Operand &operand, Op &how) {
-    const std::string type = behind(spelled(operand.type));
-    const Type named = typeNamed(type);
+    const MirType type = typing(operand.type).lent();
+    const Type named = plainly(type);
     Constant value;
-    if (type == "bool") {
+    if (named == Type::Bool) {
       value.whole = operand.written == "true";
       how = Op::LoadWhole;
     } else if (isWhole(named)) {
@@ -260,8 +269,7 @@ private:
                     &read);
       value.real = read;
       how = Op::LoadReal;
-    } else if (operand.written == "nothing" &&
-               spelled(operand.type).rfind("or-nothing ", 0) == 0) {
+    } else if (operand.written == "nothing" && typing(operand.type).orNothing) {
       how = Op::LoadNone;
     } else {
       value.text = unescape(operand.written);
@@ -320,7 +328,7 @@ private:
     out_ = &routine;
     routine.name = body.name;
     routine.parameters = body.parameters;
-    routine.answers = spelled(body.result) != "nothing";
+    routine.answers = typing(body.result).held != Type::Nothing;
     countUses(body);
 
     // Slots: one per local, then room above for the working ones.
@@ -479,8 +487,8 @@ private:
 
   void statement(const Statement &s, unsigned &scratch) {
     const RValue &value = s.value;
-    const std::string kept = spelled(body_->locals[s.place].type);
-    const bool through = isLoan(kept) && !isLoan(spelled(value.type)) &&
+    const MirType kept = typing(body_->locals[s.place].type);
+    const bool through = isLoan(kept) && !isLoan(typing(value.type)) &&
                          value.kind != RValueKind::Ref;
 
     switch (value.kind) {
@@ -518,7 +526,7 @@ private:
       // marked for the machine to copy if what arrives is only a view.
       for (size_t i = 0; i < froms.size(); ++i)
         emit(Code{Op::Argument, 0, froms[i],
-                  behind(spelled(value.operands[i].type)) == "str" ? 1u : 0u, 0});
+                  isText(typing(value.operands[i].type).lent()) ? 1u : 0u, 0});
       if (through)
         emit(Code{Op::StoreThrough, s.place, place, 0, 0});
       return;
@@ -553,10 +561,11 @@ private:
         // A loan copied into a loan travels whole; anything else is the value
         // behind it, read where it stands. A plain number read into a place
         // of the same plain type is only the number.
-        const Type plain = typeNamed(kept);
-        const bool number = isWhole(plain) || plain == Type::Bool ||
-                            isBinary(plain) || isDecimal(plain);
-        const bool same = number && behind(spelled(value.operands[0].type)) == kept;
+        const Type plain = kept.lent().held;
+        const bool number = !kept.many && !kept.orNothing &&
+                            (isWhole(plain) || plain == Type::Bool ||
+                             isBinary(plain) || isDecimal(plain));
+        const bool same = number && typing(value.operands[0].type).lent() == kept;
         // A temporary that the step just before made, that is read here and
         // nowhere else, and that nothing else writes, need not exist at all:
         // that step writes here instead. The step has to be this block's, so
@@ -603,10 +612,13 @@ private:
 
   void binary(const Statement &s, unsigned &scratch, bool through) {
     const RValue &value = s.value;
-    const std::string left = behind(spelled(value.operands[0].type));
-    const std::string made = behind(spelled(value.type));
-    const Type given = typeNamed(left);
-    const Type answered = typeNamed(made);
+    // What the loan lends, not the loan. Asking whether there *was* one and
+    // treating every loan as a loan of text is what sent two borrowed numbers
+    // to `xag_str_compare`, from this file's first version until 2026-09-07.
+    const MirType left = typing(value.operands[0].type).lent();
+    const MirType made = typing(value.type).lent();
+    const Type given = plainly(left);
+    const Type answered = plainly(made);
     const Type working = isNumber(answered) ? answered : given;
 
     const std::string &op = value.op;
@@ -621,7 +633,7 @@ private:
     // a loan of text, which was true of every loan any program had made until
     // one lent a number — and then a sum of two borrowed numbers was no step
     // at all, and its place stayed at zero.
-    const bool textual = left == "str";
+    const bool textual = isText(left);
 
     // A whole number written on the right is read from the pool by the step
     // that uses it, rather than loaded into a slot by a step of its own.
@@ -723,7 +735,7 @@ private:
   void partStore(const Statement &s, unsigned &scratch) {
     const Operand &what = s.value.operands.empty() ? Operand{} : s.value.operands[0];
     const uint32_t from = into(what, scratch);
-    const bool textual = behind(spelled(what.type)) == "str";
+    const bool textual = isText(typing(what.type).lent());
     emit(Code{Op::StorePart, s.place, from, static_cast<uint32_t>(s.parts.size()),
               textual ? 1u : 0u});
     for (const unsigned part : s.parts)
@@ -734,11 +746,11 @@ private:
     const RValue &value = s.value;
     if (value.callee == "print.stdout") {
       for (const Operand &operand : value.operands) {
-        const std::string type = behind(spelled(operand.type));
-        const Type named = typeNamed(type);
+        const MirType type = typing(operand.type).lent();
+        const Type named = plainly(type);
         const uint32_t from = into(operand, scratch);
         Op how = Op::PrintText;
-        if (type == "bool")
+        if (named == Type::Bool)
           how = Op::PrintBool;
         else if (isWhole(named))
           how = Op::PrintWhole;
@@ -766,19 +778,21 @@ private:
       // The operand's own type says which family writes it, exactly as it does
       // for print, and the same one word carries that to the machine.
       const uint32_t from = value.operands.empty() ? 0 : into(value.operands[0], scratch);
-      const std::string type =
-          value.operands.empty() ? std::string() : behind(spelled(value.operands[0].type));
-      const Type given = typeNamed(type);
-      const uint32_t family = type == "bool" ? 3u : isDecimal(given) ? 2u : isBinary(given) ? 1u : 0u;
+      const MirType type = value.operands.empty()
+                               ? MirType{}
+                               : typing(value.operands[0].type).lent();
+      const Type given = plainly(type);
+      const uint32_t family = given == Type::Bool ? 3u
+                              : isDecimal(given)  ? 2u
+                              : isBinary(given)   ? 1u
+                                                  : 0u;
       emit(Code{Op::TextOf, s.place, from, 0,
                 (widthOf(given) << 3) | (family << 1) | (isSigned(given) ? 1u : 0u)});
       return;
     }
     if (value.callee == "convert-to-number") {
       const uint32_t from = value.operands.empty() ? 0 : into(value.operands[0], scratch);
-      const Type wanted = typeNamed(behind(spelled(value.type)).rfind("or-nothing ", 0) == 0
-                                        ? behind(spelled(value.type)).substr(11)
-                                        : behind(spelled(value.type)));
+      const Type wanted = typing(value.type).within().held;
       // Width, family and signedness in one word, so the machine reads no
       // strings: `deci` and `bin` and whole numbers are told apart here once.
       const uint32_t family = isDecimal(wanted) ? 2u : isBinary(wanted) ? 1u : 0u;
