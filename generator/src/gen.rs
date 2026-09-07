@@ -688,7 +688,12 @@ impl<'a> Writer<'a> {
         let mut mutable: Vec<bool> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none()
+                // Anything that copies, not only numbers. A `bool` behind a
+                // loan was never generated either, and `not` through one asked
+                // LLVM to invert a pointer — the compiler fell over rather than
+                // the program.
+                if (Self::numeric(var.ty) || var.ty == Ty::Bool)
+                    && var.many.is_none() && var.group.is_none()
                     && !var.moved && !var.lent {
                     seen.push((var.name.clone(), var.ty));
                     mutable.push(var.mutable);
@@ -756,10 +761,17 @@ impl<'a> Writer<'a> {
             self.pad();
             self.out.push_str("set '");
             self.out.push_str(&holder);
-            self.out.push_str("' = ['");
-            self.out.push_str(&holder);
-            self.out.push_str("' + ");
-            self.literal(ty);
+            self.out.push_str("' = [");
+            if ty == Ty::Bool {
+                self.out.push_str("not '");
+                self.out.push_str(&holder);
+                self.out.push('\'');
+            } else {
+                self.out.push('\'');
+                self.out.push_str(&holder);
+                self.out.push_str("' + ");
+                self.literal(ty);
+            }
             self.out.push_str("];\n");
             self.pad();
             self.out.push_str("print.stdout['");

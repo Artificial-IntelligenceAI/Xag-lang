@@ -506,6 +506,22 @@ void itLooksBehindALoan() {
        "1.10\n");
 }
 
+// Writing a number or a `bool` through a loan, which two engines got wrong in
+// two different ways because every loan ever generated was a loan of text.
+void itWritesThroughALoan() {
+  SAYS("fn.nothing 'add-into' [refmut.int64 'total', ref.int64 'step'] {\n"
+       "  loop.range.int64 'i' = [*1*, *3*] { set 'total' = ['total' + 'step']; } }\n"
+       "START { var.mut.int64 't' = [*0*];\n  var.int64 's' = [*3*];\n"
+       "  add-into[refmut 't', ref 's'];\n  print.stdout['t' \\n]; }\n", "9\n");
+  SAYS("fn.nothing 'flip' [refmut.bool 'b'] { set 'b' = [not 'b']; }\n"
+       "START { var.mut.bool 'b' = [*false*];\n  flip[refmut 'b'];\n"
+       "  print.stdout['b' \\n]; }\n", "true\n");
+  SAYS("struct 'tag' [str 'name', int64 'n']\n"
+       "fn.int64 'peek' [ref.tag 't'] { give ['t'.n]; }\n"
+       "START { var.tag 't' = [*ada* *7*];\n"
+       "  print.stdout[(peek[ref 't']) \\n]; }\n", "7\n");
+}
+
 void itReadsWhatItIsGiven() {
   given = "12\nhello\n-5\n";
   SAYS("START {\n"
@@ -574,6 +590,7 @@ int main() {
   itHoldsAGroupOfNamedThings();
   itWritesANumberIntoText();
   itLooksBehindALoan();
+  itWritesThroughALoan();
   itReadsWhatItIsGiven();
   itKnowsWhatItWasGiven();
 

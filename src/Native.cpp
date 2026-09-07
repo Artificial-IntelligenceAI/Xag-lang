@@ -801,7 +801,10 @@ private:
                  : slots_[value.local];
 
     case RValueKind::Unary:
-      return builder_.CreateNot(read(value.operands[0]));
+      // Through the loan: `not` on a borrowed `bool` is `not` on the `bool`.
+      // Handed the loan itself, this asked LLVM to invert a pointer, and the
+      // compiler fell over rather than the program.
+      return builder_.CreateNot(behind(value.operands[0]));
 
     case RValueKind::Binary:
       return binary(value);

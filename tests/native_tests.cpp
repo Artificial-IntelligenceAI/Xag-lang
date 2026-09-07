@@ -368,6 +368,31 @@ void itLooksBehindALoan() {
         "xag_str_of_int");
 }
 
+// A loan is not always a loan of text. Reading one, writing through one, and
+// `not` on one each took the loan for the thing it lends — for as long as every
+// loan anybody wrote was a loan of text.
+void aLoanIsNotAlwaysOfText() {
+  EMITS("fn.nothing 'add-into' [refmut.int64 'total', ref.int64 'step'] {\n"
+        "  set 'total' = ['total' + 'step']; }\n"
+        "START { var.mut.int64 't' = [*0*];\n  var.int64 's' = [*3*];\n"
+        "  add-into[refmut 't', ref 's'];\n  print.stdout['t' \\n]; }\n",
+        "add i64");
+  EMITS("fn.nothing 'flip' [refmut.bool 'b'] { set 'b' = [not 'b']; }\n"
+        "START { var.mut.bool 'b' = [*false*];\n  flip[refmut 'b'];\n"
+        "  print.stdout['b' \\n]; }\n",
+        "xor i1");
+
+  // What the borrow rules promise, said where the optimiser can read it.
+  EMITS("fn.nothing 'edit' [refmut.str 'a', ref.str 'b'] { set 'a' = ['a' 'b']; }\n"
+        "START { var.mut.str 'x' = [*x*];\n  var.str 'y' = [*y*];\n"
+        "  edit[refmut 'x', ref 'y']; }\n",
+        "noalias");
+  EMITS("fn.nothing 'edit' [refmut.str 'a', ref.str 'b'] { set 'a' = ['a' 'b']; }\n"
+        "START { var.mut.str 'x' = [*x*];\n  var.str 'y' = [*y*];\n"
+        "  edit[refmut 'x', ref 'y']; }\n",
+        "readonly");
+}
+
 } // namespace
 
 int main() {
@@ -384,6 +409,7 @@ int main() {
   aSettledPlaceIsNotAskedAgain();
   itWritesANumberIntoText();
   itLooksBehindALoan();
+  aLoanIsNotAlwaysOfText();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";
