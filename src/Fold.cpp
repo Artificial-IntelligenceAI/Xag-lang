@@ -111,6 +111,20 @@ private:
     return operand.kind == OperandKind::Written;
   }
 
+  // What an operand is, when that is a number written down — either written
+  // right there, or held by the name it reads. Asked rather than substituted,
+  // so that what this pass *knows* does not depend on whether it is also
+  // allowed to *rewrite*. A program is refused or not refused whichever engine
+  // is about to run it.
+  const std::string *valueOf(const Operand &operand) const {
+    if (written(operand))
+      return &operand.written;
+    if (operand.kind != OperandKind::Copy)
+      return nullptr;
+    const auto found = known_.find(operand.local);
+    return found == known_.end() ? nullptr : &found->second;
+  }
+
   void countAssignments() {
     assignments_.clear();
     for (const BasicBlock &block : body_->blocks)
@@ -158,15 +172,18 @@ private:
     RValue &value = s.value;
     bool moved = false;
 
-    // What is known stands in for the name that held it.
-    for (Operand &operand : value.operands)
-      if (rewriting_ == Rewriting::Yes && operand.kind == OperandKind::Copy) {
-        const auto found = known_.find(operand.local);
-        if (found != known_.end()) {
-          operand = Operand{OperandKind::Written, 0, found->second, operand.type};
-          moved = true;
+    // What is known stands in for the name that held it — in the program only
+    // when rewriting. What this pass knows is asked for through `valueOf`, so
+    // the refusals do not depend on the substitution happening.
+    if (rewriting_ == Rewriting::Yes)
+      for (Operand &operand : value.operands)
+        if (operand.kind == OperandKind::Copy) {
+          const auto found = known_.find(operand.local);
+          if (found != known_.end()) {
+            operand = Operand{OperandKind::Written, 0, found->second, operand.type};
+            moved = true;
+          }
         }
-      }
 
     // How many places a `many` has, taken where it was made rather than worked
     // out later: the items are right there. A length outlives its block because
@@ -182,12 +199,17 @@ private:
     if (value.kind == RValueKind::Binary)
       moved = binary(s) || moved;
 
-    // What this place holds now, or nothing known about it any more.
-    if (value.kind == RValueKind::Use && !value.operands.empty() &&
-        written(value.operands[0]) && worthKnowing(s.place))
-      known_[s.place] = value.operands[0].written;
-    else
+    // What this place holds now, or nothing known about it any more. A binary
+    // that worked itself out has already said so and is left alone.
+    if (value.kind == RValueKind::Use && !value.operands.empty()) {
+      const std::string *held = valueOf(value.operands[0]);
+      if (held && worthKnowing(s.place))
+        known_[s.place] = *held;
+      else
+        known_.erase(s.place);
+    } else if (value.kind != RValueKind::Binary) {
       known_.erase(s.place);
+    }
     return moved;
   }
 
@@ -228,12 +250,13 @@ private:
   // A place asked for by a number, of a `many` whose length was written down.
   bool element(Statement &s) {
     RValue &value = s.value;
-    if (value.operands.size() != 2 || !written(value.operands[1]))
+    if (value.operands.size() != 2)
       return false;
+    const std::string *asked = valueOf(value.operands[1]);
     const auto found = lengths_.find(value.operands[0].local);
-    if (found == lengths_.end() || !looksWhole(value.operands[1].written))
+    if (!asked || found == lengths_.end() || !looksWhole(*asked))
       return false;
-    const XagInt at = wholeFrom(value.operands[1].written, Type::Int64);
+    const XagInt at = wholeFrom(*asked, Type::Int64);
     if (at >= 0 && at < found->second) {
       // Asked and answered here, so nothing has to ask again while it runs.
       if (rewriting_ == Rewriting::No)
@@ -253,20 +276,22 @@ private:
 
   bool binary(Statement &s) {
     RValue &value = s.value;
-    if (value.operands.size() != 2 || !written(value.operands[0]) ||
-        !written(value.operands[1]))
+    if (value.operands.size() != 2)
+      return false;
+    const std::string *left = valueOf(value.operands[0]);
+    const std::string *right = valueOf(value.operands[1]);
+    if (!left || !right)
       return false;
     const Type given = shapeOf(value.operands[0].type).lent().held;
     const Type made = shapeOf(value.type).lent().held;
-    if (!isWhole(given) || !looksWhole(value.operands[0].written) ||
-        !looksWhole(value.operands[1].written))
+    if (!isWhole(given) || !looksWhole(*left) || !looksWhole(*right))
       return false;
 
     const Type arithmetic = isWhole(made) ? made : given;
     const unsigned width = widthOf(arithmetic);
     const int sign = isSigned(arithmetic) ? 1 : 0;
-    const XagInt x = wholeFrom(value.operands[0].written, arithmetic);
-    const XagInt y = wholeFrom(value.operands[1].written, arithmetic);
+    const XagInt x = wholeFrom(*left, arithmetic);
+    const XagInt y = wholeFrom(*right, arithmetic);
     const std::string &op = value.op;
 
     // Dividing by a written zero stops every time it is reached. The compiler
@@ -300,6 +325,13 @@ private:
     else
       return false; // a comparison answers a `bool`, and is left alone for now
 
+    // Worked out either way, so that a name holding the answer is followed
+    // whichever engine this is for. Written back into the program only when the
+    // program is being rewritten.
+    if (worthKnowing(s.place))
+      known_[s.place] = folded;
+    else
+      known_.erase(s.place);
     if (rewriting_ == Rewriting::No)
       return false;
     Operand answer{OperandKind::Written, 0, folded, value.type};

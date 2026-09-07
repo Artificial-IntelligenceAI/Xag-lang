@@ -50,7 +50,7 @@ std::string saidIn(const std::string &body) {
 
 // The first code from the pass that runs once the middle layer is built, or ""
 // when it had nothing to say.
-std::string built(const std::string &text) {
+std::string builtWith(const std::string &text, xag::Rewriting rewriting) {
   const xag::Source source("test.xag", text);
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
@@ -59,9 +59,21 @@ std::string built(const std::string &text) {
     return "(did not reach it)";
   xag::MirResult made = xag::build(source, parsed.program, checked);
   xag::elaborate(made.mir);
-  const xag::FoldResult folded = xag::fold(source, made.mir, xag::Rewriting::Yes);
+  const xag::FoldResult folded = xag::fold(source, made.mir, rewriting);
   return folded.diagnostics.empty() ? "" : folded.diagnostics.front().code;
 }
+
+// The first code from the pass that runs once the middle layer is built, under
+// both settings: what a program is refused for cannot depend on which engine is
+// about to run it, and for a while it did — `xagc build` turned one down that
+// `xagc run` was happy with.
+std::string builtEitherWay(const std::string &text) {
+  const std::string optimised = builtWith(text, xag::Rewriting::Yes);
+  const std::string plain = builtWith(text, xag::Rewriting::No);
+  return optimised == plain ? optimised : optimised + " but " + plain;
+}
+
+std::string built(const std::string &text) { return builtEitherWay(text); }
 
 void aNameMustBeDeclared() {
   CHECK(inStart("print.stdout['nope' \\n];").code(0) == "E0501");
