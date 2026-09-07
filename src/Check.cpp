@@ -773,11 +773,12 @@ private:
     case ExprKind::Written:
       if (expected == Type::Unknown) {
         complain(e.span, "E0507", "nothing here says what this written value is.",
-                 {"a written value takes its type from the chain, from the parameter "
-                  "it is passed to, or from itself"},
-                 {"`*1000*` is a number under `int64` and four characters under `str`, "
-                  "so a list with no chain and no declared parameters — a print — "
-                  "leaves the value to say it."});
+                 {"a written value takes its type from what it is written into, from the "
+                  "parameter it is passed to, or from itself"},
+                 {"`*1000*` is a number under `int64` and four characters under `str`. "
+                  "`print.stdout` is a chain that calls rather than one that declares "
+                  "a name, and a print declares no parameters either, so nothing beside "
+                  "the value has said which it is and the value is left to say it."});
         return Type::Unknown;
       }
       if (isDecimal(expected)) {
@@ -1117,8 +1118,8 @@ private:
     if (path == "fill") {
       if (!expected.holds()) {
         complain(e.span, "E0507", "nothing here says what `fill` is filling.",
-                 {"a written value takes its type from the chain, from the parameter "
-                  "it is passed to, or from itself"},
+                 {"a written value takes its type from what it is written into, from the "
+                  "parameter it is passed to, or from itself"},
                  {"`fill` answers a `many`, and which `many` is a question the chain "
                   "beside it has already answered everywhere it is allowed to stand."});
         for (const Value &v : e.args.values)
