@@ -219,8 +219,38 @@ fn main() {
     }
 
     let found = findings.into_inner().unwrap();
+
+    // Agreement is about cases that were actually put to all three. A run where
+    // nothing reached them agrees about nothing, and saying "every engine
+    // agreed" of it is the exact false comfort this tool exists to remove — a
+    // stale generator once wrote 150 programs the parser refused and this
+    // reported a clean sweep.
+    let turned_away = rejected.load(Ordering::Relaxed);
+    let passed_over = skipped.load(Ordering::Relaxed);
+    let compared = ran.saturating_sub(turned_away + passed_over);
+    if compared == 0 {
+        println!(
+            "nothing was compared. {turned_away} case(s) the compiler refused, \
+             {passed_over} passed over — the engines were never asked anything.\n\
+             A generator built before the language last changed writes programs \
+             nothing will take; `cargo build --release` in `generator/` is the \
+             usual cause."
+        );
+        std::process::exit(1);
+    }
+
     if found.is_empty() && stuck.is_empty() {
-        println!("every engine agreed.");
+        // How much was actually asked, so that a mostly-refused run cannot read
+        // as a thorough one.
+        if turned_away * 5 > ran {
+            println!(
+                "every engine agreed about the {compared} case(s) that reached them \
+                 — but {turned_away} of {ran} were refused before they could, which \
+                 is more than a run this size should be losing."
+            );
+            return;
+        }
+        println!("every engine agreed about {compared} case(s).");
         return;
     }
     if found.is_empty() {
