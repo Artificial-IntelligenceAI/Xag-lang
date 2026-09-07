@@ -270,3 +270,40 @@ which is the moment to write it down rather than later.
 - Whether a loop that was run, agreed on and found safe should also be
   *replaced* by its answer. That is an optimisation and a separate decision; the
   work is already done by then.
+
+### Lifting a loop that owns something
+
+The wall, and a real one. A loop may be taken out of its program only when
+everything it touches is a plain number or a `bool`, because anything else has
+to be *rebuilt* outside the loop rather than written down — and a compile-time
+run that rebuilds a `many` is a run that owns memory the program still thinks it
+holds. Freeing it at the end of the lifted run, or failing to, are both wrong.
+
+Most counted loops worth checking are exactly this shape: they walk a `many`.
+So the rule that keeps lifting sound is also what keeps it from reaching the
+loops people write. Getting past it means the lifted program reconstructing
+owned values, with the same ownership the loop expects, which is a larger thing
+than anything here so far.
+
+### Running forward to the first read
+
+Rather than refusing to run any program that reads, run one from the top and
+stop cleanly when it reaches a read, using only what happened before that.
+
+This was the cheaper alternative to lifting loops, and lifting was built first.
+What it would still add is the loops that sit *before* a read and do not qualify
+for lifting — one walking a `many`, say. It would need the built run to stop at
+the same place, which means the ahead build lowering a read into something that
+says so and exits, so that the two runs still compare.
+
+### What it costs the oracle
+
+Every program is now built twice while being checked, and the oracle went from
+three cases a second to one. That is the compile-time bill this was always going
+to run up, and it is not a surprise. It is worth writing down anyway, because
+the number it slows down is the rate at which the oracle finds bugs — the thing
+that caught the 128-bit hole the same day the hole appeared.
+
+A run of 200 also refuses nine cases it used to run, all of them genuine
+overflows into a plain name. That is the feature working, and it is still nine
+fewer programs the three engines get compared on.
