@@ -335,10 +335,32 @@ for lifting — one walking a `many`, say. It would need the built run to stop a
 the same place, which means the ahead build lowering a read into something that
 says so and exits, so that the two runs still compare.
 
+### Running only where there is something to find
+
+There are two things ITMT can find — a sum that comes round, and a stop — and
+both need particular code to be there at all. A sum needs `+`, `-` or `x` on
+whole numbers; a stop needs a divide, a remainder, a power, or reaching into a
+`many`. A program with none of those has nothing to learn about.
+
+That is worth checking before building anything, because building is the whole
+cost. Measured on a three-line program that only prints:
+
+```
+xagc check                            0.45s
+the same, with no runtime to link     0.00s
+xagc check, after the check above     0.01s
+```
+
+The front end is free. Every bit of half a second was an LLVM module, a `cc`,
+and a process — spent to find out there was nothing to find.
+
 ### What it costs the oracle
 
 Every program is now built twice while being checked, and the oracle went from
-three cases a second to one. That is the compile-time bill this was always going
+three cases a second to one. Worse, the oracle asks `xagc` three times per case
+— `run`, `fast` and `build` — and each of those goes through `ready()`, so each
+does a build of its own. Four modules per case where there was one, and the
+skip above does not help: a generated program does arithmetic. That is the compile-time bill this was always going
 to run up, and it is not a surprise. It is worth writing down anyway, because
 the number it slows down is the rate at which the oracle finds bugs — the thing
 that caught the 128-bit hole the same day the hole appeared.

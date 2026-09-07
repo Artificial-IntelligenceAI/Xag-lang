@@ -95,6 +95,32 @@ bool samePlaces(const std::vector<Span> &a, const std::vector<Span> &b) {
   return true;
 }
 
+// Whether running this program could find anything at all.
+//
+// There are two things to find: a sum that comes round, and a stop. A sum needs
+// `+`, `-` or `x` on whole numbers; a stop needs a divide, a remainder, a power,
+// or reaching into a `many`. A program with none of those has nothing to learn
+// about, and building and starting it costs half a second to find that out.
+bool worthRunning(const Mir &mir) {
+  for (const Body &body : mir.bodies)
+    for (const BasicBlock &block : body.blocks)
+      for (const Statement &s : block.statements) {
+        if (s.kind == StatementKind::Store)
+          return true;
+        if (s.value.kind == RValueKind::Element || s.value.kind == RValueKind::Fill)
+          return true;
+        if (s.value.kind != RValueKind::Binary)
+          continue;
+        const std::string &op = s.value.op;
+        if (op == "/" || op == "mod" || op == "^")
+          return true;
+        if ((op == "+" || op == "-" || op == "x") &&
+            isWhole(body.typed[s.value.type.index].held))
+          return true;
+      }
+  return false;
+}
+
 bool hasStart(const Mir &mir) {
   for (const Body &body : mir.bodies)
     if (body.name == "START")
@@ -245,7 +271,8 @@ AheadResult ahead(const Source &, const Mir &mir,
   AheadResult out;
   // Something to settle, or a second engine to settle it with. With neither,
   // running the program would answer a question nobody asked.
-  if ((aboutSums.empty() && !building) || !hasStart(mir)) {
+  if ((aboutSums.empty() && !building) || !hasStart(mir) ||
+      (aboutSums.empty() && !worthRunning(mir))) {
     out.diagnostics = aboutSums;
     return out;
   }
