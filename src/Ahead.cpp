@@ -102,6 +102,32 @@ bool hasStart(const Mir &mir) {
   return false;
 }
 
+// What to say about a program that stopped.
+//
+// Both engines ran it, so both have an opinion, and only what they agree about
+// is worth putting to the reader. Agreeing here means stopping for the same
+// reason in the same place after writing the same thing.
+Diagnostic stopping(const InterpretResult &reading, const Compiled &running,
+                    const std::string &said) {
+  const bool same = running.stopped && running.why == reading.trouble &&
+                    running.said == said &&
+                    running.stoppedAt.begin == reading.stoppedAt.begin;
+  if (!same) {
+    std::vector<std::string> both;
+    both.push_back("Reading it, it stopped: " + reading.trouble);
+    both.push_back(running.stopped ? "Built and started, it stopped: " + running.why
+                   : running.ran  ? std::string("Built and started, it did not stop.")
+                                  : "Built and started: " + running.trouble);
+    return Diagnostic{Span{}, "", "the two ways I have of running this do not agree.",
+                      "here", both, {}, {}, Severity::Mine};
+  }
+  return Diagnostic{
+      reading.stoppedAt, "E0538", "this stops the program: " + reading.trouble, "here",
+      {"a program that cannot go on is not one worth building"},
+      {"nothing worked this out. I ran the program both ways I have of running it, "
+       "and both stopped here for this reason."}};
+}
+
 // The compiler contradicting itself. No code, because a code names a rule the
 // reader's code broke and no rule was broken; what stands in its place is the
 // two answers, which is the thing worth having in the report.
@@ -250,10 +276,17 @@ AheadResult ahead(const Source &, const Mir &mir,
   const std::string said = drain(sink);
   std::fclose(sink);
 
-  // A run that stopped — out of steps, or on something the program does wrong —
-  // saw only part of the program. What it did not reach, it cannot vouch for.
+  // A run that stopped saw only part of the program, so every bound stands. But
+  // *why* it stopped is worth having: a program that asks for a place a `many`
+  // does not have, or divides by zero, is a program that breaks — and knowing
+  // that before it is run is the whole point of running it.
   if (!result.ran) {
     out.diagnostics = aboutSums;
+    if (result.theirFault && building) {
+      const Compiled twice = building(mir);
+      if (twice.asked)
+        out.diagnostics.push_back(stopping(result, twice, said));
+    }
     return out;
   }
 

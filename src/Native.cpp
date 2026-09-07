@@ -596,6 +596,11 @@ private:
 
   void statement(const Statement &s) {
     at_ = s.span.begin;
+    // Leave where we are, so that a stop can say where. A store rather than a
+    // call, and only in the build that is asked to keep track — a reader's
+    // program does none of this.
+    if (watching_ && s.span.begin != 0)
+      builder_.CreateStore(builder_.getInt32(s.span.begin), whereWeAre());
     if (s.kind == StatementKind::Store) {
       const MirType held = localType(s.place);
       const MirType element = elementOf(held);
@@ -919,6 +924,11 @@ private:
   // data layout rather than guessed at.
   uint64_t strideOf(const MirType &element) {
     return module_.getDataLayout().getTypeAllocSize(typeFor(element));
+  }
+
+  // The runtime's own place for where the program got to.
+  llvm::Value *whereWeAre() {
+    return module_.getOrInsertGlobal("xag_where", builder_.getInt32Ty());
   }
 
   // The same sum, through the intrinsic that answers whether it fitted. The

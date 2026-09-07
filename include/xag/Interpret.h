@@ -13,6 +13,11 @@ struct InterpretResult {
   // Where a sum came round, when the run was asked to watch for it. Empty
   // otherwise, and empty is not the same as "none" unless it was asked.
   std::vector<Span> cameRound;
+  // Where the program had got to when it stopped, and whether stopping was the
+  // program's doing rather than this engine's. Running longer than the engine
+  // will wait is the engine giving up and says nothing about the program.
+  Span stoppedAt;
+  bool theirFault = false;
 };
 
 // The test interpreter: it walks the graph as written, calls the runtime for

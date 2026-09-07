@@ -418,10 +418,29 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
     if (!already)
       out.cameRound.push_back(xag::Span{at, at});
   }
+  saying.clear();
+  saying.seekg(0);
+  while (std::getline(saying, line)) {
+    const std::string stopped = "the program stopped: ";
+    const std::string where = "xag-stopped-at ";
+    if (line.rfind(stopped, 0) == 0)
+      out.why = line.substr(stopped.size());
+    else if (line.rfind(where, 0) == 0) {
+      const unsigned at =
+          static_cast<unsigned>(std::strtoul(line.c_str() + where.size(), nullptr, 10));
+      out.stoppedAt = xag::Span{at, at};
+    }
+  }
   saying.close();
   std::remove(noticed.c_str());
 
   if (status != 0) {
+    // A program that stops is an answer, not a failure to get one — as long as
+    // it said why. Everything else about a program that would not run is.
+    if (!out.why.empty()) {
+      out.stopped = true;
+      return out;
+    }
     out.trouble = "it stopped, having written " + std::to_string(out.said.size()) +
                   " character(s).";
     return out;

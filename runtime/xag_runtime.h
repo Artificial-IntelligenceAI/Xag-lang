@@ -265,6 +265,25 @@ void xag_stop(const char *why);
 typedef void (*XagStopping)(const char *why);
 void xag_hand_back_stops(XagStopping handler);
 
+// Where in the source the program had got to, for the one build that says so.
+//
+// Written straight into by generated code — a store, not a call — and only by
+// the build the compiler makes in order to run a program while compiling it.
+// Every other build leaves it at zero and `xag_stop` says nothing extra, so
+// what a reader sees when their program stops is exactly what they always saw.
+extern uint32_t xag_where;
+
+// Say how many things are outstanding, for a run that was abandoned.
+//
+// Coming back from a stop skips the destructors of everything the run had in
+// hand, so what it had allocated is lost and the count keeps counting it. Left
+// alone, the next run in the same process is told it ended still holding what
+// the last one dropped — which is how a program that is fine gets accused. The
+// memory is gone either way; this is about the count meaning something.
+//
+// Only a compiler that abandoned a run calls this. Nothing a reader runs does.
+void xag_forget_allocations(int64_t backTo);
+
 // Says that a sum came round, and where in the source it was written.
 //
 // Nothing a reader ever runs calls this. It exists for the build the compiler

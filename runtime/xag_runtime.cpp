@@ -451,6 +451,7 @@ void xag_str_of_deci(XagStr *out, uint32_t width, XagDeci value) {
 }
 
 int64_t xag_live_allocations(void) { return live; }
+void xag_forget_allocations(int64_t backTo) { live = backTo; }
 int xag_balance_is_clear(void) { return live == 0 ? 1 : 0; }
 
 void xag_many_out_of_range(int64_t index, uint64_t length) {
@@ -597,6 +598,8 @@ XagStopping handsBackTo = nullptr;
 
 void xag_hand_back_stops(XagStopping handler) { handsBackTo = handler; }
 
+uint32_t xag_where = 0;
+
 void xag_stop(const char *why) {
   const char *reason = why ? why : "no reason was given";
   // A handler does not come back. One that does has not done its job, and the
@@ -605,6 +608,10 @@ void xag_stop(const char *why) {
     handsBackTo(reason);
   std::fflush(output());
   std::fprintf(stderr, "\nthe program stopped: %s\n", reason);
+  // Only the build that was asked to keep track has anything to say here, and
+  // that build is one nobody but the compiler ever runs.
+  if (xag_where != 0)
+    std::fprintf(stderr, "xag-stopped-at %u\n", static_cast<unsigned>(xag_where));
   std::exit(1);
 }
 

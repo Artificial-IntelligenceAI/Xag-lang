@@ -27,6 +27,12 @@ struct Compiled {
   // word. Each place once, in the order they happened.
   std::vector<Span> cameRound;
   std::string trouble;  // why there is no answer, when there is none
+  // It stopped, the way a program stops, and where. `stopped` is the reason it
+  // printed; `stoppedAt` is where it had got to, which only the build that
+  // keeps track can say.
+  bool stopped = false;
+  std::string why;
+  Span stoppedAt;
 };
 
 // How to get that second answer. `ahead` does not know how to build a program

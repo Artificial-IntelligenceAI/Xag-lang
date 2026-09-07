@@ -143,6 +143,7 @@ agreeing mean something.
 | they agree, and a bound was right | the bound stands as it was |
 | they agree, and a bound was wrong | the bound is dropped |
 | they agree, and a sum came round nothing suspected | `E0537` |
+| they agree, and the program stopped | `E0538` |
 | only one engine ran | bounds may be dropped, and nothing else is said |
 
 The last row is what happens with no runtime to link against. One engine may let
@@ -191,6 +192,38 @@ A loop qualifies on three rules, each about being *sure* rather than about being
 when the loop is entered; whether it is *ever* entered is a question about the
 program around it, which was not run. Clearing a suspicion needs only that the
 loop is harmless when it runs; raising one would need to know that it does.
+
+### A program that stops
+
+A program can stop: it divides by zero, or asks for a place a `many` does not
+have. Both engines can see that happen, and a stop they agree about is `E0538` —
+the reason and the place, before the program was ever run.
+
+```text
+this stops the program: place 3 was asked for, and the `many` has 3
+
+  5 |         if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }
+    |            ^^^^^^^^^ here
+
+Error code: E0538
+```
+
+Two things had to be built for that. The built program says *where* it stopped:
+generated code in a watching build stores the place into `xag_where` — a store,
+not a call — and `xag_stop` prints it when it is not zero, which it only ever is
+in that build. And the interpreter had to survive a stop at all.
+
+**A stop used to end the compiler.** `xag_stop` calls `std::exit`, and ITMT runs
+the program in the compiler's own process — so `xagc check` on a program that
+divides by zero printed a runtime message with no file, no line and no code, and
+checking a file had quietly run it. `xag_stop` now takes a handler and the
+in-process run installs one that comes back. Nothing a reader runs installs one.
+
+Coming back skips the destructors of everything the run had in hand, so that run
+leaks. Two things follow, and the second is what the tests caught: the memory is
+gone, and the *count* of it would go on counting — so the next run in the same
+process is told it ended holding what the last one dropped. `xag_forget_allocations`
+puts the count back. A program that is fine was being accused.
 
 ### Which sums are anybody's business
 

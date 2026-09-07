@@ -42,6 +42,9 @@ class Machine {
 public:
   Machine(const Mir &mir, bool watching) : mir_(mir), watching_(watching) {}
 
+  // Where it has got to, for whoever catches a stop coming out of the runtime.
+  const Span &where() const { return whereNow_; }
+
   InterpretResult run() {
     const Body *start = find("START");
     if (!start)
@@ -52,7 +55,7 @@ public:
     if (trouble_.empty() && !xag_balance_is_clear())
       trouble_ = "the program ended still holding " +
                  std::to_string(xag_live_allocations()) + " thing(s)";
-    return InterpretResult{trouble_.empty(), trouble_, cameRound_};
+    return InterpretResult{trouble_.empty(), trouble_, cameRound_, whereNow_, false};
   }
 
 private:
@@ -65,6 +68,9 @@ private:
   // span of its own, and the statement holding it does.
   bool roundedHere_ = false;
   std::vector<Span> cameRound_;
+  // The statement being run, so that a stop coming out of the runtime can be
+  // put where it happened rather than nowhere.
+  Span whereNow_;
 
   // Whether the answer was too big for its type.
   //
@@ -823,6 +829,7 @@ private:
           trouble_ = "the program ran longer than this engine will wait";
           break;
         }
+        whereNow_ = s.span;
         if (s.kind == StatementKind::Drop) {
           if (s.conditional && !truthOf(frames_.back().locals[s.flag]))
             continue;
@@ -897,6 +904,9 @@ namespace {
 // path a reader's program takes — `interpret` installs no handler.
 jmp_buf comesBackHere;
 std::string whyItStopped;
+// Where the run had got to. A member of the machine would be lost coming back,
+// because coming back does not go through the machine.
+const Span *whereTheRunIs = nullptr;
 
 [[noreturn]] void handItBack(const char *why) {
   whyItStopped = why ? why : "no reason was given";
@@ -908,15 +918,27 @@ std::string whyItStopped;
 InterpretResult interpretWatching(const Mir &mir) {
   Machine machine(mir, /*watching=*/true);
   whyItStopped.clear();
+  const int64_t held = xag_live_allocations();
   InterpretResult out;
+  whereTheRunIs = &machine.where();
   if (setjmp(comesBackHere) == 0) {
     xag_hand_back_stops(handItBack);
     out = machine.run();
   } else {
     out.ran = false;
     out.trouble = whyItStopped;
+    if (whereTheRunIs)
+      out.stoppedAt = *whereTheRunIs;
+    // Out of the runtime, so the program asked for something it could not have
+    // — divided by zero, or reached past the end of a `many`. This engine
+    // giving up never comes through here; it sets its own trouble and returns.
+    out.theirFault = true;
+    // What this run had in hand is lost, and the count would go on counting it.
+    // The next run would then be told it ended holding what this one dropped.
+    xag_forget_allocations(held);
   }
   xag_hand_back_stops(nullptr);
+  whereTheRunIs = nullptr;
   return out;
 }
 

@@ -61,6 +61,11 @@ xag::Building agrees() {
     std::fclose(sink);
     out.ran = said.ran;
     out.cameRound = said.cameRound;
+    if (!said.ran && said.theirFault) {
+      out.stopped = true;
+      out.why = said.trouble;
+      out.stoppedAt = said.stoppedAt;
+    }
     return out;
   };
 }
@@ -265,6 +270,46 @@ void aBuiltProgramThatStoppedIsOurMistakeAsWell() {
   CHECK(!s.said.empty() && s.said[0].severity == xag::Severity::Mine);
 }
 
+
+// A program that stops is something both engines can see happen, and knowing it
+// before the program is run is the whole point of running it.
+void aProgramThatStopsIsSaidSo() {
+  // The divisor is worked out in a loop, so the fold cannot see it and this
+  // reaches the run.
+  const std::string zero = "START {\n"
+                           "    var.mut.int64 'd' = [*5*];\n"
+                           "    loop.range.int64 'i' = [*1*, *5*] {\n"
+                           "        set 'd' = ['d' - *1*];\n"
+                           "    }\n"
+                           "    var.int64 'n' = [*10* / 'd'];\n}\n";
+  CHECK(settle(zero, agrees()).code(0) == "E0538");
+  // One engine may not refuse anybody's program, here as anywhere.
+  CHECK(settle(zero).said.empty());
+
+  // Reaching past the end of a `many`, which is a stop today and knowable now.
+  const std::string past = "START {\n"
+                           "    var.many.int64 'xs' = [*5* *9* *2*];\n"
+                           "    var.mut.int64 'best' = ['xs'[*0*]];\n"
+                           "    loop.range.int64 'i' = [*1*, *3*] {\n"
+                           "        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }\n"
+                           "    }\n}\n";
+  CHECK(settle(past, agrees()).code(0) == "E0538");
+  // The same program that stays inside is left alone.
+  CHECK(settle("START {\n"
+               "    var.many.int64 'xs' = [*5* *9* *2*];\n"
+               "    var.mut.int64 'best' = ['xs'[*0*]];\n"
+               "    loop.range.int64 'i' = [*1*, *2*] {\n"
+               "        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }\n"
+               "    }\n}\n",
+               agrees())
+            .said.empty());
+
+  // Stopping in one and not the other is ours, not theirs.
+  const Settled apart = settle(zero, disagrees(""));
+  CHECK(apart.said.size() == 1);
+  CHECK(!apart.said.empty() && apart.said[0].severity == xag::Severity::Mine);
+}
+
 } // namespace
 
 int main() {
@@ -273,6 +318,7 @@ int main() {
   aWarningTheRunAnswersGoesAway();
   aLoopAfterAReadStandsOnItsOwn();
   aProgramThatReadsIsNotRun();
+  aProgramThatStopsIsSaidSo();
   aRunThatStoppedChangesNothing();
   aProgramWithNothingHeldIsNotRun();
   twoAnswersIsOurMistake();
