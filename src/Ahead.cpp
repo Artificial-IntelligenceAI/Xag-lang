@@ -173,20 +173,44 @@ Both runBothWays(const Mir &mir, const Building &building) {
 // Whether some loop, run on its own, showed that this bound was worrying about
 // nothing. The bound points at a statement; the loop holding that statement is
 // the one that answers for it.
-bool clearedByALiftedLoop(const Mir &mir, const Diagnostic &bound,
-                          const Building &building) {
-  for (const Lifted &loop : loopsThatStandAlone(mir)) {
-    bool holdsIt = false;
-    for (const Span &place : loop.places)
-      if (place.begin >= bound.span.begin && place.begin < bound.span.end)
-        holdsIt = true;
-    if (!holdsIt)
-      continue;
-    const Both both = runBothWays(loop.mir, building);
-    if (both.agreed && !inside(bound.span, both.cameRound))
+// Whether this loop holds the statement a bound is about.
+bool holdsTheStatement(const Lifted &loop, Span bound) {
+  for (const Span &place : loop.places)
+    if (place.begin >= bound.begin && place.begin < bound.end)
       return true;
-  }
   return false;
+}
+
+// Which bounds the loops of a program clear, all of them at once.
+//
+// Once per loop, not once per bound. Asked a bound at a time it lifted every
+// loop again and built and started each one again, so a program with two bounds
+// in two loops paid for four builds to answer two questions.
+std::vector<Diagnostic> whatTheLoopsLeave(const Mir &mir,
+                                          const std::vector<Diagnostic> &aboutSums,
+                                          const Building &building, bool &any) {
+  const std::vector<Lifted> loops = loopsThatStandAlone(mir);
+  std::vector<Both> answered(loops.size());
+  std::vector<bool> asked(loops.size(), false);
+
+  std::vector<Diagnostic> left;
+  for (const Diagnostic &bound : aboutSums) {
+    bool cleared = false;
+    for (unsigned i = 0; i < loops.size() && !cleared; ++i) {
+      if (!holdsTheStatement(loops[i], bound.span))
+        continue;
+      if (!asked[i]) {
+        answered[i] = runBothWays(loops[i].mir, building);
+        asked[i] = true;
+      }
+      cleared = answered[i].agreed && !inside(bound.span, answered[i].cameRound);
+    }
+    if (cleared)
+      any = true;
+    else
+      left.push_back(bound);
+  }
+  return left;
 }
 
 AheadResult ahead(const Source &, const Mir &mir,
@@ -208,12 +232,7 @@ AheadResult ahead(const Source &, const Mir &mir,
   // entered, and whether it is ever entered is a question about the program
   // around it — so it may clear a suspicion and may not raise one.
   if (readsInput(mir)) {
-    std::vector<Diagnostic> left;
-    for (const Diagnostic &bound : aboutSums)
-      if (!clearedByALiftedLoop(mir, bound, building))
-        left.push_back(bound);
-    out.diagnostics = left;
-    out.ran = left.size() != aboutSums.size();
+    out.diagnostics = whatTheLoopsLeave(mir, aboutSums, building, out.ran);
     return out;
   }
 

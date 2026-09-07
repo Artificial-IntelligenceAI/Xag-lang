@@ -1,7 +1,13 @@
-# Running a loop to find out what it does
+# ITMT — running a loop to find out what it does
 
-**Nothing here is built.** The design is written down first so it does not get
-built the wrong way round.
+**ITMT**, which Tankun named on 2026-09-07 and says *I'm Taking My Time*. It is
+a joke about the one thing this feature spends without limit, and it is the
+name.
+
+
+**Built, for sums.** The design was written down before any of it, so it did not
+get built the wrong way round; what is here now says what happens rather than
+what was intended. **Open** at the end is what is still only intended.
 
 Xag already reasons about loops at compile time. It folds constants, and it
 works out how far a counted loop gets from its written ends — `E0534` when a sum
