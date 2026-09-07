@@ -284,6 +284,14 @@ extern uint32_t xag_where;
 // Only a compiler that abandoned a run calls this. Nothing a reader runs does.
 void xag_forget_allocations(int64_t backTo);
 
+// Says that the program has reached a read, and stops there.
+//
+// What a program does after it reads depends on what it was given, and while it
+// is being compiled it has been given nothing — so there is nothing true to
+// find past this point. What came before it is still worth having. Only the
+// build the compiler makes calls this; a reader's program reads.
+void xag_would_read(void);
+
 // Says that a sum came round, and where in the source it was written.
 //
 // Nothing a reader ever runs calls this. It exists for the build the compiler

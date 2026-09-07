@@ -155,6 +155,38 @@ checker in `CheckResult::aboutSums` rather than reported: a refusal that has
 already stopped compilation cannot be overturned by a run that has not happened
 yet, and the first attempt at a test for this ran straight into that.
 
+### As far as the first read
+
+A program that reads cannot be run to the end here — what it does on what it was
+given is not what it does on nothing. It can be run *up to* the read, and
+everything before that point actually happened.
+
+Both engines stop in the same place, or nothing they say can be compared. The
+interpreter stops when it meets `read.stdin` while watching; the built program
+calls `xag_would_read`, which says so and stops, because a watching build lowers
+a read that way. A reader's build reads.
+
+What that adds over lifting a loop out is every loop before a read that *cannot*
+be lifted — one walking a `many`, or one that calls out:
+
+```
+fn.int8 'twice' [int8 'n'] { give ['n' x *2*]; }
+START {
+    var.mut.int8 'sum' = [*0*];
+    loop.range.int8 'i' = [*1*, *5*] { set 'sum' = ['sum' + twice['i']]; }
+    loop.while read.stdin[] holds 'line' { print.stdout['line' \n]; }
+}
+```
+
+The bounds give up on that loop (`W0001`, it calls out) and lifting will not
+take it (it calls out). Running the program as far as the read answers it.
+
+A partial run only answers for what it **reached**, which a whole run does not
+have to think about: a statement a program with nothing to read never reaches is
+a statement that never runs, and a bound about it is a bound about nothing. A
+statement past a read is a different matter, and its bound stands — after which
+the loop-lifting above gets its turn at it.
+
 ### A loop taken out of the program it was written in
 
 A program that reads cannot be run here — what it does depends on what it is
@@ -320,67 +352,6 @@ So the rule that keeps lifting sound is also what keeps it from reaching the
 loops people write. Getting past it means the lifted program reconstructing
 owned values, with the same ownership the loop expects, which is a larger thing
 than anything here so far.
-
-### Running forward to the first read
-
-Rather than refusing to run any program that reads, run one from the top and
-stop cleanly when it reaches a read, using only what happened before that.
-
-This was the cheaper alternative to lifting loops, and lifting was built first.
-What it would still add is the loops that sit *before* a read and do not qualify
-for lifting — one walking a `many`, say. It would need the built run to stop at
-the same place, which means the ahead build lowering a read into something that
-says so and exits, so that the two runs still compare.
-
-### Writing the answer in place of the loop
-
-A loop the compiler could run is a loop whose answer it knows, and a loop LLVM
-cannot see through is one worth writing that answer into.
-
-LLVM does this itself wherever it can see the shape of the loop, and the rule
-here is to prove only what LLVM cannot know. So the question was measured rather
-than assumed. A thousand rounds of `set 'total' = ['total' + 'i']`:
-
-```llvm
-call void @xag_print_int(i128 500500, i32 64, i32 1)     ; LLVM folded it
-```
-
-The same loop with a branch in the middle — `if ('i' mod *7*) == *0*` — LLVM
-leaves alone: four branches, and the answer computed at runtime. Running it says
-47259641. That is the gap, and `writeInWhatTheLoopsAnswer` fills it.
-
-**It does not need both engines.** A rewrite is not a refusal, and one engine may
-not refuse anybody's program — but `Fold.cpp` already rewrites on the
-interpreter's word alone, and what checks it is the same thing that checks this:
-the interpreters are given the program as written and the compiler is given what
-was rewritten, so a bad rewrite is a disagreement rather than three engines
-agreeing on the same wrong number. It is `interpretForTheAnswer` — one run, no
-build, and cheap.
-
-The loop's own blocks stay where they are, reachable from nothing, for LLVM to
-drop. That left a trap: a block still jumping back to a header that no longer
-reaches it looked exactly like a loop, so the pass answered the same dead loop
-every time it was asked. A jump backwards is a loop only when the header can
-still get to the block making it.
-
-### Running only where there is something to find
-
-There are two things ITMT can find — a sum that comes round, and a stop — and
-both need particular code to be there at all. A sum needs `+`, `-` or `x` on
-whole numbers; a stop needs a divide, a remainder, a power, or reaching into a
-`many`. A program with none of those has nothing to learn about.
-
-That is worth checking before building anything, because building is the whole
-cost. Measured on a three-line program that only prints:
-
-```
-xagc check                            0.45s
-the same, with no runtime to link     0.00s
-xagc check, after the check above     0.01s
-```
-
-The front end is free. Every bit of half a second was an LLVM module, a `cc`,
-and a process — spent to find out there was nothing to find.
 
 ### What it costs the oracle
 

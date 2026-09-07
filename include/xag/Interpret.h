@@ -22,6 +22,13 @@ struct InterpretResult {
   // way they would be written down. Only filled when asked for — a run that
   // stopped fills nothing, because it never finished holding anything.
   std::vector<std::string> endedHolding;
+  // It reached a read and stopped there rather than reading. Everything before
+  // that point happened; nothing after it is known, because what a program does
+  // after a read depends on what it was given.
+  bool wouldRead = false;
+  // Every statement it actually got to. A bound about a statement the run never
+  // reached is a bound nothing has answered.
+  std::vector<Span> reached;
 };
 
 // The test interpreter: it walks the graph as written, calls the runtime for

@@ -33,6 +33,10 @@ struct Compiled {
   bool stopped = false;
   std::string why;
   Span stoppedAt;
+  // It reached a read and stopped there rather than reading, because the build
+  // the compiler makes does that. The interpreter does the same, so the two
+  // still stop in the same place and what came before still compares.
+  bool wouldRead = false;
 };
 
 // How to get that second answer. `ahead` does not know how to build a program

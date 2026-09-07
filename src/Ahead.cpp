@@ -277,18 +277,6 @@ AheadResult ahead(const Source &, const Mir &mir,
     return out;
   }
 
-  // A program that reads cannot be run here, and the loops inside it still can.
-  // What a loop is entered with is written down even where what the program is
-  // given is not, so each one is taken out and run as a program of its own.
-  //
-  // Only to *drop* a bound. A lifted loop says what happens when the loop is
-  // entered, and whether it is ever entered is a question about the program
-  // around it — so it may clear a suspicion and may not raise one.
-  if (readsInput(mir)) {
-    out.diagnostics = whatTheLoopsLeave(mir, aboutSums, building, out.ran);
-    return out;
-  }
-
   // What the program writes while it is being compiled is not what anybody
   // asked to see. It is kept all the same, because it is the answer the second
   // run is compared against.
@@ -303,11 +291,10 @@ AheadResult ahead(const Source &, const Mir &mir,
   const std::string said = drain(sink);
   std::fclose(sink);
 
-  // A run that stopped saw only part of the program, so every bound stands. But
-  // *why* it stopped is worth having: a program that asks for a place a `many`
-  // does not have, or divides by zero, is a program that breaks — and knowing
-  // that before it is run is the whole point of running it.
-  if (!result.ran) {
+  // A program that stopped is a program that breaks, and saying so before it is
+  // ever run is the whole point of running it. Nothing else is settled: the run
+  // saw only as far as the stop.
+  if (!result.ran && !result.wouldRead) {
     out.diagnostics = aboutSums;
     if (result.theirFault && building) {
       const Compiled twice = building(mir);
@@ -317,13 +304,18 @@ AheadResult ahead(const Source &, const Mir &mir,
     return out;
   }
 
+  // It reached a read and stopped there. Everything before that happened, and
+  // nothing after it is known — what a program does on what it was given is not
+  // what it does on nothing.
+  const bool partly = result.wouldRead;
   out.ran = true;
 
   // The second answer. Without one, only the interpreter has spoken, and one
   // engine may drop a bound but may not stand one up.
   const Compiled twice = building ? building(mir) : Compiled{};
   if (twice.asked) {
-    if (!twice.ran || twice.said != said) {
+    const bool bothStoppedTheSameWay = twice.wouldRead == partly && twice.ran == !partly;
+    if (!bothStoppedTheSameWay || twice.said != said) {
       out.diagnostics.push_back(disagreed(said, twice));
       return out;
     }
@@ -357,14 +349,22 @@ AheadResult ahead(const Source &, const Mir &mir,
     }
   }
 
+  // A bound the run answered is dropped. A run that went all the way answered
+  // every one of them, including bounds on statements it never reached — a
+  // statement a program with nothing to read never reaches is one that never
+  // runs. A run that stopped at a read answered only what it got to.
+  std::vector<Diagnostic> standing;
   for (const Diagnostic &bound : aboutSums) {
-    const bool came = inside(bound.span, result.cameRound);
-    // It came round after all, so the bound was right about this one and is
-    // reported as it stands. Everywhere else the loop ran and nothing came
-    // round, which is an answer rather than an estimate.
-    if (came)
-      out.diagnostics.push_back(bound);
+    const bool answered = !partly || inside(bound.span, result.reached);
+    if (!answered || inside(bound.span, result.cameRound))
+      standing.push_back(bound);
   }
+
+  // Whatever is left is about a loop the run never got to, and a loop can be
+  // taken out and run on its own even when the program around it cannot.
+  if (!standing.empty())
+    standing = whatTheLoopsLeave(mir, standing, building, out.ran);
+  out.diagnostics.insert(out.diagnostics.end(), standing.begin(), standing.end());
   return out;
 }
 

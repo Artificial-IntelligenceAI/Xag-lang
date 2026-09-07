@@ -452,6 +452,12 @@ void xag_str_of_deci(XagStr *out, uint32_t width, XagDeci value) {
 
 int64_t xag_live_allocations(void) { return live; }
 void xag_forget_allocations(int64_t backTo) { live = backTo; }
+
+void xag_would_read(void) {
+  std::fflush(output());
+  std::fprintf(stderr, "xag-would-read\n");
+  std::exit(0);
+}
 int xag_balance_is_clear(void) { return live == 0 ? 1 : 0; }
 
 void xag_many_out_of_range(int64_t index, uint64_t length) {

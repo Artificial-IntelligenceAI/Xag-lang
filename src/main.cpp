@@ -424,7 +424,9 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   while (std::getline(saying, line)) {
     const std::string stopped = "the program stopped: ";
     const std::string where = "xag-stopped-at ";
-    if (line.rfind(stopped, 0) == 0)
+    if (line == "xag-would-read")
+      out.wouldRead = true;
+    else if (line.rfind(stopped, 0) == 0)
       out.why = line.substr(stopped.size());
     else if (line.rfind(where, 0) == 0) {
       const unsigned at =
@@ -434,6 +436,13 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   }
   saying.close();
   std::remove(noticed.c_str());
+
+  // Reaching a read is where it was told to stop, so it stopped there having
+  // done what was asked. It did not *finish*, though, and saying it did had the
+  // two engines disagreeing about every program that reads: one had stopped at
+  // the read and the other was said to have run to the end.
+  if (out.wouldRead)
+    return out;
 
   if (status != 0) {
     // A program that stops is an answer, not a failure to get one — as long as

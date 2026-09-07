@@ -7,6 +7,7 @@
 #include <csetjmp>
 
 #include <cstdlib>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -56,8 +57,8 @@ public:
     if (trouble_.empty() && !xag_balance_is_clear())
       trouble_ = "the program ended still holding " +
                  std::to_string(xag_live_allocations()) + " thing(s)";
-    return InterpretResult{trouble_.empty(), trouble_,  cameRound_,
-                           whereNow_,         false,     ended_};
+    return InterpretResult{trouble_.empty(), trouble_, cameRound_, whereNow_,
+                           false,             ended_,   wouldRead_, reached_};
   }
 
 private:
@@ -76,6 +77,10 @@ private:
   // The statement being run, so that a stop coming out of the runtime can be
   // put where it happened rather than nowhere.
   Span whereNow_;
+  // Reached a read, and stopped there instead of reading it.
+  bool wouldRead_ = false;
+  std::vector<Span> reached_;
+  std::set<unsigned> reachedAlready_;
 
   // Whether the answer was too big for its type.
   //
@@ -691,6 +696,14 @@ private:
     }
 
     if (value.callee == "read.stdin") {
+      // While the compiler is the one running it, a read is as far as it goes.
+      // The built program stops here too, so what happened before still
+      // compares between the two.
+      if (watching_) {
+        wouldRead_ = true;
+        trouble_ = "it would read here";
+        return Value{};
+      }
       Value answer;
       XagStr line{nullptr, 0, 0};
       if (!xag_read_line(&line))
@@ -835,6 +848,10 @@ private:
           break;
         }
         whereNow_ = s.span;
+        // Only while watching: a reader's run has no use for this and every
+        // statement of every loop would go through the set.
+        if (watching_ && reachedAlready_.insert(s.span.begin).second)
+          reached_.push_back(s.span);
         if (s.kind == StatementKind::Drop) {
           if (s.conditional && !truthOf(frames_.back().locals[s.flag]))
             continue;

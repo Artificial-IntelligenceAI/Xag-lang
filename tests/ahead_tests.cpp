@@ -62,6 +62,7 @@ xag::Building agrees() {
     std::fclose(sink);
     out.ran = said.ran;
     out.cameRound = said.cameRound;
+    out.wouldRead = said.wouldRead;
     if (!said.ran && said.theirFault) {
       out.stopped = true;
       out.why = said.trouble;
@@ -189,8 +190,10 @@ void aLoopAfterAReadStandsOnItsOwn() {
   CHECK(settle(over, agrees()).code(0) == "E0534");
 }
 
-// Nothing is run when what it would do depends on what it is given.
-void aProgramThatReadsIsNotRun() {
+// A program that reads is run as far as the read, and no further: what it does
+// on what it was given is not what it does on nothing. The loop here is before
+// the read, so it happened.
+void aProgramThatReadsIsRunUpToTheRead() {
   const Settled s = settle("fn.int8 'twice' [int8 'n'] { give ['n' x *2*]; }\n"
                            "START {\n"
                            "    var.mut.int8 'sum' = [*0*];\n"
@@ -200,9 +203,8 @@ void aProgramThatReadsIsNotRun() {
                            "    loop.while read.stdin[] holds 'line' {\n"
                            "        print.stdout['line' \\n];\n"
                            "    }\n}\n");
-  CHECK(!s.ran);
-  CHECK(s.said.size() == 1);
-  CHECK(s.code(0) == "W0001");
+  CHECK(s.ran);
+  CHECK(s.said.empty());
 }
 
 // A run that stopped saw only part of the program, so it vouches for none of
@@ -361,6 +363,39 @@ void aLoopWithAnAnswerIsWrittenAsItsAnswer() {
   CHECK(xag::writeInWhatTheLoopsAnswer(built.mir) == 0);
 }
 
+
+// A read is as far as a run goes, and what happened before it still happened.
+// This loop cannot be lifted — it calls out — so running the program up to the
+// read is the only thing that could ever answer for it.
+void aLoopBeforeAReadIsAnswered() {
+  const std::string before =
+      "fn.int8 'twice' [int8 'n'] { give ['n' x *2*]; }\n"
+      "START {\n"
+      "    var.mut.int8 'sum' = [*0*];\n"
+      "    loop.range.int8 'i' = [*1*, *5*] {\n"
+      "        set 'sum' = ['sum' + twice['i']];\n"
+      "    }\n"
+      "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n}\n";
+  CHECK(settle(before).held.size() == 1);
+  CHECK(!settle(before).held.empty() && settle(before).held[0].code == "W0001");
+  // Dropping a bound needs one engine; only standing one up needs two.
+  CHECK(settle(before).said.empty());
+  CHECK(settle(before, agrees()).said.empty());
+
+  // The same loop after the read is one the run never gets to, and one nothing
+  // else can answer either — so it stands.
+  const std::string after =
+      "fn.int8 'twice' [int8 'n'] { give ['n' x *2*]; }\n"
+      "START {\n"
+      "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n"
+      "    var.mut.int8 'sum' = [*0*];\n"
+      "    loop.range.int8 'i' = [*1*, *5*] {\n"
+      "        set 'sum' = ['sum' + twice['i']];\n"
+      "    }\n}\n";
+  CHECK(settle(after, agrees()).said.size() == 1);
+  CHECK(settle(after, agrees()).code(0) == "W0001");
+}
+
 } // namespace
 
 int main() {
@@ -368,7 +403,8 @@ int main() {
   aBoundThatWasRightStands();
   aWarningTheRunAnswersGoesAway();
   aLoopAfterAReadStandsOnItsOwn();
-  aProgramThatReadsIsNotRun();
+  aLoopBeforeAReadIsAnswered();
+  aProgramThatReadsIsRunUpToTheRead();
   aProgramThatStopsIsSaidSo();
   aLoopWithAnAnswerIsWrittenAsItsAnswer();
   aRunThatStoppedChangesNothing();

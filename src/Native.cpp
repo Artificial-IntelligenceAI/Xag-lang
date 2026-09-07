@@ -374,6 +374,7 @@ private:
     add("xag_many_place", i64, {i64, i64, i32});
     add("xag_set_arguments", voidTy, {i32, ptr});
     add("xag_read_line", i32, {ptr});
+    add("xag_would_read", voidTy, {});
     add("xag_arguments", voidTy, {ptr});
     add("xag_int_reads", i32, {i32, i32, ptr, i64, ptr});
     add("xag_deci_reads", i32, {i32, ptr, i64, ptr});
@@ -1198,6 +1199,17 @@ private:
     }
 
     if (value.callee == "read.stdin") {
+      // The build the compiler runs while compiling stops here rather than
+      // reading: it has been given nothing, and what a program does on nothing
+      // is not what it will do. Both engines stop at the same place, so what
+      // happened before it still compares.
+      if (watching_) {
+        builder_.CreateCall(runtime_["xag_would_read"], {});
+        builder_.CreateUnreachable();
+        builder_.SetInsertPoint(
+            llvm::BasicBlock::Create(context_, "unread",
+                                     builder_.GetInsertBlock()->getParent()));
+      }
       // The line comes back through a pointer and the answer says whether there
       // was one, which is exactly the two fields the type has.
       auto *shell = typeFor(typing(value.type));
