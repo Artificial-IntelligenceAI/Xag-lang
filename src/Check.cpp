@@ -1162,15 +1162,8 @@ private:
     if (signature.variadic) {
       // A print states no parameter types, so each value must say what it is.
       for (const Value &v : e.args.values)
-        for (const ExprPtr &item : v.items) {
-          const Ty got = expr(*item, Ty{});
-          if (got.holds())
-            complain(item->span, "E0516",
-                     "a `" + name(got) + "` holds several values, and this shows one thing.",
-                     {"showing writes one piece after another"},
-                     {"what would stand between two of them is a decision nobody has "
-                      "made, so nothing here makes it for you."});
-        }
+        for (const ExprPtr &item : v.items)
+          showable(*item, expr(*item, Ty{}));
       return signature.result;
     }
 
@@ -1190,6 +1183,40 @@ private:
                  {"nothing converts on its own"});
     }
     return signature.result;
+  }
+
+  // Showing writes one piece after another, so what it writes has to be one
+  // piece. Three things are not, and each is refused where it stands.
+  //
+  // Only the `many` was refused until 2026-09-07. A struct and an `or-nothing`
+  // wrote nothing at all and the program ran to the end saying so — the same
+  // silence in all three engines, which is why the oracle never saw it: they
+  // agreed, and agreeing about nothing is agreeing.
+  void showable(const Expr &item, Ty got) {
+    // Asked first, because an `or-nothing.many.int64` is both and this is the
+    // sharper reason: the absence, not the several.
+    if (got.mayBeNothing()) {
+      complain(item.span, "E0536",
+               "this may hold nothing, and showing it would not say which.",
+               {"there is no way to reach what is inside without asking first"},
+               {"`holds` and `when` are the asking. Written straight out, an "
+                "absent `str` and an empty one would look the same, and what "
+                "else an absence should look like is a decision nobody has made."});
+      return;
+    }
+    if (got.holds())
+      complain(item.span, "E0516",
+               "a `" + name(got) + "` holds several values, and this shows one thing.",
+               {"showing writes one piece after another"},
+               {"what would stand between two of them is a decision nobody has "
+                "made, so nothing here makes it for you."});
+    else if (got.isStruct())
+      complain(item.span, "E0516",
+               "a `" + name(got) + "` is several named things, and this shows one thing.",
+               {"showing writes one piece after another"},
+               {"a field at a time is written by naming it — `'p'.x` — and what "
+                "would stand between two of them, or whether their names should "
+                "be written too, is a decision nobody has made."});
   }
 
   // A value is one item, or several joined. Joining builds text, so joined items

@@ -1089,8 +1089,15 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   demonstration.
 - **A `many` of a `many`.** One level, and `E0210` says so. A second is where a
   type stops fitting in a pair of words and wants a table of its own.
-- **Showing a `many`.** What stands between two of them is a decision nobody has
-  made, so `E0516` refuses rather than choosing.
+- **Showing something that is not one piece.** A print writes one piece after
+  another, and three things are not one piece. A `many` and a struct are several
+  (`E0516`): what stands between two of them, and whether a struct's field names
+  should be written too, is a decision nobody has made. An `or-nothing` is the
+  other case (`E0536`) — written straight out, an absent `str` and an empty one
+  would look the same, and nothing reaches inside one without asking first.
+
+  A struct and an `or-nothing` wrote nothing at all until 2026-09-07, in all
+  three engines alike — so the oracle saw agreement and not a hole.
 - **Visibility.** `export` and `program` wait on there being more than one file.
 - **`UNSAFE`.** The spelling is settled: capitals, like `START`. What it permits
   is not, because today nothing needs permitting — there are no raw addresses,

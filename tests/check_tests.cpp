@@ -469,6 +469,30 @@ void fillNeedsAValueThatCopies() {
 void showingAManyIsRefused() {
   CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
                 "    print.stdout['xs' \\n];").code(0) == "E0516");
+  // A struct is several named things, and wrote nothing at all until it was
+  // refused — the same silence in all three engines, so the oracle agreed.
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
+              "START {\n"
+              "    var.point 'p' = [*1* *2*];\n"
+              "    print.stdout['p' \\n];\n}\n")
+            .code(0) == "E0516");
+  // A field at a time is what there is.
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
+              "START {\n"
+              "    var.point 'p' = [*1* *2*];\n"
+              "    print.stdout['p'.x \\n];\n}\n")
+            .ok());
+}
+
+void showingAMaybeIsRefused() {
+  // Nothing reaches inside without asking, and a print was reaching.
+  CHECK(inStart("var.or-nothing.int64 'n' = [nothing];\n"
+                "    print.stdout['n' \\n];").code(0) == "E0536");
+  CHECK(inStart("var.or-nothing.int64 'n' = [*5*];\n"
+                "    print.stdout['n' \\n];").code(0) == "E0536");
+  // Asking first is what makes it showable.
+  CHECK(inStart("var.or-nothing.int64 'n' = [*5*];\n"
+                "    if 'n' holds 'v' { print.stdout['v' \\n]; }").ok());
 }
 
 void aManyTravelsWhole() {
@@ -689,6 +713,7 @@ int main() {
   countAsksHowManyOfEither();
   fillNeedsAValueThatCopies();
   showingAManyIsRefused();
+  showingAMaybeIsRefused();
   aManyTravelsWhole();
   nothingNeedsSomewhereToBe();
   aValueGoesInWithoutAWord();
