@@ -1092,3 +1092,24 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 - **Showing a `many`.** What stands between two of them is a decision nobody has
   made, so `E0516` refuses rather than choosing.
 - **Visibility.** `export` and `program` wait on there being more than one file.
+- **`UNSAFE`.** The spelling is settled: capitals, like `START`. What it permits
+  is not, because today nothing needs permitting — there are no raw addresses,
+  no calls out to C, and nothing the checker refuses that a program could ask to
+  do anyway. The first thing that gives `UNSAFE` a job is calling the C ABI the
+  runtime already speaks. Whether it is a block, a word in a function's chain, or
+  both is open with it.
+
+## Capitals
+
+`START` is capitalised and `'greeting'` is not, and the difference is not
+emphasis. A capitalised word is a **landmark**: there is one of it, the file is
+read by finding it, and it is not a name anybody chose — which is why it wears
+no `'` marks. `START` is not given a name, it *is* the name.
+
+`UNSAFE` is capitalised for the same reason. Where it is written is a place a
+reader should be able to find by scanning, and a reviewer by grepping. That is
+the whole argument for the capitals: a word you should not be able to miss.
+
+Which words this covers is not settled. `export` and `program` are written in
+lower case in **Open** above, and if the rule is about landmarks rather than
+about these two words, that may be wrong.
