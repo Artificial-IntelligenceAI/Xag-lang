@@ -1,8 +1,9 @@
 # Running Xag while Xag is being compiled
 
-**Status: nothing here is built.** There is no way to ask for code to run at
-compile time, and there is no JIT. What is written down is a decision made
-before either exists, so that neither gets built the wrong way round.
+**Xag runs code at compile time.** That much is decided; how it is asked for is
+not, and **none of it is built** — there is no way to write such a block today
+and there is no JIT. What is written down here is how it behaves when it exists,
+decided first so that it does not get built the wrong way round.
 
 Xag already *reasons* at compile time — constants are folded, and how far a
 counted loop gets is worked out from its written ends (`E0534`, `W0001`). That
@@ -74,8 +75,8 @@ is the most useful thing the compiler could ask for.
 
 ## Open
 
-- Whether code may be asked to run at compile time at all, and how that is
-  spelled.
+- How a block that runs at compile time is spelled, and whether it is a block, a
+  word in a declaration's chain, or both.
 - Whether there is a way to carry on past a mismatch with the interpreter's
   answer, for somebody who cannot wait for the fix. Raised, not decided.
 - The budget stops being an engine limit and becomes an answer. Today the oracle
