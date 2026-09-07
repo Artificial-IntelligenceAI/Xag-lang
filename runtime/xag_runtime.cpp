@@ -591,9 +591,20 @@ void xag_came_round(uint32_t at) {
   std::fprintf(stderr, "xag-came-round %u\n", static_cast<unsigned>(at));
 }
 
+namespace {
+XagStopping handsBackTo = nullptr;
+} // namespace
+
+void xag_hand_back_stops(XagStopping handler) { handsBackTo = handler; }
+
 void xag_stop(const char *why) {
+  const char *reason = why ? why : "no reason was given";
+  // A handler does not come back. One that does has not done its job, and the
+  // program stops the way it would have.
+  if (handsBackTo)
+    handsBackTo(reason);
   std::fflush(output());
-  std::fprintf(stderr, "\nthe program stopped: %s\n", why ? why : "no reason was given");
+  std::fprintf(stderr, "\nthe program stopped: %s\n", reason);
   std::exit(1);
 }
 

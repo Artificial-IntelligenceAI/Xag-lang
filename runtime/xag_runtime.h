@@ -247,6 +247,24 @@ int xag_balance_is_clear(void);
 // A stop, in the same place and for the same reason in every engine.
 void xag_stop(const char *why);
 
+// Where a stop goes instead of ending the process.
+//
+// A program that stops, stops — that is what a reader's program does and it is
+// right. But the compiler runs a program while compiling it, in its own
+// process, and a program stopping must not take the compiler down with it: a
+// `xagc check` that exits with a runtime message and no diagnostic has told the
+// reader nothing and looked broken doing it. That happened.
+//
+// A handler is given rather than a place to jump to, so that `setjmp` stays in
+// the frame that will still be alive to catch it and this header stays free of
+// `jmp_buf`. A handler must not return; if one does, the stop ends the process
+// as it always did. Pass null to put it back.
+//
+// Only the in-process run installs one. The built program is a process of its
+// own and may stop the ordinary way.
+typedef void (*XagStopping)(const char *why);
+void xag_hand_back_stops(XagStopping handler);
+
 // Says that a sum came round, and where in the source it was written.
 //
 // Nothing a reader ever runs calls this. It exists for the build the compiler

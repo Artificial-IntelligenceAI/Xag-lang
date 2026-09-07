@@ -4,6 +4,8 @@
 
 #include "xag_runtime.h"
 
+#include <csetjmp>
+
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -880,8 +882,42 @@ InterpretResult interpret(const Mir &mir) {
   return Machine(mir, /*watching=*/false).run();
 }
 
+namespace {
+
+// Where a stop lands while the compiler is the one running the program.
+//
+// The runtime ends the process when a program stops, which is right for a
+// program and wrong for a compiler running one: `xagc check` on a program that
+// divides by zero exited with a runtime message and no diagnostic at all.
+//
+// Coming back this way skips the destructors of everything the run had in hand,
+// so whatever it had allocated is leaked. That is accepted: the run is being
+// thrown away, the compiler is about to say something and stop, and the
+// alternative is the compiler dying instead of speaking. Nothing here is on the
+// path a reader's program takes — `interpret` installs no handler.
+jmp_buf comesBackHere;
+std::string whyItStopped;
+
+[[noreturn]] void handItBack(const char *why) {
+  whyItStopped = why ? why : "no reason was given";
+  std::longjmp(comesBackHere, 1);
+}
+
+} // namespace
+
 InterpretResult interpretWatching(const Mir &mir) {
-  return Machine(mir, /*watching=*/true).run();
+  Machine machine(mir, /*watching=*/true);
+  whyItStopped.clear();
+  InterpretResult out;
+  if (setjmp(comesBackHere) == 0) {
+    xag_hand_back_stops(handItBack);
+    out = machine.run();
+  } else {
+    out.ran = false;
+    out.trouble = whyItStopped;
+  }
+  xag_hand_back_stops(nullptr);
+  return out;
 }
 
 } // namespace xag

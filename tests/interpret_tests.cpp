@@ -667,6 +667,27 @@ void itNoticesASumComeRound() {
                 "    set 'n' = ['n' + 'two'];\n}\n") == 0);
 }
 
+// The compiler runs a program while compiling it, so a program stopping must
+// not end the compiler. It did: `xagc check` on a program that divides by zero
+// exited with a runtime message and no diagnostic.
+void aStopComesBackRatherThanEndingEverything() {
+  // Written down, so the fold would refuse this before anything ran — the
+  // divisor is worked out in a loop instead, where nothing can see it.
+  const int stopped = watched("START {\n"
+                              "    var.mut.int64 'd' = [*5*];\n"
+                              "    loop.range.int64 'i' = [*1*, *5*] {\n"
+                              "        set 'd' = ['d' - *1*];\n"
+                              "    }\n"
+                              "    var.int64 'n' = [*10* / 'd'];\n}\n");
+  // -1 is "it did not finish", which is the point: it came back to say so.
+  CHECK(stopped == -1);
+  // And having come back, the engine still works.
+  CHECK(watched("START {\n"
+                "    var.mut.int8 'n' = [*1*];\n"
+                "    var.int8 'one' = [*1*];\n"
+                "    set 'n' = ['n' + 'one'];\n}\n") == 0);
+}
+
 int main() {
   itPrints();
   itCounts();
@@ -696,6 +717,7 @@ int main() {
   itKnowsWhatItWasGiven();
 
   itNoticesASumComeRound();
+  aStopComesBackRatherThanEndingEverything();
 
   if (failures == 0)
     std::cout << "all interpreter tests passed\n";
