@@ -54,6 +54,19 @@ whose ends are written down, that is knowable before the program ever runs.
 The test interpreter runs it, and the compiled form runs it, and their answers
 are compared. Every build. Not a flag, and not only a test in the oracle.
 
+The compiled form is **built the way anything is built** — an object out of
+`Native.cpp`, linked against the runtime by `cc`, run as a program of its own.
+Not a JIT. Xag is ahead-of-time to native, and a JIT would be a third way of
+making code beside the two that already exist, which is exactly what the second
+run is meant to rule out. Three things follow from it being a separate program
+rather than code called in-process: it is the very backend that ships, a crash
+in it is a result rather than the compiler falling over, and a loop that will not
+finish can be killed. Only the interpreter, then, needs to count its steps.
+
+The cost is a link and a program started. Every loop in a file worth running
+goes into one such program, built once and run once, so it is a cost per
+compilation rather than per loop.
+
 Running twice costs compile time and no runtime time, which is the trade this
 language already says it is making:
 
@@ -72,9 +85,9 @@ reported the way every other mistake is reported.
 
 If the two differ, the program did nothing wrong — Xag contradicted itself.
 
-It still cannot hand back a program. The compiled run and the shipping backend
-are one code path, so the interpreter's answer would be acted on while the same
-code, compiled normally, does the other thing. So it stops.
+It still cannot hand back a program. The compiled run *is* the shipping backend,
+so the interpreter's answer would be acted on while the same code, compiled
+normally, does the other thing. So it stops.
 
 **Stopping is not blaming.** Every word Xag prints today is about the reader's
 code, closing with
