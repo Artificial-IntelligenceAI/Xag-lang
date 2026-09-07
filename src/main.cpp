@@ -1,4 +1,5 @@
 #include "xag/Lexer.h"
+#include "xag/Ahead.h"
 #include "xag/Check.h"
 #include "xag/Fold.h"
 #include "xag/Fast.h"
@@ -358,6 +359,13 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // rather than of the tree.
   const xag::RegionResult held = xag::regions(source, built.mir);
   if (report(source, held.diagnostics) != 0)
+    return false;
+
+  // Last, because it runs the program, and a program is only run once it has
+  // been read and found sound. A file holding both a mistake and a very long
+  // loop has to report the mistake, and it cannot if it is still counting.
+  const xag::AheadResult ran = xag::ahead(source, built.mir, checked.aboutSums);
+  if (report(source, ran.diagnostics) != 0)
     return false;
   status = 0;
   return true;

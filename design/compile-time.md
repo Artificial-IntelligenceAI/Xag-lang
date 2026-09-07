@@ -153,6 +153,23 @@ A run also has to give the same answer on every machine, or the same source
 builds into different programs. There is no FFI, so that is nearly free today,
 which is the moment to write it down rather than later.
 
+## What is built
+
+The test interpreter can watch for a sum coming round (`interpretWatching`), and
+`src/Ahead.cpp` runs a program that reads nothing, watching, and settles what the
+bounds only guessed at. The bounds' own two diagnostics — `E0534` and `W0001` —
+are held back by the checker in `CheckResult::aboutSums` rather than reported,
+because a refusal that has already happened cannot be overturned by a run that
+has not happened yet.
+
+It **only ever drops** a bound. One engine has run, and one engine is not enough
+to refuse a program on. A wrong answer here can only let something through,
+which is what already happens wherever a bound gives up — so it is no worse than
+what stood before it, and it stops refusing programs that are fine.
+
+The second run and the comparison are not built. Until they are, nothing here
+tells a reader their program is wrong on one engine's word.
+
 ## Open
 
 - Whether a bound alone may still refuse a program, or only warn once running is

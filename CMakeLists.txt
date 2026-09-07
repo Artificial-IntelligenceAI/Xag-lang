@@ -92,6 +92,7 @@ add_library(xagfront STATIC
   src/MirPrinter.cpp
   src/MirElaborate.cpp
   src/Interpret.cpp
+  src/Ahead.cpp
   src/Fold.cpp
   src/Regions.cpp
   src/Fast.cpp)
@@ -120,7 +121,7 @@ target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
-foreach(suite lexer parser check own mir runtime interpret native regions fast)
+foreach(suite lexer parser check own mir runtime interpret native regions fast ahead)
   add_executable(${suite}_tests tests/${suite}_tests.cpp)
   if(${suite} STREQUAL native)
     target_link_libraries(${suite}_tests PRIVATE xagnative xagrt)

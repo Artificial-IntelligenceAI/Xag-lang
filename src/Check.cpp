@@ -210,6 +210,16 @@ private:
   bool inFunction_ = false;
   unsigned loopDepth_ = 0;
 
+  // The bounds' own two, kept apart so a run can overturn them. Everything
+  // about them is the same; only where they are filed differs.
+  void aboutSums(Span span, std::string code, std::string message,
+                 std::vector<std::string> rules, std::vector<std::string> tips,
+                 Severity severity) {
+    result_.aboutSums.push_back(Diagnostic{span, std::move(code), std::move(message),
+                                           "here", std::move(rules), std::move(tips),
+                                           {}, severity});
+  }
+
   void complain(Span span, std::string code, std::string message,
                 std::vector<std::string> rules, std::vector<std::string> tips = {},
                 std::string label = "here", std::vector<Note> notes = {}) {
@@ -572,25 +582,27 @@ private:
         // nothing would let it come round in silence; refusing would turn away
         // a program that is very likely fine.
         if (known || held->knownStart)
-          warn(inner->span, "W0001",
-               "`'" + inner->name + "'` is added to here, and I cannot work out how "
-               "far it gets.",
-               {"a sum that does not fit comes round, and that is rarely what was "
-                "wanted"},
-               {"`wrapping` on the declaration says it is meant to, and then nothing "
-                "is said about it."});
+          aboutSums(inner->span, "W0001",
+                    "`'" + inner->name + "'` is added to here, and I cannot work out "
+                    "how far it gets.",
+                    {"a sum that does not fit comes round, and that is rarely what was "
+                     "wanted"},
+                    {"`wrapping` on the declaration says it is meant to, and then "
+                     "nothing is said about it."},
+                    Severity::Warning);
         continue;
       }
       const __int128 reach = plus ? held->start + total : held->start - total;
       if (reach > mostOf(held->type.kind) || reach < leastOf(held->type.kind))
-        complain(inner->span, "E0534",
-                 "`'" + inner->name + "'` reaches past what a `" +
-                     std::string(name(held->type)) + "` holds.",
-                 {"a sum that does not fit comes round, and that is rarely what was "
-                  "wanted"},
-                 {"the loop's ends are written down, so how far this gets is settled "
-                  "before the program runs; `wrapping` says it is meant to come "
-                  "round."});
+        aboutSums(inner->span, "E0534",
+                  "`'" + inner->name + "'` reaches past what a `" +
+                      std::string(name(held->type)) + "` holds.",
+                  {"a sum that does not fit comes round, and that is rarely what was "
+                   "wanted"},
+                  {"the loop's ends are written down, so how far this gets is settled "
+                   "before the program runs; `wrapping` says it is meant to come "
+                   "round."},
+                  Severity::Error);
     }
   }
 

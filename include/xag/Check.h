@@ -130,6 +130,16 @@ struct Shape {
 struct CheckResult {
   std::vector<Diagnostic> diagnostics;
 
+  // What the bounds worked out about sums in counted loops — `E0534` and
+  // `W0001` — held back rather than reported.
+  //
+  // A bound only ever says *at most*, and at most is sometimes wrong in the
+  // direction that refuses a working program. Reported here, it would stop
+  // compilation before there was a middle layer to run, and a run cannot
+  // overturn a refusal that already happened. So these wait for `ahead`, which
+  // either lets them stand or drops them for having actually run the loop.
+  std::vector<Diagnostic> aboutSums;
+
   // What the checker worked out, so that nothing after it has to work the same
   // thing out again. Keyed by node, which is stable for as long as the tree is.
   std::unordered_map<const Expr *, Ty> expressions;
