@@ -1101,15 +1101,11 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Capitals
 
-`START` is capitalised and `'greeting'` is not, and the difference is not
-emphasis. A capitalised word is a **landmark**: there is one of it, the file is
-read by finding it, and it is not a name anybody chose — which is why it wears
-no `'` marks. `START` is not given a name, it *is* the name.
+`START` and `UNSAFE` are written in capitals so they can be found. That is the
+whole reason. Where a program begins, and where it stops being checked, are the
+two things a reader scans for and a reviewer greps for, and capitals make them
+impossible to miss in a file of lower-case words.
 
-`UNSAFE` is capitalised for the same reason. Where it is written is a place a
-reader should be able to find by scanning, and a reviewer by grepping. That is
-the whole argument for the capitals: a word you should not be able to miss.
-
-Which words this covers is not settled. `export` and `program` are written in
-lower case in **Open** above, and if the rule is about landmarks rather than
-about these two words, that may be wrong.
+It is not a system, and nothing else is capitalised by it. `export` and
+`program` are lower case in **Open** above and stay that way unless there is the
+same reason to change them.
