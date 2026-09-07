@@ -1,4 +1,5 @@
 #include "xag/Lexer.h"
+#include "xag/Loops.h"
 #include "xag/Ahead.h"
 #include "xag/Check.h"
 #include "xag/Fold.h"
@@ -495,6 +496,14 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
                  buildAndStart);
   if (report(source, ran.diagnostics) != 0)
     return false;
+
+  // Last of all, and only for what gets compiled. A loop whose answer is known
+  // is written back as that answer, and the interpreters never see it — which
+  // is what leaves the oracle a rewrite to disagree with, rather than three
+  // engines agreeing on the same folded number.
+  if (rewriting == xag::Rewriting::Yes)
+    xag::writeInWhatTheLoopsAnswer(built.mir);
+
   status = 0;
   return true;
 }

@@ -1,5 +1,7 @@
 #include "xag/Loops.h"
 
+#include "xag/Interpret.h"
+
 #include <algorithm>
 #include <set>
 
@@ -46,11 +48,34 @@ std::set<unsigned> around(const Body &body, unsigned header, unsigned latch) {
   return inside;
 }
 
+// Whether the header can still get to the block that jumps back to it. A jump
+// back is not a loop on its own: once a loop has been answered and its header
+// sends everything straight past it, the blocks left behind still jump back to
+// a header that no longer reaches them, and taking that for a loop had this
+// pass answering the same dead loop again every time it was asked.
+bool reaches(const Body &body, unsigned from, unsigned to) {
+  std::vector<bool> seen(body.blocks.size(), false);
+  std::vector<unsigned> asking{from};
+  while (!asking.empty()) {
+    const unsigned at = asking.back();
+    asking.pop_back();
+    if (at >= body.blocks.size() || seen[at])
+      continue;
+    seen[at] = true;
+    for (unsigned next : goesTo(body.blocks[at])) {
+      if (next == to)
+        return true;
+      asking.push_back(next);
+    }
+  }
+  return false;
+}
+
 std::vector<Circle> circlesIn(const Body &body) {
   std::vector<Circle> found;
   for (const BasicBlock &block : body.blocks)
     for (unsigned to : goesTo(block))
-      if (to <= block.id) {
+      if (to <= block.id && reaches(body, to, block.id)) {
         Circle one;
         one.header = to;
         one.blocks = around(body, to, block.id);
@@ -225,10 +250,104 @@ std::vector<Lifted> loopsThatStandAlone(const Mir &mir) {
       alone.blocks.push_back(std::move(ends));
 
       lifted.mir.bodies.push_back(std::move(alone));
+
+      // Where it came from, and what it leaves behind: everything it assigns
+      // that anything outside it mentions. A temporary the loop made for itself
+      // is nobody's business once the loop is a number.
+      lifted.body = static_cast<unsigned>(&body - mir.bodies.data());
+      lifted.header = circle.header;
+      for (unsigned to : goesTo(body.blocks[circle.header]))
+        if (!circle.blocks.count(to))
+          lifted.leaves = to;
+      for (unsigned id : touched) {
+        bool assignedInside = false;
+        for (unsigned at : circle.blocks)
+          for (const Statement &s : body.blocks[at].statements)
+            if (s.kind == StatementKind::Assign && s.place == id)
+              assignedInside = true;
+        if (!assignedInside)
+          continue;
+        bool seenOutside = false;
+        for (const BasicBlock &block : body.blocks) {
+          if (circle.blocks.count(block.id))
+            continue;
+          std::vector<unsigned> read;
+          for (const Statement &s : block.statements) {
+            if (s.kind == StatementKind::Assign)
+              readsOf(s.value, read);
+            if (s.kind == StatementKind::Store) {
+              readsOf(s.value, read);
+              readsOf(s.at, read);
+              read.push_back(s.place);
+            }
+            if (s.kind == StatementKind::Drop)
+              read.push_back(s.place);
+          }
+          if (block.terminator.kind == TerminatorKind::Switch)
+            readsOf(block.terminator.condition, read);
+          if (block.terminator.kind == TerminatorKind::Return && block.terminator.answers)
+            readsOf(block.terminator.answer, read);
+          for (unsigned one : read)
+            if (one == id)
+              seenOutside = true;
+        }
+        if (seenOutside)
+          lifted.liveOut.push_back(id);
+      }
+
       out.push_back(std::move(lifted));
     }
   }
   return out;
+}
+
+unsigned writeInWhatTheLoopsAnswer(Mir &mir) {
+  unsigned written = 0;
+  for (const Lifted &loop : loopsThatStandAlone(mir)) {
+    if (loop.liveOut.empty())
+      continue;
+    const InterpretResult answered = interpretForTheAnswer(loop.mir);
+    if (!answered.ran)
+      continue;
+
+    // Every one of them has to have an answer, or the loop cannot go: what is
+    // left behind has to be all of it.
+    std::vector<Statement> instead;
+    Body &body = mir.bodies[loop.body];
+    bool all = true;
+    for (unsigned id : loop.liveOut) {
+      if (id >= answered.endedHolding.size() || answered.endedHolding[id].empty()) {
+        all = false;
+        break;
+      }
+      Statement s;
+      s.kind = StatementKind::Assign;
+      s.span = body.blocks[loop.header].statements.empty()
+                   ? Span{}
+                   : body.blocks[loop.header].statements.front().span;
+      s.place = id;
+      s.value.kind = RValueKind::Use;
+      s.value.type = body.locals[id].type;
+      Operand said;
+      said.kind = OperandKind::Written;
+      said.written = answered.endedHolding[id];
+      said.type = body.locals[id].type;
+      s.value.operands.push_back(said);
+      instead.push_back(std::move(s));
+    }
+    if (!all)
+      continue;
+
+    // The header goes straight to the way out, holding what the loop would have
+    // left. Its blocks are then reachable from nothing and LLVM drops them.
+    BasicBlock &header = body.blocks[loop.header];
+    header.statements = std::move(instead);
+    header.terminator = Terminator{};
+    header.terminator.kind = TerminatorKind::Goto;
+    header.terminator.targets = {loop.leaves};
+    ++written;
+  }
+  return written;
 }
 
 } // namespace xag

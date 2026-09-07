@@ -306,9 +306,6 @@ which is the moment to write it down rather than later.
   quiet until it is finished.
 - What else a run should look for beyond sums that do not fit and places that do
   not exist.
-- Whether a loop that was run, agreed on and found safe should also be
-  *replaced* by its answer. That is an optimisation and a separate decision; the
-  work is already done by then.
 
 ### Lifting a loop that owns something
 
@@ -334,6 +331,37 @@ What it would still add is the loops that sit *before* a read and do not qualify
 for lifting — one walking a `many`, say. It would need the built run to stop at
 the same place, which means the ahead build lowering a read into something that
 says so and exits, so that the two runs still compare.
+
+### Writing the answer in place of the loop
+
+A loop the compiler could run is a loop whose answer it knows, and a loop LLVM
+cannot see through is one worth writing that answer into.
+
+LLVM does this itself wherever it can see the shape of the loop, and the rule
+here is to prove only what LLVM cannot know. So the question was measured rather
+than assumed. A thousand rounds of `set 'total' = ['total' + 'i']`:
+
+```llvm
+call void @xag_print_int(i128 500500, i32 64, i32 1)     ; LLVM folded it
+```
+
+The same loop with a branch in the middle — `if ('i' mod *7*) == *0*` — LLVM
+leaves alone: four branches, and the answer computed at runtime. Running it says
+47259641. That is the gap, and `writeInWhatTheLoopsAnswer` fills it.
+
+**It does not need both engines.** A rewrite is not a refusal, and one engine may
+not refuse anybody's program — but `Fold.cpp` already rewrites on the
+interpreter's word alone, and what checks it is the same thing that checks this:
+the interpreters are given the program as written and the compiler is given what
+was rewritten, so a bad rewrite is a disagreement rather than three engines
+agreeing on the same wrong number. It is `interpretForTheAnswer` — one run, no
+build, and cheap.
+
+The loop's own blocks stay where they are, reachable from nothing, for LLVM to
+drop. That left a trap: a block still jumping back to a header that no longer
+reaches it looked exactly like a loop, so the pass answered the same dead loop
+every time it was asked. A jump backwards is a loop only when the header can
+still get to the block making it.
 
 ### Running only where there is something to find
 

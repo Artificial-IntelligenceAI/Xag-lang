@@ -40,7 +40,8 @@ struct Frame {
 
 class Machine {
 public:
-  Machine(const Mir &mir, bool watching) : mir_(mir), watching_(watching) {}
+  Machine(const Mir &mir, bool watching, bool keeping = false)
+      : mir_(mir), watching_(watching), keeping_(keeping) {}
 
   // Where it has got to, for whoever catches a stop coming out of the runtime.
   const Span &where() const { return whereNow_; }
@@ -55,12 +56,16 @@ public:
     if (trouble_.empty() && !xag_balance_is_clear())
       trouble_ = "the program ended still holding " +
                  std::to_string(xag_live_allocations()) + " thing(s)";
-    return InterpretResult{trouble_.empty(), trouble_, cameRound_, whereNow_, false};
+    return InterpretResult{trouble_.empty(), trouble_,  cameRound_,
+                           whereNow_,         false,     ended_};
   }
 
 private:
   const Mir &mir_;
   const bool watching_ = false;
+  // Whether to keep what `START` was holding when it finished.
+  const bool keeping_ = false;
+  std::vector<std::string> ended_;
   std::vector<Frame> frames_;
   std::string trouble_;
   uint64_t steps_ = 0;
@@ -876,6 +881,32 @@ private:
       break;
     }
 
+    // What it was left holding, before it stops holding it. Numbers only:
+    // everything else has something behind it that a written value cannot say.
+    if (keeping_ && frames_.size() == 1 && trouble_.empty()) {
+      const Body &ending = *frames_.back().body;
+      ended_.assign(ending.locals.size(), std::string());
+      for (unsigned id = 0; id < ending.locals.size(); ++id) {
+        const Value &held = frames_.back().locals[id];
+        if (held.kind != Value::Kind::Number)
+          continue;
+        const MirType &type = ending.typed[ending.locals[id].type.index];
+        if (type.isLoan() || type.orNothing || type.many)
+          continue;
+        if (type.held == Type::Bool) {
+          ended_[id] = held.number != 0 ? "true" : "false";
+          continue;
+        }
+        if (!isWhole(type.held))
+          continue;
+        char written[64];
+        const unsigned long size = xag_int_writes(written, sizeof(written), held.number,
+                                                  widthOf(type.held),
+                                                  isSigned(type.held) ? 1 : 0);
+        ended_[id].assign(written, size);
+      }
+    }
+
     // Whatever the frame still holds ends with it.
     for (Value &value : frames_.back().locals)
       endValue(value);
@@ -913,14 +944,15 @@ const Span *whereTheRunIs = nullptr;
   std::longjmp(comesBackHere, 1);
 }
 
-} // namespace
-
-InterpretResult interpretWatching(const Mir &mir) {
-  Machine machine(mir, /*watching=*/true);
+// One run, with a stop coming back here rather than ending the process.
+//
+// `setjmp` lives in this frame because this frame is the one still standing
+// when a stop comes back to it.
+InterpretResult runHandingBackStops(Machine &&machine) {
   whyItStopped.clear();
   const int64_t held = xag_live_allocations();
-  InterpretResult out;
   whereTheRunIs = &machine.where();
+  InterpretResult out;
   if (setjmp(comesBackHere) == 0) {
     xag_hand_back_stops(handItBack);
     out = machine.run();
@@ -940,6 +972,16 @@ InterpretResult interpretWatching(const Mir &mir) {
   xag_hand_back_stops(nullptr);
   whereTheRunIs = nullptr;
   return out;
+}
+
+} // namespace
+
+InterpretResult interpretWatching(const Mir &mir) {
+  return runHandingBackStops(Machine(mir, /*watching=*/true));
+}
+
+InterpretResult interpretForTheAnswer(const Mir &mir) {
+  return runHandingBackStops(Machine(mir, /*watching=*/false, /*keeping=*/true));
 }
 
 } // namespace xag

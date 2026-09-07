@@ -1,5 +1,6 @@
 #include "xag/Ahead.h"
 #include "xag/Interpret.h"
+#include "xag/Loops.h"
 #include "xag/Check.h"
 #include "xag/Fold.h"
 #include "xag/Lexer.h"
@@ -310,6 +311,56 @@ void aProgramThatStopsIsSaidSo() {
   CHECK(!apart.said.empty() && apart.said[0].severity == xag::Severity::Mine);
 }
 
+// A loop the compiler could run is a loop whose answer it knows, and one LLVM
+// cannot see through is one worth writing the answer into.
+void aLoopWithAnAnswerIsWrittenAsItsAnswer() {
+  const std::string branching =
+      "START {\n"
+      "    var.mut.int64 'total' = [*0*];\n"
+      "    loop.range.int64 'i' = [*1*, *1000*] {\n"
+      "        if ('i' mod *7*) == *0* { set 'total' = ['total' + 'i' x 'i']; }\n"
+      "        else { set 'total' = ['total' - *3*]; }\n"
+      "    }\n"
+      "    print.stdout[str:*total = * 'total' \\n];\n}\n";
+  const xag::Source source("test.xag", branching);
+  const xag::LexResult lexed = xag::lex(source);
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+  const xag::OwnResult owned = xag::own(source, parsed.program);
+  CHECK(owned.ok());
+  xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::elaborate(built.mir);
+
+  CHECK(xag::writeInWhatTheLoopsAnswer(built.mir) == 1);
+
+  // The answer is written where the loop was, and the block everything used to
+  // jump back to now goes forward. The loop's own blocks are still there and
+  // nothing reaches them, which is LLVM's to tidy rather than this pass's.
+  bool holdsTheAnswer = false;
+  bool goesForward = false;
+  for (const xag::Body &body : built.mir.bodies)
+    for (const xag::BasicBlock &block : body.blocks) {
+      bool here = false;
+      for (const xag::Statement &s : block.statements)
+        for (const xag::Operand &one : s.value.operands)
+          if (one.kind == xag::OperandKind::Written && one.written == "47259641")
+            here = true;
+      if (!here)
+        continue;
+      holdsTheAnswer = true;
+      goesForward = block.terminator.kind == xag::TerminatorKind::Goto &&
+                    block.terminator.targets.size() == 1 &&
+                    block.terminator.targets[0] > block.id;
+    }
+  CHECK(holdsTheAnswer);
+  CHECK(goesForward);
+
+  // Asked twice, it answers the same loop the same way rather than folding what
+  // it already folded into something else.
+  CHECK(xag::writeInWhatTheLoopsAnswer(built.mir) == 0);
+}
+
 } // namespace
 
 int main() {
@@ -319,6 +370,7 @@ int main() {
   aLoopAfterAReadStandsOnItsOwn();
   aProgramThatReadsIsNotRun();
   aProgramThatStopsIsSaidSo();
+  aLoopWithAnAnswerIsWrittenAsItsAnswer();
   aRunThatStoppedChangesNothing();
   aProgramWithNothingHeldIsNotRun();
   twoAnswersIsOurMistake();

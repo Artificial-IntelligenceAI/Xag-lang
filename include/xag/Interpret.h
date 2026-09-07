@@ -18,6 +18,10 @@ struct InterpretResult {
   // will wait is the engine giving up and says nothing about the program.
   Span stoppedAt;
   bool theirFault = false;
+  // What the whole numbers and `bool`s held when `START` finished, written the
+  // way they would be written down. Only filled when asked for — a run that
+  // stopped fills nothing, because it never finished holding anything.
+  std::vector<std::string> endedHolding;
 };
 
 // The test interpreter: it walks the graph as written, calls the runtime for
@@ -37,5 +41,13 @@ InterpretResult interpret(const Mir &mir);
 // Only `+`, `-` and `x` are watched: those are the three the language says are
 // added, subtracted or multiplied, and they are the three a sum is built from.
 InterpretResult interpretWatching(const Mir &mir);
+
+// The same run again, and what `START` was left holding.
+//
+// For folding a loop away: a loop the compiler could run is one whose answer it
+// knows, and a loop LLVM cannot see through is one worth writing the answer
+// into. `endedHolding` is a written value per local, or empty where the local
+// held something that is not a number.
+InterpretResult interpretForTheAnswer(const Mir &mir);
 
 } // namespace xag
