@@ -32,37 +32,8 @@ std::string symbolFor(const std::string &name) {
   return out;
 }
 
-bool isLoan(const std::string &type) {
-  return type.rfind("ref ", 0) == 0 || type.rfind("refmut ", 0) == 0;
-}
-
-bool mayBeNothing(const std::string &type);
-
-std::string withoutLoan(const std::string &type) {
-  if (type.rfind("refmut ", 0) == 0)
-    return type.substr(7);
-  if (type.rfind("ref ", 0) == 0)
-    return type.substr(4);
-  return type;
-}
-
-bool holdsMany(const std::string &type) {
-  return withoutLoan(type).rfind("many ", 0) == 0;
-}
-
-bool mayBeNothing(const std::string &type) {
-  return withoutLoan(type).rfind("or-nothing ", 0) == 0;
-}
-
 // A value handed over by being copied, which is everything but text and the
 // things that hold it.
-bool copiesNamed(const std::string &type) {
-  if (type == "bool")
-    return true;
-  const Type named = typeNamed(type);
-  return isNumber(named);
-}
-
 // What is left once the `or-nothing` is off it.
 // A type as the middle layer spells it, which is the one language both the
 // checker and this file already speak.
@@ -70,14 +41,39 @@ std::string spellOf(Ty type) {
   return type.kind == Type::Unknown ? std::string("?") : name(type);
 }
 
-std::string within(const std::string &type) {
-  const std::string bare = withoutLoan(type);
-  return bare.rfind("or-nothing ", 0) == 0 ? bare.substr(11) : bare;
+// The same questions, asked of the type rather than of its spelling. The
+// spellings survive only where a string is genuinely wanted; everything that
+// used to pull one apart asks these.
+bool isLoan(const MirType &type) { return type.isLoan(); }
+bool holdsMany(const MirType &type) { return type.many && !type.orNothing; }
+bool mayBeNothing(const MirType &type) { return type.orNothing; }
+MirType withoutLoan(const MirType &type) { return type.lent(); }
+MirType within(const MirType &type) { return type.within(); }
+MirType elementOf(const MirType &type) { return type.element(); }
+
+// Plain text: not lent, not absent, not several.
+bool isText(const MirType &type) {
+  return !type.isLoan() && !type.many && !type.orNothing && type.held == Type::Str;
 }
 
-std::string elementOf(const std::string &type) {
-  const std::string bare = withoutLoan(type);
-  return bare.rfind("many ", 0) == 0 ? bare.substr(5) : std::string("?");
+// A value handed over by being copied, which is everything but text, the things
+// that hold it, and a loan — a loan is a pointer, and copying one would be
+// copying the borrow rather than what it borrows.
+// A struct's fields are held as the checker's `Ty`; this is the same type as
+// the middle layer holds it.
+MirType asMirType(Ty type) {
+  MirType out;
+  out.orNothing = type.orNothing;
+  out.many = type.holds();
+  out.held = type.holds() ? type.element : type.kind;
+  out.named = type.named;
+  return out;
+}
+
+bool copiesNamed(const MirType &type) {
+  if (type.isLoan() || type.many || type.orNothing)
+    return false;
+  return type.held == Type::Bool || isNumber(type.held);
 }
 
 class Emitter {
@@ -155,20 +151,21 @@ private:
   // Whether letting one of these go means doing anything at all. A struct of
   // numbers holds nothing that has an owner, and asking is what keeps a drop of
   // one from being written at all.
-  bool ownsAnything(const std::string &spelled) const {
-    const std::string bare = withoutLoan(spelled);
-    if (copiesNamed(bare) || bare == "nothing")
+  bool ownsAnything(const MirType &type) const {
+    const MirType bare = withoutLoan(type);
+    if (copiesNamed(bare) || bare.held == Type::Nothing)
       return false;
     if (mayBeNothing(bare))
       return ownsAnything(within(bare));
     if (holdsMany(bare))
       return true; // the places themselves have an owner, whatever is in them
-    if (const Shape *shape = shapeOf(bare))
-      for (const Field &field : shape->fields) {
-        if (ownsAnything(spellOf(field.type)))
+    if (bare.held == Type::Struct) {
+      for (const Field &field : mir_.shapes[bare.named].fields)
+        if (ownsAnything(asMirType(field.type)))
           return true;
-      }
-    return shapeOf(bare) ? false : bare == "str";
+      return false;
+    }
+    return bare.held == Type::Str;
   }
 
   // Letting go of one value, whatever it is made of.
@@ -178,11 +175,11 @@ private:
   // nothing. Choosing between three runtime calls with a chain of `?:` instead
   // sent a struct held inside a struct to `xag_many_drop`, which was handed
   // something that was never allocated and aborted.
-  void letGo(const std::string &spelled, llvm::Value *at) {
-    const std::string bare = withoutLoan(spelled);
+  void letGo(const MirType &type, llvm::Value *at) {
+    const MirType bare = withoutLoan(type);
     if (!ownsAnything(bare))
       return;
-    if (bare == "str") {
+    if (isText(bare)) {
       builder_.CreateCall(runtime_["xag_str_drop"], {at});
       return;
     }
@@ -201,8 +198,8 @@ private:
       return;
     }
     if (holdsMany(bare)) {
-      const std::string element = elementOf(bare);
-      if (element == "str") {
+      const MirType element = elementOf(bare);
+      if (isText(element)) {
         builder_.CreateCall(runtime_["xag_many_drop_str"], {at});
         return;
       }
@@ -211,17 +208,19 @@ private:
       builder_.CreateCall(runtime_["xag_many_drop"], {at});
       return;
     }
-    if (const Shape *shape = shapeOf(bare))
-      for (unsigned i = 0; i < shape->fields.size(); ++i)
-        letGo(spellOf(shape->fields[i].type),
+    if (bare.held == Type::Struct) {
+      const Shape &shape = mir_.shapes[bare.named];
+      for (unsigned i = 0; i < shape.fields.size(); ++i)
+        letGo(asMirType(shape.fields[i].type),
               builder_.CreateStructGEP(typeFor(bare), at, i));
+    }
   }
 
   // Every place of a `many`, one at a time, before the array itself goes. The
   // runtime has a walk of its own for text, which is the common case; anything
   // else is written out here because what one place holds is not something the
   // runtime knows the shape of.
-  void letGoOfEveryPlace(const std::string &element, llvm::Value *array) {
+  void letGoOfEveryPlace(const MirType &element, llvm::Value *array) {
     auto *whole = builder_.CreateLoad(many_, array);
     auto *base = builder_.CreateExtractValue(whole, 0);
     auto *length = builder_.CreateExtractValue(whole, 1);
@@ -245,40 +244,61 @@ private:
     builder_.SetInsertPoint(done);
   }
 
-  const MirType &shapeOf(TypeRef type) const {
+  // The type as the middle layer took it apart. Everything here asks this
+  // rather than reading the spelling and taking it apart again — which is what
+  // four of this week's bugs were: a loan taken for the thing it lends.
+  const MirType &typing(TypeRef type) const {
     static const MirType nothing;
     return type.index < body_->typed.size() ? body_->typed[type.index] : nothing;
   }
 
-  llvm::Type *typeFor(const std::string &spelled) {
-    if (spelled == "bool")
-      return builder_.getInt1Ty();
-    if (spelled == "str")
-      return str_;
-    if (isLoan(spelled))
+  const MirType &typing(unsigned local) const {
+    return typing(body_->locals[local].type);
+  }
+
+  llvm::Type *typeFor(const MirType &type) {
+    if (type.isLoan())
       return builder_.getPtrTy();
-    if (const Shape *shape = shapeOf(withoutLoan(spelled))) {
-      // Named struct types, so the IR reads the way the program does.
-      auto found = shapes_.find(shape->name);
-      if (found != shapes_.end())
-        return found->second;
-      auto *made = llvm::StructType::create(context_, "xag." + shape->name);
-      shapes_[shape->name] = made;
-      std::vector<llvm::Type *> held;
-      for (const Field &field : shape->fields)
-        held.push_back(typeFor(spellOf(field.type)));
-      made->setBody(held);
-      return made;
-    }
-    if (mayBeNothing(spelled))
+    if (type.orNothing)
       // Whether it is there, and what it is. Two fields, because a `str` that
       // is absent and a `str` that is empty are different things and no bit
       // pattern of one is free to mean the other.
       return llvm::StructType::get(context_,
-                                   {builder_.getInt1Ty(), typeFor(within(spelled))});
-    if (holdsMany(spelled))
+                                   {builder_.getInt1Ty(), typeFor(type.within())});
+    if (type.many)
       return many_;
-    const Type named = typeNamed(spelled);
+    if (type.held == Type::Bool)
+      return builder_.getInt1Ty();
+    if (type.held == Type::Str)
+      return str_;
+    if (type.held == Type::Struct)
+      return structFor(type.named);
+    return typeFor(type.held);
+  }
+
+  llvm::Type *structFor(unsigned which) {
+    const Shape &shape = mir_.shapes[which];
+    auto found = shapes_.find(shape.name);
+    if (found != shapes_.end())
+      return found->second;
+    // Named struct types, so the IR reads the way the program does.
+    auto *made = llvm::StructType::create(context_, "xag." + shape.name);
+    shapes_[shape.name] = made;
+    std::vector<llvm::Type *> held;
+    for (const Field &field : shape.fields)
+      held.push_back(typeFor(asMirType(field.type)));
+    made->setBody(held);
+    return made;
+  }
+
+  // One of the types the standard names, as a machine holds it. Everything a
+  // chain can put around one — a loan, an absence, a `many`, a struct — is
+  // answered by the caller above, so what reaches here is always plain.
+  llvm::Type *typeFor(Type named) {
+    if (named == Type::Bool)
+      return builder_.getInt1Ty();
+    if (named == Type::Str)
+      return str_;
     if (isWhole(named))
       return builder_.getIntNTy(widthOf(named));
     if (isBinary(named))
@@ -296,11 +316,6 @@ private:
     auto *carrier = builder_.getInt128Ty();
     return isSigned(named) ? builder_.CreateSExt(value, carrier)
                            : builder_.CreateZExt(value, carrier);
-  }
-
-  const std::string &nameOf(TypeRef type) const {
-    static const std::string unknown = "?";
-    return type.index < body_->types.size() ? body_->types[type.index] : unknown;
   }
 
   void declareRuntime() {
@@ -371,9 +386,10 @@ private:
     body_ = &body;
     std::vector<llvm::Type *> params;
     for (unsigned i = 1; i <= body.parameters && i < body.locals.size(); ++i)
-      params.push_back(typeFor(nameOf(body.locals[i].type)));
-    const std::string &result = nameOf(body.result);
-    llvm::Type *answer = result == "nothing" ? builder_.getVoidTy() : typeFor(result);
+      params.push_back(typeFor(typing(body.locals[i].type)));
+    const MirType &result = typing(body.result);
+    llvm::Type *answer =
+        result.held == Type::Nothing ? builder_.getVoidTy() : typeFor(result);
     auto *type = llvm::FunctionType::get(answer, params, false);
     llvm::Function *made = llvm::Function::Create(
         type, llvm::Function::InternalLinkage, symbolFor(body.name), module_);
@@ -390,7 +406,7 @@ private:
     // A `ref` may share with other `ref`s, so it is not `noalias`. Nothing is
     // ever written through one, so it is `readonly`.
     for (unsigned i = 1; i <= body.parameters && i < body.locals.size(); ++i) {
-      const MirType &held = shapeOf(body.locals[i].type);
+      const MirType &held = typing(body.locals[i].type);
       if (!held.isLoan())
         continue;
       const unsigned at = i - 1;
@@ -412,19 +428,19 @@ private:
 
     slots_.assign(body.locals.size(), nullptr);
     for (const Local &local : body.locals)
-      slots_[local.id] = builder_.CreateAlloca(typeFor(nameOf(local.type)), nullptr,
+      slots_[local.id] = builder_.CreateAlloca(typeFor(typing(local.type)), nullptr,
                                                "_" + std::to_string(local.id));
     // Every slot starts empty, so a drop that reaches one never sees rubbish.
     for (const Local &local : body.locals) {
-      const std::string &held = nameOf(local.type);
-      if (held == "str")
+      const MirType &held = typing(local.type);
+      if (isText(held))
         builder_.CreateStore(llvm::Constant::getNullValue(str_), slots_[local.id]);
       else if (holdsMany(held) && !isLoan(held))
         builder_.CreateStore(llvm::Constant::getNullValue(many_), slots_[local.id]);
       else if (mayBeNothing(held) && !isLoan(held))
         builder_.CreateStore(llvm::Constant::getNullValue(typeFor(held)),
                              slots_[local.id]);
-      else if (shapeOf(held) && !isLoan(held))
+      else if (held.held == Type::Struct && !isLoan(held))
         builder_.CreateStore(llvm::Constant::getNullValue(typeFor(held)),
                              slots_[local.id]);
     }
@@ -476,14 +492,14 @@ private:
   // answers the loan itself, which is a pointer — and widening a pointer to a
   // number is not something LLVM will even build.
   llvm::Value *behind(const Operand &operand) {
-    const std::string spelled = nameOf(operand.type);
+    const MirType &spelled = typing(operand.type);
     if (!isLoan(spelled))
       return read(operand);
     return builder_.CreateLoad(typeFor(withoutLoan(spelled)), read(operand));
   }
 
   llvm::Value *read(const Operand &operand) {
-    const std::string &type = nameOf(operand.type);
+    const MirType &type = typing(operand.type);
     switch (operand.kind) {
     case OperandKind::Written: {
       if (operand.written == "nothing" && mayBeNothing(type)) {
@@ -491,9 +507,9 @@ private:
         auto *none = llvm::Constant::getNullValue(shell);
         return none; // the flag is false, and what it does not hold is not read
       }
-      if (type == "bool")
+      if (type.held == Type::Bool && !type.isLoan())
         return builder_.getInt1(operand.written == "true");
-      const Type named = typeNamed(type);
+      const Type named = type.lent().held;
       if (isWhole(named)) {
         // Read at the width it was written with. The checker has already said
         // it fits, which is what makes reading it here safe at any width.
@@ -530,9 +546,9 @@ private:
       auto *taken =
           builder_.CreateLoad(typeFor(localType(operand.local)), slots_[operand.local]);
       // What was taken is gone from where it was, so a stray drop finds nothing.
-      if (localType(operand.local) == "str")
+      if (localType(operand.local).held == Type::Str && !localType(operand.local).isLoan())
         builder_.CreateStore(llvm::Constant::getNullValue(str_), slots_[operand.local]);
-      else if (holdsMany(localType(operand.local)) && !isLoan(localType(operand.local)))
+      else if (localType(operand.local).many && !localType(operand.local).isLoan())
         builder_.CreateStore(llvm::Constant::getNullValue(many_), slots_[operand.local]);
       return taken;
     }
@@ -540,29 +556,29 @@ private:
     return nullptr;
   }
 
-  const std::string &localType(unsigned local) const {
-    return nameOf(body_->locals[local].type);
+  const MirType &localType(unsigned local) const {
+    return typing(body_->locals[local].type);
   }
 
   // What an operand actually holds — the local's type, since the operand's own
   // spelling is what was asked of it rather than what is there.
-  const std::string &operandType(const Operand &operand) const {
-    static const std::string written = "?";
+  const MirType &operandType(const Operand &operand) const {
+    static const MirType written;
     return operand.kind == OperandKind::Written ? written : localType(operand.local);
   }
 
   // A pointer to text, whether the operand names it, lends it, or wrote it.
   llvm::Value *textPointer(const Operand &operand) {
-    const std::string &type = nameOf(operand.type);
+    const MirType &type = typing(operand.type);
     if (operand.kind != OperandKind::Written) {
-      const std::string &held = localType(operand.local);
-      if (held == "str")
+      const MirType &held = localType(operand.local);
+      if (isText(held))
         return slots_[operand.local];
       if (isLoan(held))
         return builder_.CreateLoad(builder_.getPtrTy(), slots_[operand.local]);
     }
     auto *slot = builder_.CreateAlloca(str_, nullptr, "piece");
-    if (type == "str" || isLoan(type))
+    if (isText(type) || isLoan(type))
       builder_.CreateStore(read(operand), slot);
     else
       builder_.CreateStore(llvm::Constant::getNullValue(str_), slot);
@@ -573,14 +589,14 @@ private:
 
   void statement(const Statement &s) {
     if (s.kind == StatementKind::Store) {
-      const std::string held = localType(s.place);
-      const std::string element = elementOf(held);
+      const MirType held = localType(s.place);
+      const MirType element = elementOf(held);
       auto *place = placePointer(
           isLoan(held) ? builder_.CreateLoad(builder_.getPtrTy(), slots_[s.place])
                        : slots_[s.place],
           builder_.CreateSExtOrTrunc(read(s.at), builder_.getInt64Ty()), element,
           s.value.settled);
-      if (element == "str") {
+      if (isText(element)) {
         // What was in the place ends here: a `many` holds a value everywhere,
         // and putting one in does not make room by forgetting the other.
         builder_.CreateCall(runtime_["xag_str_drop"], {place});
@@ -593,7 +609,7 @@ private:
     }
 
     if (s.kind == StatementKind::Drop) {
-      const std::string held = localType(s.place);
+      const MirType held = localType(s.place);
       if (!ownsAnything(held))
         return;
       if (!s.conditional) {
@@ -621,19 +637,19 @@ private:
     // Down to the one thing being written, which leaves everything beside it
     // exactly where it was — the whole point of a place having parts.
     if (!s.parts.empty()) {
-      std::string held = withoutLoan(localType(s.place));
-      llvm::Value *where = isLoan(localType(s.place))
+      MirType held = localType(s.place).lent();
+      llvm::Value *where = localType(s.place).isLoan()
                                ? builder_.CreateLoad(builder_.getPtrTy(),
                                                      slots_[s.place])
                                : slots_[s.place];
       for (unsigned part : s.parts) {
-        const Shape *shape = shapeOf(held);
-        if (!shape || part >= shape->fields.size())
+        if (held.held != Type::Struct ||
+            part >= mir_.shapes[held.named].fields.size())
           return;
         where = builder_.CreateStructGEP(typeFor(held), where, part);
-        held = spellOf(shape->fields[part].type);
+        held = asMirType(mir_.shapes[held.named].fields[part].type);
       }
-      if (!copiesNamed(held) && held == "str")
+      if (!copiesNamed(held) && isText(held))
         builder_.CreateCall(runtime_["xag_str_drop"], {where});
       builder_.CreateStore(value, where);
       return;
@@ -641,8 +657,8 @@ private:
 
     // A value going into something that may hold nothing is that value, held.
     // The absence writes itself; everything else has to be wrapped on the way.
-    const std::string &into = localType(s.place);
-    if (mayBeNothing(into) && !mayBeNothing(nameOf(s.value.type))) {
+    const MirType &into = localType(s.place);
+    if (mayBeNothing(into) && !mayBeNothing(typing(s.value.type))) {
       auto *shell = llvm::UndefValue::get(typeFor(into));
       auto *held = builder_.CreateInsertValue(shell, builder_.getInt1(true), 0);
       builder_.CreateStore(builder_.CreateInsertValue(held, value, 1),
@@ -658,13 +674,13 @@ private:
     // where `_3` points. Telling them apart is what the value's own type says:
     // a loan going in is a loan being made. Getting this wrong stored through a
     // slot that had nothing in it yet.
-    if (isLoan(localType(s.place)) && !isLoan(nameOf(s.value.type)) &&
+    if (localType(s.place).isLoan() && !isLoan(typing(s.value.type)) &&
         s.value.kind != RValueKind::Ref) {
-      const std::string lent = withoutLoan(localType(s.place));
+      const MirType lent = localType(s.place).lent();
       auto *through = builder_.CreateLoad(builder_.getPtrTy(), slots_[s.place]);
       // What was there is let go of first: putting a value in does not make
       // room by forgetting the one it replaces.
-      if (lent == "str")
+      if (isText(lent))
         builder_.CreateCall(runtime_["xag_str_drop"], {through});
       builder_.CreateStore(value, through);
       return;
@@ -676,8 +692,8 @@ private:
   llvm::Value *manyPointer(const Operand &operand) {
     if (operand.kind == OperandKind::Written)
       return nullptr;
-    const std::string &held = localType(operand.local);
-    if (isLoan(held))
+    const MirType &held = localType(operand.local);
+    if (held.isLoan())
       return builder_.CreateLoad(builder_.getPtrTy(), slots_[operand.local]);
     return slots_[operand.local];
   }
@@ -690,7 +706,7 @@ private:
   // sits in the middle of every loop over a `many`. An unsigned compare covers
   // a negative index and an empty array at once: both are outside.
   llvm::Value *placePointer(llvm::Value *array, llvm::Value *index,
-                            const std::string &element, bool settled = false) {
+                            const MirType &element, bool settled = false) {
     auto *whole = builder_.CreateLoad(many_, array);
     auto *base = builder_.CreateExtractValue(whole, 0);
     auto *length = builder_.CreateExtractValue(whole, 1);
@@ -739,7 +755,7 @@ private:
   llvm::Value *evaluate(const RValue &value) {
     switch (value.kind) {
     case RValueKind::Collect: {
-      const std::string element = elementOf(nameOf(value.type));
+      const MirType element = elementOf(typing(value.type));
       auto *made = builder_.CreateAlloca(many_, nullptr, "collected");
       const unsigned count = static_cast<unsigned>(value.operands.size());
       builder_.CreateCall(
@@ -750,7 +766,7 @@ private:
         auto *base = builder_.CreateExtractValue(whole, 0);
         for (unsigned i = 0; i < count; ++i) {
           auto *at = builder_.CreateGEP(typeFor(element), base, builder_.getInt64(i));
-          if (element == "str")
+          if (isText(element))
             builder_.CreateStore(
                 builder_.CreateLoad(str_, textPointer(value.operands[i])), at);
           else
@@ -761,7 +777,7 @@ private:
     }
 
     case RValueKind::Fill: {
-      const std::string element = elementOf(nameOf(value.type));
+      const MirType element = elementOf(typing(value.type));
       auto *made = builder_.CreateAlloca(many_, nullptr, "filled");
       auto *howMany = asIndex(value.operands[1]);
       builder_.CreateCall(runtime_["xag_many_new"],
@@ -774,7 +790,7 @@ private:
     }
 
     case RValueKind::Element: {
-      const std::string element = elementOf(nameOf(value.operands[0].type));
+      const MirType element = elementOf(typing(value.operands[0].type));
       auto *place = placePointer(manyPointer(value.operands[0]),
                                  asIndex(value.operands[1]), element, value.settled);
       // What copies is read out; what does not is lent where it stands. Asking
@@ -796,7 +812,7 @@ private:
       // every borrow passed through two functions read rubbish. Both
       // interpreters follow a chain of loans, which is why only this engine
       // was wrong and no vote between the other two would have said so.
-      return isLoan(localType(value.local))
+      return localType(value.local).isLoan()
                  ? builder_.CreateLoad(builder_.getPtrTy(), slots_[value.local])
                  : slots_[value.local];
 
@@ -824,7 +840,7 @@ private:
     }
 
     case RValueKind::Group: {
-      auto *shell = typeFor(nameOf(value.type));
+      auto *shell = typeFor(typing(value.type));
       llvm::Value *built = llvm::UndefValue::get(shell);
       for (unsigned i = 0; i < value.operands.size(); ++i)
         built = builder_.CreateInsertValue(built, read(value.operands[i]), i);
@@ -832,11 +848,13 @@ private:
     }
 
     case RValueKind::Taken: {
-      const std::string of = operandType(value.operands[0]);
-      const Shape *shape = shapeOf(withoutLoan(of));
+      const MirType of = operandType(value.operands[0]);
+      const Shape *shape = of.lent().held == Type::Struct
+                               ? &mir_.shapes[of.named]
+                               : nullptr;
       if (!shape || value.local >= shape->fields.size())
         return nullptr;
-      const std::string inner = spellOf(shape->fields[value.local].type);
+      const MirType inner = asMirType(shape->fields[value.local].type);
       auto *where = isLoan(of) ? builder_.CreateLoad(builder_.getPtrTy(),
                                                      slots_[value.operands[0].local])
                                : slots_[value.operands[0].local];
@@ -850,11 +868,13 @@ private:
     }
 
     case RValueKind::Part: {
-      const std::string of = operandType(value.operands[0]);
-      const Shape *shape = shapeOf(withoutLoan(of));
+      const MirType of = operandType(value.operands[0]);
+      const Shape *shape = of.lent().held == Type::Struct
+                               ? &mir_.shapes[of.named]
+                               : nullptr;
       if (!shape || value.local >= shape->fields.size())
         return nullptr;
-      const std::string inner = spellOf(shape->fields[value.local].type);
+      const MirType inner = asMirType(shape->fields[value.local].type);
       // What copies is read out; what has an owner is lent where it stands.
       auto *where = isLoan(of)
                         ? builder_.CreateLoad(builder_.getPtrTy(),
@@ -873,7 +893,7 @@ private:
 
     case RValueKind::Inside: {
       // Lent where what is inside has an owner, read out where it has not.
-      const std::string held = within(operandType(value.operands[0]));
+      const MirType held = within(operandType(value.operands[0]));
       auto *where = slots_[value.operands[0].local];
       auto *at = builder_.CreateStructGEP(typeFor(operandType(value.operands[0])),
                                           where, 1);
@@ -889,7 +909,7 @@ private:
 
   // One place, in bytes. The layout is the machine's, asked of the module's own
   // data layout rather than guessed at.
-  uint64_t strideOf(const std::string &element) {
+  uint64_t strideOf(const MirType &element) {
     return module_.getDataLayout().getTypeAllocSize(typeFor(element));
   }
 
@@ -898,8 +918,8 @@ private:
     // What the loan lends, not the loan. Every loan used to be taken for a loan
     // of text, because for a long time every loan was one — so `refmut int64`
     // came in here and two pointers-to-a-number went to `xag_str_compare`.
-    const std::string leftType = withoutLoan(nameOf(value.operands[0].type));
-    const bool onText = leftType == "str";
+    const MirType leftType = withoutLoan(typing(value.operands[0].type));
+    const bool onText = isText(leftType);
 
     if (onText) {
       auto *seen = builder_.CreateCall(
@@ -922,7 +942,7 @@ private:
     if (op == "and") return builder_.CreateAnd(left, right);
     if (op == "or") return builder_.CreateOr(left, right);
 
-    const Type given = typeNamed(leftType);
+    const Type given = leftType.held;
     if (isDecimal(given)) {
       auto *carrier = builder_.getInt128Ty();
       auto *say = builder_.getInt32(static_cast<int>(widthOf(given)));
@@ -937,7 +957,7 @@ private:
                              : op == "mod" ? "xag_deci_mod"
                                            : "xag_deci_pow";
         return builder_.CreateTrunc(builder_.CreateCall(runtime_[called], {say, x, y}),
-                                    typeFor(nameOf(value.type)));
+                                    typeFor(typing(value.type)));
       }
       auto *order = builder_.CreateCall(runtime_["xag_deci_compare"], {say, x, y});
       auto *unordered = builder_.CreateICmpEQ(order, builder_.getInt32(-3));
@@ -999,9 +1019,9 @@ private:
           runtime_[op == "mod" ? "xag_bin_mod" : "xag_bin_pow"],
           {builder_.CreateFPExt(left, wide), builder_.CreateFPExt(right, wide),
            builder_.getInt32(widthOf(given))});
-      return builder_.CreateFPTrunc(answered, typeFor(nameOf(value.type)));
+      return builder_.CreateFPTrunc(answered, typeFor(typing(value.type)));
     }
-    const Type made = typeNamed(nameOf(value.type));
+    const Type made = typing(value.type).lent().held;
     const Type working = isWhole(made) ? made : given;
     const bool unsignedly = isWhole(given) && !isSigned(given);
 
@@ -1079,7 +1099,7 @@ private:
         {widened(left, working), widened(right, working),
          builder_.getInt32(widthOf(working)),
          builder_.getInt32(isSigned(working) ? 1 : 0)});
-    return builder_.CreateTrunc(answered, typeFor(nameOf(value.type)));
+    return builder_.CreateTrunc(answered, typeFor(typing(value.type)));
   }
 
   llvm::Value *call(const RValue &value) {
@@ -1087,8 +1107,8 @@ private:
       for (const Operand &operand : value.operands) {
         // What is behind the loan, not the loan: a borrowed number is a number,
         // and asking `ref int64` what type it is answers nothing at all.
-        const std::string type = withoutLoan(nameOf(operand.type));
-        const Type named = typeNamed(type);
+        const MirType type = withoutLoan(typing(operand.type));
+        const Type named = type.held;
         if (isDecimal(named))
           builder_.CreateCall(
               runtime_["xag_print_deci"],
@@ -1106,7 +1126,7 @@ private:
                               {widened(behind(operand), named),
                                builder_.getInt32(widthOf(named)),
                                builder_.getInt32(isSigned(named) ? 1 : 0)});
-        else if (type == "bool")
+        else if (type.held == Type::Bool)
           builder_.CreateCall(
               runtime_["xag_print_bool"],
               {builder_.CreateZExt(behind(operand), builder_.getInt32Ty())});
@@ -1119,7 +1139,7 @@ private:
     if (value.callee == "read.stdin") {
       // The line comes back through a pointer and the answer says whether there
       // was one, which is exactly the two fields the type has.
-      auto *shell = typeFor(nameOf(value.type));
+      auto *shell = typeFor(typing(value.type));
       auto *line = builder_.CreateAlloca(str_, nullptr, "line");
       builder_.CreateStore(llvm::Constant::getNullValue(str_), line);
       auto *got = builder_.CreateCall(runtime_["xag_read_line"], {line});
@@ -1135,9 +1155,9 @@ private:
     }
 
     if (value.callee == "convert-to-number") {
-      const std::string spelled = nameOf(value.type);
-      const std::string wanted = within(spelled);
-      const Type named = typeNamed(wanted);
+      const MirType spelled = typing(value.type);
+      const MirType wanted = within(spelled);
+      const Type named = wanted.held;
       auto *shell = typeFor(spelled);
       auto *text = value.operands.empty() ? nullptr : textPointer(value.operands[0]);
       if (!text)
@@ -1193,8 +1213,7 @@ private:
     if (value.callee == "convert-to-str") {
       auto *out = builder_.CreateAlloca(str_, nullptr, "written");
       if (!value.operands.empty()) {
-        const std::string given = withoutLoan(nameOf(value.operands[0].type));
-        const Type named = typeNamed(given);
+        const Type named = withoutLoan(typing(value.operands[0].type)).held;
         llvm::Value *held = behind(value.operands[0]);
         if (named == Type::Bool)
           builder_.CreateCall(runtime_["xag_str_of_bool"],
@@ -1256,9 +1275,9 @@ private:
       return;
     }
     case TerminatorKind::Return:
-      if (end.answers && nameOf(body_->result) != "nothing") {
+      if (end.answers && typing(body_->result).held != Type::Nothing) {
         builder_.CreateRet(read(end.answer));
-      } else if (nameOf(body_->result) != "nothing") {
+      } else if (typing(body_->result).held != Type::Nothing) {
         // Lowering leaves a block after every `give`, which nothing reaches.
         builder_.CreateUnreachable();
       } else {
