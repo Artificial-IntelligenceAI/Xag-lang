@@ -1,90 +1,147 @@
-# Running Xag while Xag is being compiled
+# Running a loop to find out what it does
 
-**Xag runs code at compile time.** That much is decided; how it is asked for is
-not, and **none of it is built** — there is no way to write such a block today
-and there is no JIT. What is written down here is how it behaves when it exists,
-decided first so that it does not get built the wrong way round.
+**Nothing here is built.** The design is written down first so it does not get
+built the wrong way round.
 
-Xag already *reasons* at compile time — constants are folded, and how far a
-counted loop gets is worked out from its written ends (`E0534`, `W0001`). That
-is the compiler deciding to, for its own reasons. Running at compile time would
-be a program *asking*, and it is a different thing.
+Xag already reasons about loops at compile time. It folds constants, and it
+works out how far a counted loop gets from its written ends — `E0534` when a sum
+will not fit, `W0001` when it cannot tell. That reasoning is *bounds*: it never
+learns what a loop computes, only how large the answer could be.
 
-## The two ways to run it, and why there are two
+This is the other way of finding out. When a loop's inputs are all written down,
+the compiler stops, compiles that loop on its own, runs it, and looks at what
+actually happened. **There is nothing to write.** A word appears only where there
+is a choice, and there is no choice here: the compiler does it where it can.
 
-The test interpreter could run it. It runs MIR already, it is built to be
-obviously correct, it counts its steps (`kBudget` in `src/Interpret.cpp`), and
-the oracle already proves it agrees with the native backend. It is also slow on
-purpose.
+That is the whole difference from Zig's `comptime` and Jai's `#run`, which are
+things a program asks for. Nobody asks for this.
 
-The native backend could run it, by compiling the block and calling it through
-LLVM's JIT — which ships in the LLVM already linked. Jai does this and almost
-nobody else does; Zig, Rust, C++ and D all interpret instead. It is fast, and
-the answer comes from the same backend that compiles the rest of the program.
+## Why, when there are already bounds
 
-Neither is strictly better:
+Bounds are conservative, and conservative in the direction that refuses working
+programs. This one is refused today:
 
-- The interpreter works when the target is not the host. A JIT computes the
-  *host's* answer and bakes it into a *target's* program. `Native.cpp` uses
-  `getDefaultTargetTriple()` today, so there is no cross-compiling yet — but
-  there is already a POWER path (`tests/power/`), so this is not hypothetical.
-- The interpreter can stop. A budget counts steps; native code does not, not
-  cheaply. An endless block under a JIT hangs `xagc` with nothing to say, and a
-  bad one takes the compiler down with it.
-- Compiling stops being safe. Under a JIT, `xagc check` on a file you did not
-  write runs that file's code.
+```
+START {
+    var.mut.int8 'total' = [*0*];
+    loop.range.int8 'i' = [*1*, *100*] {
+        set 'total' = ['total' + 'i' / *50*];
+    }
+}
+```
 
-## Decided: both run, every build, and they must agree
+```text
+`'total'` reaches past what a `int8` holds.
+Error code: E0534
+```
 
-Tankun, 2026-09-07. The check is not a flag and not only an oracle test. Every
-build that runs code at compile time runs it both ways and compares.
+The same loop in `int16` prints `total = 52`, which fits an `int8` with room to
+spare. The bound reasons *100 trips, at most 2 each, so at most 200* — and never
+notices the step is 0 for the first half of the loop. There was an exact answer
+available and the compiler refused on an estimate instead.
 
-The reason it can be a default rather than an option is the rule for defaults —
-*most safety, with no runtime performance cost*. Running it twice costs compile
-time and nothing else, and slow compilation is already the price this language
-says it is paying:
+So the two are not rivals. Bounds are instant whatever the trip count and cost
+nothing, but they only ever say *at most*. Running is exact and costs a step per
+iteration. A bound is the right thing to reach for first; it is the wrong thing
+to refuse a program on when running it was possible.
+
+It catches more than sums, too. Reaching past the end of a `many` is a runtime
+stop today — *"place 3 was asked for, and the `many` has 3"* — and in a loop
+whose ends are written down, that is knowable before the program ever runs.
+
+## It is run twice, and the two must agree
+
+The test interpreter runs it, and the compiled form runs it, and their answers
+are compared. Every build. Not a flag, and not only a test in the oracle.
+
+Running twice costs compile time and no runtime time, which is the trade this
+language already says it is making:
 
 > Excellent Runtime Performance / Slow Compilation Time —
 > it builds slowly *because* of what it does to run quickly.
 
-## A disagreement is the compiler's fault, and has to say so
+**Tankun's rule for what a disagreement means:**
 
-**Tankun's point, and the reason this document exists:** if the two answers
-differ, the program did nothing wrong. Xag contradicted itself. Refusing the
-program in the ordinary voice would blame the reader for our bug.
+> If one disagrees, it's OUR problem. If both agree, it's THEIR problem.
 
-It still cannot produce a program. The JIT and the native backend are the same
-code path, so the interpreter's answer would be baked in while the same
-expression, compiled normally, computes the other one at runtime — the program
-would hold both answers for one piece of code. That is worse than either.
+Both agreeing is what makes the answer worth acting on. A loop that overflows,
+or reaches past the end of a `many`, is then a fact about the program, and it is
+reported the way every other mistake is reported.
 
-So it stops, and **stopping is not blaming**. This needs a kind of message Xag
-does not have: today every word it prints is about the reader's code, including
+## A disagreement is the compiler's fault, and says so
+
+If the two differ, the program did nothing wrong — Xag contradicted itself.
+
+It still cannot hand back a program. The compiled run and the shipping backend
+are one code path, so the interpreter's answer would be acted on while the same
+code, compiled normally, does the other thing. So it stops.
+
+**Stopping is not blaming.** Every word Xag prints today is about the reader's
+code, closing with
 
 ```
 If I am wrong about any of that, please tell me: <issues>
 ```
 
-which assumes the compiler is probably right. A mismatch is the opposite case —
-the compiler is certainly wrong and knows it. That message says so in its first
-sentence, carries no `E0…` code (those name a rule the reader's code broke),
-shows both answers and the block that produced them, and puts the issue link at
-the middle of it rather than the foot. A mismatch a reader hits is a program the
-generator never wrote, finding a disagreement the oracle never found; the report
-is the most useful thing the compiler could ask for.
+which allows that the compiler may be wrong. A mismatch is the opposite case:
+certainly wrong, and it knows it. That message says so in its first sentence,
+carries no `E0…` code — those name a rule the reader's code broke, and no rule
+was broken — shows both answers and the loop that produced them, and puts the
+issue link at the middle of it rather than the foot.
+
+A mismatch a reader hits is a program the generator never wrote, finding a
+disagreement the oracle never found. The report is the most useful thing the
+compiler could ask for.
+
+## A `loop.range` is not limited
+
+**Decided by Tankun, 2026-09-07: no limit by default.** A `loop.range` has its
+ends written down, so it always finishes, and there is no halting problem to
+defend against — only patience, which is the thing this language already spends.
+
+The case against was this one:
+
+```
+loop.range.int64 'i' = [*1*, *9223372036854775807*] { ... }
+```
+
+Legal, finite, and it terminates some time after the sun does. Tankun's answer
+is that this is exactly right: a loop that takes forever to compile is a loop
+that takes forever to run, and finding that out during the build, on your own
+machine, beats finding it out after shipping. The writer set the limit when they
+wrote the ends; the compiler does not get a second opinion.
+
+The trip count is worth computing anyway, because it is free: two written
+numbers, multiplied through any nesting, before a single iteration runs. It is
+the same on every machine, and it is what any message about a long run would be
+built from.
+
+A `while` is the other case. Its trip count is not written down, so it can fail
+to finish for real, and something has to stop it. The test interpreter already
+counts its steps (`kBudget` in `src/Interpret.cpp`) — but that budget is an
+engine limit today, one the oracle sets aside cases for reaching. If running a
+loop can reach it, running out has to become an answer: a diagnostic pointing at
+a real loop, saying the compiler gave up rather than that the program is wrong.
+
+## When it cannot be done
+
+Only a loop whose inputs are all known can be run. A loop over a parameter, or
+one reading input, cannot — so this sits on top of the bounds rather than
+replacing them. Bounds keep doing the work wherever an unknown is involved.
+
+A run also has to give the same answer on every machine, or the same source
+builds into different programs. There is no FFI, so that is nearly free today,
+which is the moment to write it down rather than later.
 
 ## Open
 
-- How a block that runs at compile time is spelled, and whether it is a block, a
-  word in a declaration's chain, or both.
-- Whether there is a way to carry on past a mismatch with the interpreter's
-  answer, for somebody who cannot wait for the fix. Raised, not decided.
-- The budget stops being an engine limit and becomes an answer. Today the oracle
-  sets aside any case that reaches it. If a compile-time block can reach it,
-  running out has to become a diagnostic pointing at a real loop.
-- A compile-time run has to give the same answer on every machine, or the same
-  source builds into different programs. There is no FFI, so this is nearly free
-  today — which is the moment to write it down, not later.
-- What this is *for*. The first thing that needs it is showing a struct or a
-  `many` (`E0516`), where what stands between the pieces is a decision the
-  compiler should not be making for everyone.
+- Whether a bound alone may still refuse a program, or only warn once running is
+  possible. `E0534` refuses on an estimate today, and the example above shows it
+  refusing a correct program.
+- Whether the compiler says what it is doing before a long run, or simply goes
+  quiet until it is finished.
+- What else a run should look for beyond sums that do not fit and places that do
+  not exist.
+- Whether a loop that was run, agreed on and found safe should also be
+  *replaced* by its answer. That is an optimisation and a separate decision; the
+  work is already done by then.
