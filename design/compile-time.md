@@ -377,19 +377,32 @@ which is the moment to write it down rather than later.
 - What else a run should look for beyond sums that do not fit and places that do
   not exist.
 
-### Lifting a loop that owns something
+### A `loop.range` is not limited, except that it is
 
-The wall, and a real one. A loop may be taken out of its program only when
-everything it touches is a plain number or a `bool`, because anything else has
-to be *rebuilt* outside the loop rather than written down — and a compile-time
-run that rebuilds a `many` is a run that owns memory the program still thinks it
-holds. Freeing it at the end of the lifted run, or failing to, are both wrong.
+Decided: a `loop.range` gets no limit, because its ends are written down and the
+writer set the limit when they wrote them. What is built does not do that. The
+test interpreter gives up after fifty million steps (`kBudget`), so:
 
-Most counted loops worth checking are exactly this shape: they walk a `many`.
-So the rule that keeps lifting sound is also what keeps it from reaching the
-loops people write. Getting past it means the lifted program reconstructing
-owned values, with the same ownership the loop expects, which is a larger thing
-than anything here so far.
+```
+loop.range.int64 'i' = [*1*, *20000000*] {
+    if ('i' mod *7*) == *0* { ... } else { ... }
+}
+```
+
+is not answered. It is three and a half seconds of running, and then nothing —
+the loop stays in the built program and every bound about it stands. LLVM folds
+the plainer shapes by itself, so the loops that reach this are exactly the ones
+worth answering.
+
+Three ways out, and the decision does not pick between them:
+
+- **Take the budget off an ITMT run.** A `loop.range` finishes, so the run
+  finishes; the compiler takes as long as the loop takes, which is what "not
+  limited" said. A `while` still needs the budget, since it may never finish.
+- **Keep it, and mean something narrower by "not limited"** — that the compiler
+  will not *refuse* a long loop, only that it may not answer one.
+- **Keep it and say so**, which at least stops the three and a half seconds
+  being silent.
 
 ### What it costs the oracle
 
