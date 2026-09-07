@@ -106,6 +106,50 @@ A mismatch a reader hits is a program the generator never wrote, finding a
 disagreement the oracle never found. The report is the most useful thing the
 compiler could ask for.
 
+## What is built
+
+The two runs, and the comparison. `src/Ahead.cpp` runs a program that reads
+nothing — once through the test interpreter watching for a sum coming round
+(`interpretWatching`), and once built into a program of its own by
+`Native.cpp`, linked by `cc`, and started — and compares what each wrote.
+
+The bounds' two diagnostics, `E0534` and `W0001`, are held back by the checker
+in `CheckResult::aboutSums` rather than reported. A refusal that has already
+stopped compilation cannot be overturned by a run that has not happened yet, and
+the first attempt at a test for this ran straight into that.
+
+| | |
+| --- | --- |
+| the two disagree | `Severity::Mine` — ours, and it says so |
+| they agree, and a bound was right | the bound stands as it was |
+| they agree, and a bound was wrong | the bound is dropped |
+| only one engine ran | the same, and nothing else |
+
+## What is not built: standing a bound up
+
+Reporting a sum nothing suspected is written and then taken out again, and why
+is worth keeping.
+
+The two runs are compared by **what they wrote**. Writing the same thing means
+they agreed about every value that reached the output. It says nothing about a
+value that never got written down — and a sum that comes round in such a value
+leaves *both* runs silent, so they "agree" without either having answered.
+Refusing on that is one engine refusing somebody's program.
+
+It is the same shape as the hole found in `E0516` the same day: three engines
+printed nothing for a struct, in the same way, and the oracle read that as
+agreement. **Two engines silent in the same way is not two engines agreeing.**
+
+The oracle said so too, in numbers: with it in, 78 of 200 generated cases were
+refused where they had run before, every one of them on this.
+
+So standing a bound up waits on the built run being able to say *where* a sum
+came round, rather than only what the program printed. That means checked
+arithmetic in the ahead build — the same backend and the same optimiser with
+overflow checks added, the way a debug build has them. Whether that counts as a
+third way of making code, which running twice exists to rule out, is the open
+question.
+
 ## A `loop.range` is not limited
 
 **Decided by Tankun, 2026-09-07: not limited.** Not the running, and not the
@@ -152,23 +196,6 @@ replacing them. Bounds keep doing the work wherever an unknown is involved.
 A run also has to give the same answer on every machine, or the same source
 builds into different programs. There is no FFI, so that is nearly free today,
 which is the moment to write it down rather than later.
-
-## What is built
-
-The test interpreter can watch for a sum coming round (`interpretWatching`), and
-`src/Ahead.cpp` runs a program that reads nothing, watching, and settles what the
-bounds only guessed at. The bounds' own two diagnostics — `E0534` and `W0001` —
-are held back by the checker in `CheckResult::aboutSums` rather than reported,
-because a refusal that has already happened cannot be overturned by a run that
-has not happened yet.
-
-It **only ever drops** a bound. One engine has run, and one engine is not enough
-to refuse a program on. A wrong answer here can only let something through,
-which is what already happens wherever a bound gives up — so it is no worse than
-what stood before it, and it stops refusing programs that are fine.
-
-The second run and the comparison are not built. Until they are, nothing here
-tells a reader their program is wrong on one engine's word.
 
 ## Open
 

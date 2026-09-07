@@ -159,8 +159,24 @@ int report(const xag::Source &source, const std::vector<xag::Diagnostic> &diagno
   // and here is what could not be worked out.
   std::vector<xag::Diagnostic> errors;
   std::vector<xag::Diagnostic> warnings;
-  for (const xag::Diagnostic &one : diagnostics)
-    (one.severity == xag::Severity::Error ? errors : warnings).push_back(one);
+  std::vector<xag::Diagnostic> mine;
+  for (const xag::Diagnostic &one : diagnostics) {
+    if (one.severity == xag::Severity::Mine)
+      mine.push_back(one);
+    else
+      (one.severity == xag::Severity::Error ? errors : warnings).push_back(one);
+  }
+
+  // First and alone. Everything else said about a program the compiler cannot
+  // agree with itself about is worth nothing until that is fixed, and it is
+  // ours to fix.
+  if (!mine.empty()) {
+    xag::renderMineOpening(std::cerr);
+    for (const xag::Diagnostic &one : mine)
+      xag::render(source, one, std::cerr);
+    xag::renderMineTally(mine.size(), std::cerr);
+    return 1;
+  }
 
   if (!warnings.empty()) {
     xag::renderWarningOpening(std::cerr);
@@ -323,6 +339,73 @@ int fastFile(const std::string &path) {
 }
 
 // Everything a program has to survive before any engine sees it.
+// Building the program and starting it, so that something other than the test
+// interpreter has an opinion about what it does.
+//
+// Everything happens beside the source, in files named after the process, and
+// every one of them is removed whatever happens. What the program writes is
+// kept; that is the whole point of running it.
+xag::Compiled buildAndStart(const xag::Mir &mir) {
+  xag::Compiled out;
+  const std::string runtime = runtimeLibrary();
+  if (!isThere(runtime))
+    return out; // nothing to link against, so nothing was asked
+
+  // `mkstemp` rather than a name made up and hoped for: it makes the file as it
+  // names it, so nothing else can take the name in between. The empty file it
+  // leaves is what the linker writes over, so it is not removed here — doing
+  // that deleted the program between linking it and starting it, and the two
+  // engines duly disagreed about a program only one of them had.
+  
+  std::string stem = "/tmp/xag-ahead-XXXXXX";
+  const int held = ::mkstemp(stem.data());
+  if (held < 0)
+    return out;
+  ::close(held);
+  const std::string object = stem + ".o";
+  out.asked = true;
+
+  // Optimised, because that is what the reader will be given. An answer from
+  // an unoptimised build would leave the optimiser as the one thing nothing
+  // checks — which is the same reason the interpreters get the program as
+  // written and the compiler gets what the optimiser made of it.
+  const xag::NativeResult emitted = xag::emitObject(mir, true, object);
+  if (!emitted.ok()) {
+    out.trouble = emitted.trouble;
+    std::remove(object.c_str());
+    return out;
+  }
+
+  const std::string link =
+      "cc \"" + object + "\" \"" + runtime + "\" -o \"" + stem + "\" 2>/dev/null";
+  const int linked = std::system(link.c_str());
+  std::remove(object.c_str());
+  if (linked != 0) {
+    out.trouble = "it would not link.";
+    return out;
+  }
+
+  // Its own output, read back. Whatever it writes to the terminal it would
+  // write when the reader ran it, and that is not this moment.
+  const std::string said = stem + ".out";
+  const std::string start = "\"" + stem + "\" > \"" + said + "\" 2>/dev/null";
+  const int status = std::system(start.c_str());
+  std::remove(stem.c_str());
+
+  std::ifstream reading(said, std::ios::binary);
+  out.said.assign(std::istreambuf_iterator<char>(reading), std::istreambuf_iterator<char>());
+  reading.close();
+  std::remove(said.c_str());
+
+  if (status != 0) {
+    out.trouble = "it stopped, having written " + std::to_string(out.said.size()) +
+                  " character(s).";
+    return out;
+  }
+  out.ran = true;
+  return out;
+}
+
 bool ready(const std::string &path, std::string &text, xag::MirResult &built, int &status,
            xag::Rewriting rewriting) {
   status = 1;
@@ -364,7 +447,8 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // Last, because it runs the program, and a program is only run once it has
   // been read and found sound. A file holding both a mistake and a very long
   // loop has to report the mistake, and it cannot if it is still counting.
-  const xag::AheadResult ran = xag::ahead(source, built.mir, checked.aboutSums);
+  const xag::AheadResult ran =
+      xag::ahead(source, built.mir, checked.aboutSums, buildAndStart);
   if (report(source, ran.diagnostics) != 0)
     return false;
   status = 0;

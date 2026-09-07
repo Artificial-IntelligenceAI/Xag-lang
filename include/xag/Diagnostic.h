@@ -24,7 +24,15 @@ struct Note {
 // the compiler was not clever enough, and saying nothing would let a wrong
 // answer through in silence. Codes are `E…` when it refuses and `W…` when it
 // only says so.
-enum class Severity { Error, Warning };
+// `Mine` is the third, and it is not about the reader's code at all: the two
+// engines that ran their loop gave different answers, so the compiler
+// contradicted itself and knows it. It stops like a refusal — a program cannot
+// be handed back when the compiler holds two answers for one piece of it — but
+// it is not a refusal, and saying so in the reader's voice would blame them for
+// our mistake. Codes are `E…` when it refuses, `W…` when it only says so, and
+// none at all for `Mine`: a code names a rule the reader's code broke, and no
+// rule was broken.
+enum class Severity { Error, Warning, Mine };
 
 struct Diagnostic {
   Span span;
@@ -54,6 +62,7 @@ void renderOpening(std::ostream &out);
 void renderWarningOpening(std::ostream &out);
 void renderTally(std::size_t errors, std::ostream &out);
 void renderWarningTally(std::size_t warnings, std::ostream &out);
-void renderWarningTally(std::size_t warnings, std::ostream &out);
+void renderMineOpening(std::ostream &out);
+void renderMineTally(std::size_t howMany, std::ostream &out);
 
 } // namespace xag

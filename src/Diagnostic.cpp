@@ -10,7 +10,7 @@ const char *const kIssues = "https://github.com/Artificial-IntelligenceAI/Xag-la
 
 bool anyErrors(const std::vector<Diagnostic> &diagnostics) {
   for (const Diagnostic &one : diagnostics)
-    if (one.severity == Severity::Error)
+    if (one.severity == Severity::Error || one.severity == Severity::Mine)
       return true;
   return false;
 }
@@ -25,6 +25,22 @@ void renderOpening(std::ostream &out) {
 void renderWarningOpening(std::ostream &out) {
   out << "Hello, your code built. There are thing(s) I could not work out, "
          "and here they are.\n";
+}
+
+// Neither of the other two. The first apologises for refusing in case it is
+// wrong, and the second says the code built. This one says the compiler is
+// wrong, which it does not have to hedge about: it watched itself disagree.
+void renderMineOpening(std::ostream &out) {
+  out << "This is a bug in xagc, not in your code. I ran part of your program "
+         "twice\nand got two different answers, so I cannot honestly build it.\n";
+}
+
+void renderMineTally(std::size_t howMany, std::ostream &out) {
+  out << '\n'
+      << "I disagreed with myself in " << howMany
+      << (howMany == 1 ? " place.\n" : " places.\n")
+      << "Your program is very likely fine. Please tell us, and paste it in — it\n"
+         "found something nothing else has: " << kIssues << '\n';
 }
 
 void renderTally(std::size_t errors, std::ostream &out) {
@@ -77,6 +93,16 @@ unsigned digitsNeeded(const Source &source, const Diagnostic &diagnostic) {
 } // namespace
 
 void render(const Source &source, const Diagnostic &diagnostic, std::ostream &out) {
+  // Some things are not about a place. Two engines disagreeing about a whole
+  // program is one of them, and underlining the first character of the file
+  // would be pointing at something for the sake of pointing.
+  if (diagnostic.span.begin == 0 && diagnostic.span.end == 0) {
+    out << "\nin " << source.name() << ":\n\n" << diagnostic.message << "\n\n";
+    for (const std::string &what : diagnostic.rules)
+      out << what << '\n';
+    return;
+  }
+
   const Source::Position start = source.positionOf(diagnostic.span.begin);
 
   out << "\nfile: " << source.name() << ", line: " << start.line
@@ -92,12 +118,20 @@ void render(const Source &source, const Diagnostic &diagnostic, std::ostream &ou
     pointAt(source, note.span, note.label, gutter, shown, out);
   out << '\n';
 
-  out << "Error code: " << diagnostic.code << '\n';
-  if (!diagnostic.rules.empty()) {
+  // A code names a rule the reader's code broke. When the compiler is the one
+  // that is wrong there is no such rule, so there is no code and nothing is
+  // said about rules — only what the two answers were.
+  if (diagnostic.severity != Severity::Mine)
+    out << "Error code: " << diagnostic.code << '\n';
+  if (diagnostic.severity != Severity::Mine && !diagnostic.rules.empty()) {
     out << "Rule(s) broken:";
     for (const std::string &rule : diagnostic.rules)
       out << ' ' << rule;
     out << '\n';
+  }
+  if (diagnostic.severity == Severity::Mine && !diagnostic.rules.empty()) {
+    for (const std::string &what : diagnostic.rules)
+      out << what << '\n';
   }
   if (!diagnostic.tips.empty()) {
     out << "Tip(s):";

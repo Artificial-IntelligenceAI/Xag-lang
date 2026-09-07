@@ -20,6 +20,45 @@ bool readsInput(const Mir &mir) {
   return false;
 }
 
+// Everything a temporary file was written with, read back.
+std::string drain(std::FILE *file) {
+  std::fflush(file);
+  std::rewind(file);
+  std::string out;
+  char buffer[4096];
+  size_t got = 0;
+  while ((got = std::fread(buffer, 1, sizeof(buffer), file)) > 0)
+    out.append(buffer, got);
+  return out;
+}
+
+// Everything up to the first place two pieces of text stop being the same, so
+// the report can say where they parted rather than printing both whole.
+std::string upToTheDifference(const std::string &a, const std::string &b) {
+  size_t at = 0;
+  while (at < a.size() && at < b.size() && a[at] == b[at])
+    ++at;
+  return a.substr(0, at);
+}
+
+std::string firstLineFrom(const std::string &text, size_t at) {
+  const size_t stop = text.find('\n', at);
+  return text.substr(at, stop == std::string::npos ? std::string::npos : stop - at);
+}
+
+// Whether any of these places sits within this one. A bound points at the whole
+// `set`, and the sum happens in a temporary inside it — `_6 = _1 + _5` — whose
+// span is the part of the line that adds rather than the line. So the two are
+// never equal, and containment is the question worth asking. Which way round it
+// is asked matters: asked backwards, every real overflow went unreported and
+// the tests said so.
+bool inside(Span place, const std::vector<Span> &ones) {
+  for (const Span &one : ones)
+    if (one.begin >= place.begin && one.begin < place.end)
+      return true;
+  return false;
+}
+
 bool hasStart(const Mir &mir) {
   for (const Body &body : mir.bodies)
     if (body.name == "START")
@@ -27,10 +66,30 @@ bool hasStart(const Mir &mir) {
   return false;
 }
 
+// The compiler contradicting itself. No code, because a code names a rule the
+// reader's code broke and no rule was broken; what stands in its place is the
+// two answers, which is the thing worth having in the report.
+Diagnostic disagreed(const std::string &interpreted, const Compiled &twice) {
+  std::vector<std::string> both;
+  if (!twice.ran) {
+    both.push_back("Reading it, I ran it to the end. Built and started, it did not: " +
+                   (twice.trouble.empty() ? std::string("it stopped.") : twice.trouble));
+  } else {
+    const size_t at = upToTheDifference(interpreted, twice.said).size();
+    both.push_back("They agreed for " + std::to_string(at) +
+                   " character(s), and then did not.");
+    both.push_back("  reading it:  " + firstLineFrom(interpreted, at));
+    both.push_back("  running it:  " + firstLineFrom(twice.said, at));
+  }
+  return Diagnostic{Span{}, "", "the two ways I have of running this do not agree.",
+                    "here", both, {}, {}, Severity::Mine};
+}
+
 } // namespace
 
 AheadResult ahead(const Source &, const Mir &mir,
-                  const std::vector<Diagnostic> &aboutSums) {
+                  const std::vector<Diagnostic> &aboutSums,
+                  const Building &building) {
   AheadResult out;
   if (aboutSums.empty() || !hasStart(mir) || readsInput(mir)) {
     out.diagnostics = aboutSums;
@@ -38,7 +97,8 @@ AheadResult ahead(const Source &, const Mir &mir,
   }
 
   // What the program writes while it is being compiled is not what anybody
-  // asked to see. It goes somewhere and is thrown away.
+  // asked to see. It is kept all the same, because it is the answer the second
+  // run is compared against.
   std::FILE *sink = std::tmpfile();
   if (!sink) {
     out.diagnostics = aboutSums;
@@ -47,6 +107,7 @@ AheadResult ahead(const Source &, const Mir &mir,
   xag_set_output(sink);
   const InterpretResult result = interpretWatching(mir);
   xag_set_output(nullptr);
+  const std::string said = drain(sink);
   std::fclose(sink);
 
   // A run that stopped — out of steps, or on something the program does wrong —
@@ -57,15 +118,20 @@ AheadResult ahead(const Source &, const Mir &mir,
   }
 
   out.ran = true;
+
+  // The second answer. Without one, only the interpreter has spoken, and one
+  // engine may drop a bound but may not stand one up.
+  const Compiled twice = building ? building(mir) : Compiled{};
+  if (twice.asked) {
+    if (!twice.ran || twice.said != said) {
+      out.diagnostics.push_back(disagreed(said, twice));
+      return out;
+    }
+    out.compared = true;
+  }
+
   for (const Diagnostic &bound : aboutSums) {
-    // The bound points at the whole `set`, and the sum happens in a temporary
-    // inside it — `_6 = _1 + _5` — whose span is the part of the line that adds
-    // rather than the line. So the question is whether the place it came round
-    // is inside the place the bound is about, not whether they are the same.
-    bool came = false;
-    for (const Span &span : result.cameRound)
-      if (span.begin >= bound.span.begin && span.begin < bound.span.end)
-        came = true;
+    const bool came = inside(bound.span, result.cameRound);
     // It came round after all, so the bound was right about this one and is
     // reported as it stands. Everywhere else the loop ran and nothing came
     // round, which is an answer rather than an estimate.
