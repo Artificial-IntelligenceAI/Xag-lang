@@ -646,6 +646,25 @@ void itNoticesASumComeRound() {
                 "    var.mut.int64 'n' = [*100*];\n"
                 "    var.int64 'two' = [*2*];\n"
                 "    set 'n' = ['n' x 'two'];\n}\n") == 0);
+
+  // At 128 bits there is nothing wider to have been cut from, so the test that
+  // works at every other width — did cutting it change it? — answers no to
+  // everything. The built program checks properly and said so; the oracle
+  // brought back the disagreement.
+  CHECK(watched("START {\n"
+                "    var.mut.wrapping.int128 'n' = [*1*];\n"
+                "    var.int128 'most' = "
+                "[*170141183460469231731687303715884105727*];\n"
+                "    set 'n' = ['n' + 'most'];\n}\n") == 1);
+  CHECK(watched("START {\n"
+                "    var.mut.wrapping.uint128 'n' = [*0*];\n"
+                "    var.uint128 'one' = [*1*];\n"
+                "    set 'n' = ['n' - 'one'];\n}\n") == 1);
+  // And it still says nothing about one that fits.
+  CHECK(watched("START {\n"
+                "    var.mut.int128 'n' = [*1*];\n"
+                "    var.int128 'two' = [*2*];\n"
+                "    set 'n' = ['n' + 'two'];\n}\n") == 0);
 }
 
 int main() {

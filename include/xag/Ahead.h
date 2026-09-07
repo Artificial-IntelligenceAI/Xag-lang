@@ -21,6 +21,11 @@ struct Compiled {
   bool asked = false;   // whether building was even attempted
   bool ran = false;     // it was built, started, and finished on its own
   std::string said;     // everything it wrote
+  // Where it said a sum came round. The build it was made by is the only one
+  // with checked arithmetic in it, so this is the second opinion about an
+  // overflow — the thing that makes standing a bound up more than one engine's
+  // word. Each place once, in the order they happened.
+  std::vector<Span> cameRound;
   std::string trouble;  // why there is no answer, when there is none
 };
 
@@ -55,13 +60,14 @@ struct AheadResult {
 // leave the answer partly unknown, and a bound that might still be right is
 // left standing.
 //
-// It still only ever *drops* a bound, and never stands one up that nothing
-// suspected — because the two runs are compared by what they wrote, and a sum
-// coming round in a value nothing prints leaves both of them silent. Two
-// engines silent in the same way is not two engines agreeing. Standing one up
-// waits on the built run being able to say where a sum came round.
+// Both runs answer two questions: what the program wrote, and where a sum came
+// round. The second is what lets a bound be stood up rather than only dropped.
+// Comparing output alone, a sum coming round in a value nothing prints leaves
+// both runs silent — and two engines silent in the same way is not two engines
+// agreeing, which is the shape of every hole found in this project so far.
 AheadResult ahead(const Source &source, const Mir &mir,
                   const std::vector<Diagnostic> &aboutSums,
+                  const std::vector<Span> &intoPlainNames = {},
                   const Building &building = {});
 
 } // namespace xag

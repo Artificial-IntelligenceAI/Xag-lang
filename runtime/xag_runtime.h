@@ -247,6 +247,16 @@ int xag_balance_is_clear(void);
 // A stop, in the same place and for the same reason in every engine.
 void xag_stop(const char *why);
 
+// Says that a sum came round, and where in the source it was written.
+//
+// Nothing a reader ever runs calls this. It exists for the build the compiler
+// makes of a program in order to run it while compiling it, which is the only
+// build with checked arithmetic in it — the one handed back has a machine's own
+// add, and a sum that does not fit comes round in it as it always has. It
+// writes to stderr, so what the program writes to stdout stays exactly what it
+// would have written.
+void xag_came_round(uint32_t at);
+
 #ifdef __cplusplus
 }
 #endif

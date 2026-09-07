@@ -59,6 +59,41 @@ bool inside(Span place, const std::vector<Span> &ones) {
   return false;
 }
 
+// Whether this place sits within any of those.
+bool inside2(Span one, const std::vector<Span> &places) {
+  for (const Span &place : places)
+    if (one.begin >= place.begin && one.begin <= place.end)
+      return true;
+  return false;
+}
+
+std::vector<Span> spansOf(const std::vector<Diagnostic> &diagnostics) {
+  std::vector<Span> out;
+  out.reserve(diagnostics.size());
+  for (const Diagnostic &one : diagnostics)
+    out.push_back(one.span);
+  return out;
+}
+
+bool holds(const std::vector<Span> &places, Span one) {
+  for (const Span &place : places)
+    if (place.begin == one.begin)
+      return true;
+  return false;
+}
+
+// The same places, whatever order they were reached in. A built program may
+// arrive at them differently and still agree about which they are.
+bool samePlaces(const std::vector<Span> &a, const std::vector<Span> &b) {
+  for (const Span &one : a)
+    if (!holds(b, one))
+      return false;
+  for (const Span &one : b)
+    if (!holds(a, one))
+      return false;
+  return true;
+}
+
 bool hasStart(const Mir &mir) {
   for (const Body &body : mir.bodies)
     if (body.name == "START")
@@ -85,13 +120,28 @@ Diagnostic disagreed(const std::string &interpreted, const Compiled &twice) {
                     "here", both, {}, {}, Severity::Mine};
 }
 
+// They wrote the same thing and did not agree about where a sum came round.
+// Only a watching interpreter and a checked build can see this at all, which is
+// exactly why it is worth seeing: comparing output alone, it is silence.
+Diagnostic disagreedAboutSums(const std::vector<Span> &reading,
+                              const std::vector<Span> &running) {
+  return Diagnostic{
+      Span{}, "", "the two ways I have of running this do not agree.", "here",
+      {"They wrote the same thing, and did not agree about where a sum came round.",
+       "  reading it:  " + std::to_string(reading.size()) + " place(s)",
+       "  running it:  " + std::to_string(running.size()) + " place(s)"},
+      {}, {}, Severity::Mine};
+}
+
 } // namespace
 
 AheadResult ahead(const Source &, const Mir &mir,
                   const std::vector<Diagnostic> &aboutSums,
-                  const Building &building) {
+                  const std::vector<Span> &intoPlainNames, const Building &building) {
   AheadResult out;
-  if (aboutSums.empty() || !hasStart(mir) || readsInput(mir)) {
+  // Something to settle, or a second engine to settle it with. With neither,
+  // running the program would answer a question nobody asked.
+  if ((aboutSums.empty() && !building) || !hasStart(mir) || readsInput(mir)) {
     out.diagnostics = aboutSums;
     return out;
   }
@@ -127,7 +177,34 @@ AheadResult ahead(const Source &, const Mir &mir,
       out.diagnostics.push_back(disagreed(said, twice));
       return out;
     }
+    // Both wrote the same thing, and both were asked where a sum came round.
+    // The second question is the one that matters: two engines writing nothing
+    // is not two engines agreeing, and a sum coming round in a value nothing
+    // prints leaves them both silent.
+    if (!samePlaces(result.cameRound, twice.cameRound)) {
+      out.diagnostics.push_back(disagreedAboutSums(result.cameRound, twice.cameRound));
+      return out;
+    }
     out.compared = true;
+  }
+
+  // What the run found that nothing suspected. Only once both engines have
+  // agreed about it: this refuses a program, and one engine may not do that.
+  if (out.compared) {
+    for (const Span &came : result.cameRound) {
+      // Only where the answer becomes a name that did not say `wrapping`. A
+      // sum inside a comparison, or handed straight to something, has nowhere
+      // for the reader to have written the word — so it is not their fault and
+      // is not put to them.
+      if (!inside2(came, intoPlainNames) || inside2(came, spansOf(aboutSums)))
+        continue;
+      out.diagnostics.push_back(Diagnostic{
+          came, "E0537", "a sum comes round here.", "here",
+          {"a sum that does not fit comes round, and that is rarely what was wanted"},
+          {"nothing worked this out. I ran the program both ways I have of running "
+           "it, watching, and both saw this one come round. `wrapping` on the "
+           "declaration says it is meant to."}});
+    }
   }
 
   for (const Diagnostic &bound : aboutSums) {

@@ -78,8 +78,8 @@ bool copiesNamed(const MirType &type) {
 
 class Emitter {
 public:
-  Emitter(const Mir &mir)
-      : mir_(mir), module_("xag", context_), builder_(context_) {
+  Emitter(const Mir &mir, bool watching = false)
+      : mir_(mir), watching_(watching), module_("xag", context_), builder_(context_) {
     // A `many` asks how wide one of its places is while the code is being
     // written, so the layout has to be settled before any of it is — an empty
     // one answers zero, and a buffer of that size is a heap overflow.
@@ -124,6 +124,9 @@ public:
 
 private:
   const Mir &mir_;
+  // Whether this is the build the compiler makes to run a program while
+  // compiling it. Nothing a reader is ever handed is built with this on.
+  const bool watching_ = false;
   llvm::LLVMContext context_;
   llvm::Module module_;
   llvm::IRBuilder<> builder_;
@@ -133,6 +136,9 @@ private:
 
   std::unordered_map<std::string, llvm::Function *> functions_;
   std::unordered_map<std::string, llvm::FunctionCallee> runtime_;
+  // Where the statement being lowered was written, so a sum that comes round
+  // can say. An RValue has no span of its own; the statement holding it does.
+  unsigned at_ = 0;
 
   const Body *body_ = nullptr;
   std::vector<llvm::Value *> slots_; // one alloca per local
@@ -335,6 +341,7 @@ private:
     add("xag_str_of_bin128", voidTy, {ptr, builder_.getInt128Ty()});
     add("xag_str_of_deci", voidTy, {ptr, i32, builder_.getInt128Ty()});
     add("xag_stop", voidTy, {ptr});
+    add("xag_came_round", voidTy, {i32});
     if (auto *stops = llvm::dyn_cast<llvm::Function>(runtime_["xag_stop"].getCallee()))
       stops->addFnAttr(llvm::Attribute::NoReturn);
     add("xag_str_from", voidTy, {ptr, ptr, i64});
@@ -588,6 +595,7 @@ private:
   // ---- statements
 
   void statement(const Statement &s) {
+    at_ = s.span.begin;
     if (s.kind == StatementKind::Store) {
       const MirType held = localType(s.place);
       const MirType element = elementOf(held);
@@ -913,6 +921,35 @@ private:
     return module_.getDataLayout().getTypeAllocSize(typeFor(element));
   }
 
+  // The same sum, through the intrinsic that answers whether it fitted. The
+  // answer is the machine's own wrapped one either way — this changes nothing
+  // about what the program computes, only whether anything noticed.
+  llvm::Value *watchedArithmetic(const std::string &op, llvm::Value *left,
+                                 llvm::Value *right, bool unsignedly) {
+    const llvm::Intrinsic::ID which =
+        op == "+" ? (unsignedly ? llvm::Intrinsic::uadd_with_overflow
+                                : llvm::Intrinsic::sadd_with_overflow)
+        : op == "-" ? (unsignedly ? llvm::Intrinsic::usub_with_overflow
+                                  : llvm::Intrinsic::ssub_with_overflow)
+                    : (unsignedly ? llvm::Intrinsic::umul_with_overflow
+                                  : llvm::Intrinsic::smul_with_overflow);
+    llvm::Function *asked = llvm::Intrinsic::getOrInsertDeclaration(
+        &module_, which, {left->getType()});
+    llvm::Value *both = builder_.CreateCall(asked, {left, right});
+    llvm::Value *answer = builder_.CreateExtractValue(both, 0);
+    llvm::Value *round = builder_.CreateExtractValue(both, 1);
+
+    llvm::Function *function = builder_.GetInsertBlock()->getParent();
+    auto *say = llvm::BasicBlock::Create(context_, "cameround", function);
+    auto *on = llvm::BasicBlock::Create(context_, "fitted", function);
+    builder_.CreateCondBr(round, say, on);
+    builder_.SetInsertPoint(say);
+    builder_.CreateCall(runtime_["xag_came_round"], {builder_.getInt32(at_)});
+    builder_.CreateBr(on);
+    builder_.SetInsertPoint(on);
+    return answer;
+  }
+
   llvm::Value *binary(const RValue &value) {
     const std::string &op = value.op;
     // What the loan lends, not the loan. Every loan used to be taken for a loan
@@ -1043,9 +1080,23 @@ private:
     // Under `overflow = "wrap"` a machine's own add is exactly the answer, so
     // there is nothing to be gained by calling out for it and a great deal to
     // be lost: a call is something the optimiser cannot see through.
-    if (op == "+") return builder_.CreateAdd(left, right);
-    if (op == "-") return builder_.CreateSub(left, right);
-    if (op == "x") return builder_.CreateMul(left, right);
+    //
+    // Unless this is the build the compiler makes in order to run the program
+    // while compiling it. That one is asked where a sum came round, so it does
+    // the same arithmetic through the intrinsic that answers as well as adds,
+    // and says so when the answer did not fit. Nothing a reader runs is built
+    // this way.
+    if (op == "+" || op == "-" || op == "x") {
+      if (!watching_) {
+        if (op == "+") return builder_.CreateAdd(left, right);
+        if (op == "-") return builder_.CreateSub(left, right);
+        return builder_.CreateMul(left, right);
+      }
+      // From `working`, the type the sum is done in — not from `given`, which
+      // is what a comparison reads its two sides by. They coincide for these
+      // three, and asking the wrong one would be a disagreement waiting.
+      return watchedArithmetic(op, left, right, isWhole(working) && !isSigned(working));
+    }
 
     // Dividing has a question in front of it rather than inside it: what to do
     // about zero, and the one signed pair a machine has no answer for. Both are
@@ -1338,9 +1389,10 @@ NativeResult emitIr(const Mir &mir, bool optimise) {
   return result;
 }
 
-NativeResult emitObject(const Mir &mir, bool optimise, const std::string &path) {
+NativeResult emitObject(const Mir &mir, bool optimise, const std::string &path,
+                        Watching watching) {
   NativeResult result;
-  Emitter emitter(mir);
+  Emitter emitter(mir, watching == Watching::Yes);
   if (!emitter.run(result.trouble))
     return result;
 

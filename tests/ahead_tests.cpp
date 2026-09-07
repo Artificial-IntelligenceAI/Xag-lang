@@ -36,7 +36,22 @@ struct Settled {
 // what is tested here is what `ahead` does with two answers rather than whether
 // the backend produces the right one. Every program below prints nothing, so
 // agreeing means saying nothing.
-xag::Building agrees() {
+// Agreeing means agreeing about both questions: what was written, and where a
+// sum came round. Every program below prints nothing, so the first is empty.
+xag::Building agrees(std::vector<xag::Span> cameRound = {}) {
+  return [cameRound](const xag::Mir &) {
+    xag::Compiled out;
+    out.asked = true;
+    out.ran = true;
+    out.cameRound = cameRound;
+    return out;
+  };
+}
+
+// Wrote the same thing, and saw a different set of sums come round. Only a
+// checked build can disagree this way, and it is the disagreement that would
+// otherwise have been silence.
+xag::Building agreesButSawNoSums() {
   return [](const xag::Mir &) {
     xag::Compiled out;
     out.asked = true;
@@ -87,7 +102,8 @@ Settled settle(const std::string &text, const xag::Building &building = {}) {
   out.held = checked.aboutSums;
 
   const xag::AheadResult ahead =
-      xag::ahead(source, built.mir, checked.aboutSums, building);
+      xag::ahead(source, built.mir, checked.aboutSums, checked.intoPlainNames,
+                 building);
   out.ran = ahead.ran;
   out.compared = ahead.compared;
   out.said = ahead.diagnostics;

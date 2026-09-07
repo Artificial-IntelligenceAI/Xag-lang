@@ -64,10 +64,39 @@ private:
   bool roundedHere_ = false;
   std::vector<Span> cameRound_;
 
-  // A sum came round exactly when cutting it to the type changed it. Nothing
-  // here decides what the answer is; the answer was already decided above.
-  void notice(XagInt raw, XagInt kept) {
-    if (watching_ && raw != kept)
+  // Whether the answer was too big for its type.
+  //
+  // Below 128 bits, cutting it and looking is the whole test: the exact answer
+  // always fits in the 128 the arithmetic is done in, so cutting changes it
+  // exactly when it did not fit. At 128 there is nothing wider to have been cut
+  // from — `xag_int_fit` hands back every value unchanged — so the test that
+  // works everywhere else is blind precisely where the numbers are biggest, and
+  // the built program, which checks properly, disagreed. The oracle found it.
+  static bool tooBig(const std::string &op, __uint128_t ux, __uint128_t uy,
+                     unsigned width, int sign) {
+    if (width < 128) {
+      const XagInt raw = op == "+"   ? static_cast<XagInt>(ux + uy)
+                         : op == "-" ? static_cast<XagInt>(ux - uy)
+                                     : static_cast<XagInt>(ux * uy);
+      return xag_int_fit(raw, width, sign) != raw;
+    }
+    if (sign) {
+      const __int128 x = static_cast<__int128>(ux), y = static_cast<__int128>(uy);
+      __int128 out = 0;
+      return op == "+"   ? __builtin_add_overflow(x, y, &out)
+             : op == "-" ? __builtin_sub_overflow(x, y, &out)
+                         : __builtin_mul_overflow(x, y, &out);
+    }
+    __uint128_t out = 0;
+    return op == "+"   ? __builtin_add_overflow(ux, uy, &out)
+           : op == "-" ? __builtin_sub_overflow(ux, uy, &out)
+                       : __builtin_mul_overflow(ux, uy, &out);
+  }
+
+  // Nothing here decides what the answer is; the answer was decided above, and
+  // this only remembers that it did not fit.
+  void notice(bool round) {
+    if (watching_ && round)
       roundedHere_ = true;
   }
 
@@ -573,18 +602,12 @@ private:
       const bool unsignedCompare = isWhole(given) && !isSigned(given);
       const __uint128_t ux = static_cast<__uint128_t>(x), uy = static_cast<__uint128_t>(y);
 
-      if (op == "+") {
-        const XagInt raw = static_cast<XagInt>(ux + uy);
+      if (op == "+" || op == "-" || op == "x") {
+        const XagInt raw = op == "+"   ? static_cast<XagInt>(ux + uy)
+                           : op == "-" ? static_cast<XagInt>(ux - uy)
+                                       : static_cast<XagInt>(ux * uy);
         answer.number = xag_int_fit(raw, width, sign);
-        notice(raw, answer.number);
-      } else if (op == "-") {
-        const XagInt raw = static_cast<XagInt>(ux - uy);
-        answer.number = xag_int_fit(raw, width, sign);
-        notice(raw, answer.number);
-      } else if (op == "x") {
-        const XagInt raw = static_cast<XagInt>(ux * uy);
-        answer.number = xag_int_fit(raw, width, sign);
-        notice(raw, answer.number);
+        notice(tooBig(op, ux, uy, width, sign));
       }
       else if (op == "/") answer.number = xag_int_div(x, y, width, sign);
       else if (op == "mod") answer.number = xag_int_mod(x, y, width, sign);

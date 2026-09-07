@@ -140,6 +140,22 @@ struct CheckResult {
   // either lets them stand or drops them for having actually run the loop.
   std::vector<Diagnostic> aboutSums;
 
+  // Where a sum coming round is worth telling somebody about: every statement
+  // writing a whole number into a name whose chain did *not* say `wrapping`.
+  //
+  // Both ends of that matter. `wrapping` is the reader saying it is meant, and
+  // a checksum coming round is the checksum working. But `wrapping` is written
+  // on a **name**, and a sum happens between values — so a sum whose answer
+  // never becomes a name has nowhere for the word to go, and refusing one would
+  // be refusing a program with no way to answer back:
+  //
+  //     var.mut.bool 'b' = [(int16:*234*) >== ('n' x *4*)];
+  //
+  // That multiply may come round and there is nothing anybody could write to
+  // say it is meant to. So a run says nothing about it, and the language having
+  // no way to say it is the open question rather than the reader's problem.
+  std::vector<Span> intoPlainNames;
+
   // What the checker worked out, so that nothing after it has to work the same
   // thing out again. Keyed by node, which is stable for as long as the tree is.
   std::unordered_map<const Expr *, Ty> expressions;

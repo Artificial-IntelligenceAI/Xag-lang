@@ -1378,6 +1378,8 @@ private:
       result_.declarations[&s] = type;
       onlyValueChecked(s.value, type, s.span);
       Symbol made{type, changeable(s.chain), s.nameSpan, wrapsChain(s.chain)};
+      if (isWhole(type) && !made.wraps)
+        result_.intoPlainNames.push_back(s.span);
       if (isWhole(type)) {
         __int128 given = 0;
         if (wholeItemOf(s.value, given)) {
@@ -1392,6 +1394,9 @@ private:
     case StmtKind::Set: {
       if (Symbol *held = lookupToChange(s.name))
         held->knownStart = false;
+      if (const Symbol *said = lookup(s.name);
+          said && !said->wraps && isWhole(said->type))
+        result_.intoPlainNames.push_back(s.span);
       const Symbol *symbol = lookup(s.name);
       if (!symbol) {
         complain(s.nameSpan, "E0501", "`'" + s.name + "'` is not declared.",

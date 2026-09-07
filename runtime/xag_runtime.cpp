@@ -587,6 +587,10 @@ int32_t xag_int_reads(uint32_t width, int32_t is_signed, const char *text,
 void xag_note_taken(void) { ++live; }
 void xag_note_given(void) { --live; }
 
+void xag_came_round(uint32_t at) {
+  std::fprintf(stderr, "xag-came-round %u\n", static_cast<unsigned>(at));
+}
+
 void xag_stop(const char *why) {
   std::fflush(output());
   std::fprintf(stderr, "\nthe program stopped: %s\n", why ? why : "no reason was given");

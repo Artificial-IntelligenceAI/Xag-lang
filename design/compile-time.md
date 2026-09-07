@@ -108,47 +108,70 @@ compiler could ask for.
 
 ## What is built
 
-The two runs, and the comparison. `src/Ahead.cpp` runs a program that reads
-nothing — once through the test interpreter watching for a sum coming round
-(`interpretWatching`), and once built into a program of its own by
-`Native.cpp`, linked by `cc`, and started — and compares what each wrote.
+`src/Ahead.cpp` runs a program that reads nothing, twice, and compares two
+things about the runs: **what each wrote**, and **where each says a sum came
+round**.
 
-The bounds' two diagnostics, `E0534` and `W0001`, are held back by the checker
-in `CheckResult::aboutSums` rather than reported. A refusal that has already
-stopped compilation cannot be overturned by a run that has not happened yet, and
-the first attempt at a test for this ran straight into that.
+- Reading it: the test interpreter, watching (`interpretWatching`). A sum came
+  round exactly where cutting it to the type changed it.
+- Running it: an object from `Native.cpp`, linked by `cc`, started as a program
+  of its own. Built with `Watching::Yes` — the only build anywhere with checked
+  arithmetic in it: `llvm.sadd.with.overflow` and its five relatives, and a call
+  to `xag_came_round` where one of them says the answer did not fit.
 
-| | |
+**Nothing a reader is handed is built that way.** `xagc build` emits a machine's
+own add, and a sum that does not fit comes round in it as it always has. The
+checks are how the compiler watches itself, not how the language behaves.
+
+Comparing the output alone was written first and taken out again. A sum coming
+round in a value nothing prints leaves *both* runs silent, and two engines
+silent in the same way is not two engines agreeing — the same hole found in
+`E0516` the same day, where three engines printed nothing for a struct and the
+oracle read it as agreement. Asking both where a sum came round is what makes
+agreeing mean something.
+
+| what happened | what is said |
 | --- | --- |
-| the two disagree | `Severity::Mine` — ours, and it says so |
+| they wrote different things | `Severity::Mine` — ours, and it says so |
+| they wrote the same, and disagree about the sums | `Severity::Mine` as well |
 | they agree, and a bound was right | the bound stands as it was |
 | they agree, and a bound was wrong | the bound is dropped |
-| only one engine ran | the same, and nothing else |
+| they agree, and a sum came round nothing suspected | `E0537` |
+| only one engine ran | bounds may be dropped, and nothing else is said |
 
-## What is not built: standing a bound up
+The last row is what happens with no runtime to link against. One engine may let
+something through, which is what already happens wherever a bound gives up, but
+it may not refuse anybody's program.
 
-Reporting a sum nothing suspected is written and then taken out again, and why
-is worth keeping.
+The bounds' own two diagnostics, `E0534` and `W0001`, are held back by the
+checker in `CheckResult::aboutSums` rather than reported: a refusal that has
+already stopped compilation cannot be overturned by a run that has not happened
+yet, and the first attempt at a test for this ran straight into that.
 
-The two runs are compared by **what they wrote**. Writing the same thing means
-they agreed about every value that reached the output. It says nothing about a
-value that never got written down — and a sum that comes round in such a value
-leaves *both* runs silent, so they "agree" without either having answered.
-Refusing on that is one engine refusing somebody's program.
+### Which sums are anybody's business
 
-It is the same shape as the hole found in `E0516` the same day: three engines
-printed nothing for a struct, in the same way, and the oracle read that as
-agreement. **Two engines silent in the same way is not two engines agreeing.**
+`E0537` is only ever said about a sum whose answer becomes a **name** that did
+not say `wrapping` — `CheckResult::intoPlainNames`. Both runs watch every sum,
+including the ones meant to come round, because a checksum coming round is the
+checksum working and the run is not the place to decide that.
 
-The oracle said so too, in numbers: with it in, 78 of 200 generated cases were
-refused where they had run before, every one of them on this.
+The narrowing is not tidiness. `wrapping` is written on a name, and a sum
+happens between values, so a sum whose answer never becomes a name has nowhere
+for the word to go:
 
-So standing a bound up waits on the built run being able to say *where* a sum
-came round, rather than only what the program printed. That means checked
-arithmetic in the ahead build — the same backend and the same optimiser with
-overflow checks added, the way a debug build has them. Whether that counts as a
-third way of making code, which running twice exists to rule out, is the open
-question.
+```
+var.mut.bool 'b' = [(int16:*234*) >== ('n' x *4*)];
+```
+
+That multiply may come round, and there is nothing anybody could write to say it
+is meant to. Refusing it would be handing the reader a diagnostic they cannot
+answer. The oracle put a number on how common that is: reported everywhere, 82
+of 200 generated programs were refused, nearly all of them for sums exactly like
+that one.
+
+**So `wrapping` not reaching every sum is an open question about the language,
+not a gap in this pass.** Until it is answered, a sum with no name at the end of
+it is watched, agreed about, and said nothing about.
 
 ## A `loop.range` is not limited
 

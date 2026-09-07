@@ -369,7 +369,8 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   // an unoptimised build would leave the optimiser as the one thing nothing
   // checks — which is the same reason the interpreters get the program as
   // written and the compiler gets what the optimiser made of it.
-  const xag::NativeResult emitted = xag::emitObject(mir, true, object);
+  const xag::NativeResult emitted =
+      xag::emitObject(mir, true, object, xag::Watching::Yes);
   if (!emitted.ok()) {
     out.trouble = emitted.trouble;
     std::remove(object.c_str());
@@ -388,7 +389,9 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   // Its own output, read back. Whatever it writes to the terminal it would
   // write when the reader ran it, and that is not this moment.
   const std::string said = stem + ".out";
-  const std::string start = "\"" + stem + "\" > \"" + said + "\" 2>/dev/null";
+  const std::string noticed = stem + ".round";
+  const std::string start =
+      "\"" + stem + "\" > \"" + said + "\" 2> \"" + noticed + "\"";
   const int status = std::system(start.c_str());
   std::remove(stem.c_str());
 
@@ -396,6 +399,27 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   out.said.assign(std::istreambuf_iterator<char>(reading), std::istreambuf_iterator<char>());
   reading.close();
   std::remove(said.c_str());
+
+  // Where it said a sum came round, one line each, in the order they happened.
+  // Kept apart from what the program wrote, because a program's own output is
+  // its answer and this is the compiler talking to itself.
+  std::ifstream saying(noticed);
+  std::string line;
+  while (std::getline(saying, line)) {
+    const std::string mark = "xag-came-round ";
+    if (line.rfind(mark, 0) != 0)
+      continue;
+    const unsigned at =
+        static_cast<unsigned>(std::strtoul(line.c_str() + mark.size(), nullptr, 10));
+    bool already = false;
+    for (const xag::Span &had : out.cameRound)
+      if (had.begin == at)
+        already = true;
+    if (!already)
+      out.cameRound.push_back(xag::Span{at, at});
+  }
+  saying.close();
+  std::remove(noticed.c_str());
 
   if (status != 0) {
     out.trouble = "it stopped, having written " + std::to_string(out.said.size()) +
@@ -448,7 +472,8 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // been read and found sound. A file holding both a mistake and a very long
   // loop has to report the mistake, and it cannot if it is still counting.
   const xag::AheadResult ran =
-      xag::ahead(source, built.mir, checked.aboutSums, buildAndStart);
+      xag::ahead(source, built.mir, checked.aboutSums, checked.intoPlainNames,
+                 buildAndStart);
   if (report(source, ran.diagnostics) != 0)
     return false;
   status = 0;

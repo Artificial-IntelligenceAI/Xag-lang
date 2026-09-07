@@ -1099,6 +1099,10 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   A struct and an `or-nothing` wrote nothing at all until 2026-09-07, in all
   three engines alike — so the oracle saw agreement and not a hole.
 - **Visibility.** `export` and `program` wait on there being more than one file.
+- **`wrapping` on a sum with no name.** The word is written where a name is
+  declared, and a sum happens between values. `('n' x *4*)` inside a comparison
+  may come round and there is nothing anybody could write to say it is meant to,
+  so nothing is said about it — see `design/compile-time.md`.
 - **`UNSAFE`.** The spelling is settled: capitals, like `START`. What it permits
   is not, because today nothing needs permitting — there are no raw addresses,
   no calls out to C, and nothing the checker refuses that a program could ask to
