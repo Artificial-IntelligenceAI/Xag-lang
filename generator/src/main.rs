@@ -51,8 +51,16 @@ struct Finding {
     odd: Option<&'static str>,
 }
 
-/// Which engine, if any, is the one out of step. Two engines can only say that
-/// something is wrong; three can say which.
+/// Which engine, if any, is the one out of step.
+///
+/// Out of step is not the same as wrong, and it is worth not confusing them. On
+/// 2026-09-07 two engines shared a mistake about printing a borrowed number —
+/// they had shared it for months — and the third was right. A vote between them
+/// would have named the correct one as the odd one out, and so would the usual
+/// tie-break of believing the test interpreter, which was one of the two.
+///
+/// So three engines can say *that* they disagree and *which one stands apart*.
+/// Which one is right is a question for whoever reads the program.
 fn oddOneOut(answers: &[(&'static str, Answer)]) -> Option<&'static str> {
     for i in 0..answers.len() {
         let mut agrees = 0;
@@ -227,7 +235,11 @@ fn main() {
         println!("\n──────── seed {} ────────", finding.seed);
         println!("{}", finding.program);
         match finding.odd {
-            Some(name) => println!(">>> {name} is the one out of step; the other two agree.\n"),
+            Some(name) => println!(
+                ">>> {name} is the one out of step; the other two agree.\n\
+                 >>> That is not the same as {name} being wrong: a mistake two of\n\
+                 >>> them share makes the third the odd one.\n"
+            ),
             None => println!(">>> all three say something different.\n"),
         }
         for (name, answer) in &finding.answers {
