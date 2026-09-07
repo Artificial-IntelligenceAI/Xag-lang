@@ -285,6 +285,27 @@ void onTurningNumbersIntoText() {
         "  print.stdout['a' str:* * 'c' str:* * convert-to-str['c'] \\n]; }\n"
         "START { var.int64 'a' = [*300*]; var.deci64 'c' = [*1.10*];\n"
         "  show[ref 'a', ref 'c']; }\n");
+  // Arithmetic and comparison on borrowed numbers, and a number written
+  // through a loan. Every loan any program had made was a loan of text until
+  // one lent a number, and the sum of two borrowed numbers was no step at all.
+  AGREE("fn.nothing 'add-into' [refmut.int64 'total', ref.int64 'step'] {\n"
+        "  loop.range.int64 'i' = [*1*, *3*] { set 'total' = ['total' + 'step']; } }\n"
+        "START { var.mut.int64 't' = [*0*]; var.int64 's' = [*3*];\n"
+        "  add-into[refmut 't', ref 's'];\n"
+        "  print.stdout['t' \\n]; }\n");
+  AGREE("fn.nothing 'scale' [refmut.bin64 'x', ref.deci64 'd'] {\n"
+        "  set 'x' = ['x' x *2.5*];\n"
+        "  print.stdout['x' str:* * ('d' + deci64:*0.01*) \\n]; }\n"
+        "START { var.mut.bin64 'x' = [*0.1*]; var.deci64 'd' = [*1.10*];\n"
+        "  scale[refmut 'x', ref 'd'];\n"
+        "  print.stdout['x' \\n]; }\n");
+  AGREE("fn.str 'order' [ref.int64 'a', ref.int64 'b'] {\n"
+        "  if 'a' < 'b' { give [*less*]; }\n"
+        "  if 'a' == 'b' { give [*same*]; }\n"
+        "  give [*more*]; }\n"
+        "START { var.int64 'p' = [*2*]; var.int64 'q' = [*10*];\n"
+        "  print.stdout[(order[ref 'p', ref 'q']) str:* * (order[ref 'q', ref 'p'])"
+        " str:* * (order[ref 'p', ref 'p']) \\n]; }\n");
   // And the other way, under its new name.
   AGREE("START { var.str 't' = [*250*];\n"
         "  var.or-nothing.uint8 'n' = [convert-to-number[ref 't']];\n"

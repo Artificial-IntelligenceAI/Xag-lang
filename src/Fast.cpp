@@ -616,7 +616,12 @@ private:
                            op == "==" || op == "!==";
     const bool wholes = isWhole(given) || given == Type::Bool;
     const bool logical = op == "and" || op == "or";
-    const bool textual = left == "str" || isLoan(spelled(value.operands[0].type));
+    // `left` has already had its loan taken off, so this asks what is behind
+    // the loan rather than whether there is one. It used to take any loan for
+    // a loan of text, which was true of every loan any program had made until
+    // one lent a number — and then a sum of two borrowed numbers was no step
+    // at all, and its place stayed at zero.
+    const bool textual = left == "str";
 
     // A whole number written on the right is read from the pool by the step
     // that uses it, rather than loaded into a slot by a step of its own.
