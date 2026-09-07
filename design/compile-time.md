@@ -148,6 +148,44 @@ checker in `CheckResult::aboutSums` rather than reported: a refusal that has
 already stopped compilation cannot be overturned by a run that has not happened
 yet, and the first attempt at a test for this ran straight into that.
 
+### A loop taken out of the program it was written in
+
+A program that reads cannot be run here — what it does depends on what it is
+given. Its loops still can: **what a loop is entered with is written down even
+where the program's input is not.**
+
+```
+START {
+    var.mut.int8 'total' = [*0*];
+    loop.while read.stdin[] holds 'line' { print.stdout['line' \n]; }
+    loop.range.int8 'i' = [*1*, *100*] {
+        set 'total' = ['total' + 'i' / *50*];      # bounded at 200, reaches 52
+    }
+}
+```
+
+`src/Loops.cpp` finds the counted loop, sees `*1*`, `*100*` and `*0*` written
+down for everything it is entered with, and builds it into a program of its own
+called `START`. That program is run both ways like any other.
+
+A loop qualifies on three rules, each about being *sure* rather than about being
+*able*:
+
+- **Everything it touches is a plain number or a `bool`.** Text, a `many`, a
+  struct or a borrow would have to be built up again outside the loop, and
+  handing a loop something it does not really own is how a compile-time run
+  starts freeing what a program still holds.
+- **It calls nothing.** A call reaches code with its own state and its own
+  reads, and following it is following the whole program again.
+- **Every value it is entered with is assigned exactly once outside the loop,
+  and assigned a written value.** One assignment outside means no other value
+  can reach it, which settles the question without asking which paths run.
+
+**A lifted loop may only drop a bound, never raise one.** It says what happens
+when the loop is entered; whether it is *ever* entered is a question about the
+program around it, which was not run. Clearing a suspicion needs only that the
+loop is harmless when it runs; raising one would need to know that it does.
+
 ### Which sums are anybody's business
 
 `E0537` is only ever said about a sum whose answer becomes a **name** that did

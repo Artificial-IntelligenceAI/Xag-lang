@@ -94,6 +94,7 @@ add_library(xagfront STATIC
   src/Interpret.cpp
   src/Ahead.cpp
   src/Fold.cpp
+  src/Loops.cpp
   src/Regions.cpp
   src/Fast.cpp)
 target_include_directories(xagfront PUBLIC include)

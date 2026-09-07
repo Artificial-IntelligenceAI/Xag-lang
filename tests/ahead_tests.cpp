@@ -1,11 +1,14 @@
 #include "xag/Ahead.h"
+#include "xag/Interpret.h"
 #include "xag/Check.h"
 #include "xag/Fold.h"
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Own.h"
 #include "xag/Parser.h"
+#include "xag_runtime.h"
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 
@@ -32,30 +35,32 @@ struct Settled {
   }
 };
 
-// A second engine that is not one: it says what the test wants it to say, so
-// what is tested here is what `ahead` does with two answers rather than whether
-// the backend produces the right one. Every program below prints nothing, so
-// agreeing means saying nothing.
-// Agreeing means agreeing about both questions: what was written, and where a
-// sum came round. Every program below prints nothing, so the first is empty.
-xag::Building agrees(std::vector<xag::Span> cameRound = {}) {
-  return [cameRound](const xag::Mir &) {
+// A second engine that is not one: it runs the same interpreter, so it always
+// agrees. What that tests is the plumbing — which answers are compared, and what
+// is done with the outcome — not whether two real engines agree, which no fake
+// can tell you.
+//
+// It has to actually run, rather than report nothing. A fake that always says
+// "no sums came round" disagrees with the interpreter about every program that
+// overflows, and a test then passes because the two disagreed rather than
+// because the answer was right. One did.
+xag::Building agrees() {
+  return [](const xag::Mir &mir) {
     xag::Compiled out;
     out.asked = true;
-    out.ran = true;
-    out.cameRound = cameRound;
-    return out;
-  };
-}
-
-// Wrote the same thing, and saw a different set of sums come round. Only a
-// checked build can disagree this way, and it is the disagreement that would
-// otherwise have been silence.
-xag::Building agreesButSawNoSums() {
-  return [](const xag::Mir &) {
-    xag::Compiled out;
-    out.asked = true;
-    out.ran = true;
+    std::FILE *sink = std::tmpfile();
+    xag_set_output(sink);
+    const xag::InterpretResult said = xag::interpretWatching(mir);
+    xag_set_output(nullptr);
+    std::fflush(sink);
+    std::rewind(sink);
+    char buffer[4096];
+    size_t got = 0;
+    while ((got = std::fread(buffer, 1, sizeof(buffer), sink)) > 0)
+      out.said.append(buffer, got);
+    std::fclose(sink);
+    out.ran = said.ran;
+    out.cameRound = said.cameRound;
     return out;
   };
 }
@@ -151,6 +156,33 @@ void aWarningTheRunAnswersGoesAway() {
   CHECK(s.said.empty());
 }
 
+// A program that reads cannot be run, and a loop inside it still can: what the
+// loop is entered with is written down even where the program's input is not.
+void aLoopAfterAReadStandsOnItsOwn() {
+  const std::string reads =
+      "START {\n"
+      "    var.mut.int8 'total' = [*0*];\n"
+      "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n"
+      "    loop.range.int8 'i' = [*1*, *100*] {\n"
+      "        set 'total' = ['total' + 'i' / *50*];\n"
+      "    }\n}\n";
+  // The bound says at most 200 and refuses an `int8`. The loop reaches 52.
+  CHECK(settle(reads).held.size() == 1);
+  CHECK(settle(reads).code(0) == "E0534");   // one engine may not clear it
+  CHECK(settle(reads, agrees()).said.empty()); // two may
+
+  // And one that really does come round is still refused, read or no read.
+  const std::string over =
+      "START {\n"
+      "    var.mut.int8 'total' = [*0*];\n"
+      "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n"
+      "    loop.range.int8 'i' = [*1*, *10*] {\n"
+      "        set 'total' = ['total' + *20*];\n"
+      "    }\n}\n";
+  CHECK(settle(over, agrees()).said.size() == 1);
+  CHECK(settle(over, agrees()).code(0) == "E0534");
+}
+
 // Nothing is run when what it would do depends on what it is given.
 void aProgramThatReadsIsNotRun() {
   const Settled s = settle("fn.int8 'twice' [int8 'n'] { give ['n' x *2*]; }\n"
@@ -239,6 +271,7 @@ int main() {
   aBoundThatWasWrongIsDropped();
   aBoundThatWasRightStands();
   aWarningTheRunAnswersGoesAway();
+  aLoopAfterAReadStandsOnItsOwn();
   aProgramThatReadsIsNotRun();
   aRunThatStoppedChangesNothing();
   aProgramWithNothingHeldIsNotRun();

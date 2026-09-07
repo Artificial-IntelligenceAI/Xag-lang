@@ -1,6 +1,7 @@
 #include "xag/Ahead.h"
 
 #include "xag/Interpret.h"
+#include "xag/Loops.h"
 #include "xag_runtime.h"
 
 #include <cstdio>
@@ -135,14 +136,84 @@ Diagnostic disagreedAboutSums(const std::vector<Span> &reading,
 
 } // namespace
 
+// One run of one program, both ways, and whether the two agreed. `cameRound` is
+// where they agreed a sum came round; it means nothing unless `agreed`.
+struct Both {
+  bool agreed = false;
+  std::vector<Span> cameRound;
+};
+
+Both runBothWays(const Mir &mir, const Building &building) {
+  Both out;
+  std::FILE *sink = std::tmpfile();
+  if (!sink)
+    return out;
+  xag_set_output(sink);
+  const InterpretResult reading = interpretWatching(mir);
+  xag_set_output(nullptr);
+  const std::string said = drain(sink);
+  std::fclose(sink);
+  if (!reading.ran)
+    return out;
+
+  // Without a second engine there is nothing to agree with, and one engine may
+  // not be believed about anything it would refuse a program for.
+  if (!building)
+    return out;
+  const Compiled twice = building(mir);
+  if (!twice.asked || !twice.ran || twice.said != said ||
+      !samePlaces(reading.cameRound, twice.cameRound))
+    return out;
+
+  out.agreed = true;
+  out.cameRound = reading.cameRound;
+  return out;
+}
+
+// Whether some loop, run on its own, showed that this bound was worrying about
+// nothing. The bound points at a statement; the loop holding that statement is
+// the one that answers for it.
+bool clearedByALiftedLoop(const Mir &mir, const Diagnostic &bound,
+                          const Building &building) {
+  for (const Lifted &loop : loopsThatStandAlone(mir)) {
+    bool holdsIt = false;
+    for (const Span &place : loop.places)
+      if (place.begin >= bound.span.begin && place.begin < bound.span.end)
+        holdsIt = true;
+    if (!holdsIt)
+      continue;
+    const Both both = runBothWays(loop.mir, building);
+    if (both.agreed && !inside(bound.span, both.cameRound))
+      return true;
+  }
+  return false;
+}
+
 AheadResult ahead(const Source &, const Mir &mir,
                   const std::vector<Diagnostic> &aboutSums,
                   const std::vector<Span> &intoPlainNames, const Building &building) {
   AheadResult out;
   // Something to settle, or a second engine to settle it with. With neither,
   // running the program would answer a question nobody asked.
-  if ((aboutSums.empty() && !building) || !hasStart(mir) || readsInput(mir)) {
+  if ((aboutSums.empty() && !building) || !hasStart(mir)) {
     out.diagnostics = aboutSums;
+    return out;
+  }
+
+  // A program that reads cannot be run here, and the loops inside it still can.
+  // What a loop is entered with is written down even where what the program is
+  // given is not, so each one is taken out and run as a program of its own.
+  //
+  // Only to *drop* a bound. A lifted loop says what happens when the loop is
+  // entered, and whether it is ever entered is a question about the program
+  // around it — so it may clear a suspicion and may not raise one.
+  if (readsInput(mir)) {
+    std::vector<Diagnostic> left;
+    for (const Diagnostic &bound : aboutSums)
+      if (!clearedByALiftedLoop(mir, bound, building))
+        left.push_back(bound);
+    out.diagnostics = left;
+    out.ran = left.size() != aboutSums.size();
     return out;
   }
 
