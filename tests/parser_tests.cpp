@@ -245,6 +245,9 @@ void aChainHasOneOrder() {
 void visibilityHasNowhereToGoYet() {
   CHECK(run("fn.export.int64 'f' [] { give [*7*]; }\n").code(0) == "E0206");
   CHECK(run("const.program.int64 'L' = [*1*];\n").code(0) == "E0206");
+  // And it is not a word a file may open with either, so there is still no way
+  // to write more than one file.
+  CHECK(run("export.fn.int64 'f' [] { give [*1*]; }\n").code(0) == "E0104");
 }
 
 void aLoopSaysWhichKindItIs() {
