@@ -95,7 +95,8 @@ compiler could ask for.
 
 ## A `loop.range` is not limited
 
-**Decided by Tankun, 2026-09-07: no limit by default.** A `loop.range` has its
+**Decided by Tankun, 2026-09-07: not limited.** Not the running, and not the
+loop either — a range is never refused for being large. A `loop.range` has its
 ends written down, so it always finishes, and there is no halting problem to
 defend against — only patience, which is the thing this language already spends.
 
@@ -110,6 +111,12 @@ is that this is exactly right: a loop that takes forever to compile is a loop
 that takes forever to run, and finding that out during the build, on your own
 machine, beats finding it out after shipping. The writer set the limit when they
 wrote the ends; the compiler does not get a second opinion.
+
+One thing does follow from it: **checking finishes before any loop runs.** A file
+with a mistake on one line and a very long loop on another has to report the
+mistake, and it cannot if it is still counting. Every diagnostic the checker
+would give is given first, and running is what happens to a program that has
+already been read and found sound.
 
 The trip count is worth computing anyway, because it is free: two written
 numbers, multiplied through any nesting, before a single iteration runs. It is
