@@ -59,7 +59,7 @@ std::string built(const std::string &text) {
     return "(did not reach it)";
   xag::MirResult made = xag::build(source, parsed.program, checked);
   xag::elaborate(made.mir);
-  const xag::FoldResult folded = xag::fold(source, made.mir);
+  const xag::FoldResult folded = xag::fold(source, made.mir, xag::Rewriting::Yes);
   return folded.diagnostics.empty() ? "" : folded.diagnostics.front().code;
 }
 

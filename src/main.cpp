@@ -232,7 +232,7 @@ std::string runtimeLibrary() {
 }
 
 bool ready(const std::string &path, std::string &text, xag::MirResult &built,
-           int &status);
+           int &status, xag::Rewriting rewriting = xag::Rewriting::No);
 
 int lexFile(const std::string &path) {
   std::string text;
@@ -281,6 +281,11 @@ int checkFile(const std::string &path) {
 int runFile(const std::string &path) {
   if (!decimalIsThere(path))
     return 1;
+  // Given the program as written, not what the optimiser made of it. The
+  // compiler gets the optimised one, so the oracle is comparing the two on
+  // every case it runs — and a mistake in the folding shows up as a
+  // disagreement rather than as three engines agreeing on the same wrong
+  // number.
   // The same road every other engine takes. Running had a pipeline of its own,
   // which had drifted: it never asked the region pass anything, so `xagc run`
   // ran programs that `xagc check` and `xagc build` both refused — and it is
@@ -317,7 +322,8 @@ int fastFile(const std::string &path) {
 }
 
 // Everything a program has to survive before any engine sees it.
-bool ready(const std::string &path, std::string &text, xag::MirResult &built, int &status) {
+bool ready(const std::string &path, std::string &text, xag::MirResult &built, int &status,
+           xag::Rewriting rewriting) {
   status = 1;
   if (!readSource(path, text))
     return false;
@@ -344,7 +350,7 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // What is already written down is worked out here, once, rather than by every
   // engine on every run — and what is written down and certainly wrong is
   // refused rather than left to stop when it is reached.
-  const xag::FoldResult folded = xag::fold(source, built.mir);
+  const xag::FoldResult folded = xag::fold(source, built.mir, rewriting);
   if (report(source, folded.diagnostics) != 0)
     return false;
 
@@ -363,7 +369,7 @@ int irFile(const std::string &path, bool optimise) {
   std::string text;
   xag::MirResult built;
   int status = 0;
-  if (!ready(path, text, built, status))
+  if (!ready(path, text, built, status, xag::Rewriting::Yes))
     return status;
   const xag::NativeResult emitted = xag::emitIr(built.mir, optimise);
   if (!emitted.ok()) {
@@ -380,7 +386,7 @@ int buildFile(const std::string &path) {
   std::string text;
   xag::MirResult built;
   int status = 0;
-  if (!ready(path, text, built, status))
+  if (!ready(path, text, built, status, xag::Rewriting::Yes))
     return status;
 
   const std::string stem = path.substr(0, path.rfind('.'));
@@ -436,9 +442,10 @@ int mirFile(const std::string &path) {
   xag::elaborate(built.mir);
   if (!built.ok())
     return report(source, built.diagnostics);
-  // Folded before it is shown, because what is printed here should be what the
-  // engines are handed rather than what they were nearly handed.
-  const xag::FoldResult folded = xag::fold(source, built.mir);
+  // Shown as the interpreters are given it — the program as written, refused
+  // where it is certainly wrong but not rewritten. What the optimiser makes of
+  // it afterwards is the compiler's business, and `xagc ir` shows that.
+  const xag::FoldResult folded = xag::fold(source, built.mir, xag::Rewriting::No);
   if (!folded.ok())
     return report(source, folded.diagnostics);
   xag::print(built.mir, std::cout);

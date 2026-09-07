@@ -46,7 +46,8 @@ XagInt wholeFrom(const std::string &text, Type type) {
 
 class Folder {
 public:
-  Folder(const Source &source, Mir &mir) : source_(source), mir_(mir) {}
+  Folder(const Source &source, Mir &mir, Rewriting rewriting)
+      : source_(source), mir_(mir), rewriting_(rewriting) {}
 
   FoldResult run() {
     for (Body &body : mir_.bodies) {
@@ -84,6 +85,7 @@ private:
   const Source &source_;
   Mir &mir_;
   Body *body_ = nullptr;
+  Rewriting rewriting_ = Rewriting::Yes;
   // How many places a `many` has, where the program said so where it was made.
   std::unordered_map<unsigned, std::int64_t> lengths_;
   // What a local is known to hold, when it is written once and that once is a
@@ -142,6 +144,8 @@ private:
         if (found != lengths_.end()) {
           const XagInt at = wholeFrom(s.at.written, Type::Int64);
           if (at >= 0 && at < found->second) {
+            if (rewriting_ == Rewriting::No)
+              return false;
             s.value.settled = true;
             return true;
           }
@@ -160,7 +164,7 @@ private:
 
     // What is known stands in for the name that held it.
     for (Operand &operand : value.operands)
-      if (operand.kind == OperandKind::Copy) {
+      if (rewriting_ == Rewriting::Yes && operand.kind == OperandKind::Copy) {
         const auto found = known_.find(operand.local);
         if (found != known_.end()) {
           operand = Operand{OperandKind::Written, 0, found->second, operand.type};
@@ -200,6 +204,8 @@ private:
     for (const Operand &one : value.operands)
       if (!written(one))
         return false;
+    if (rewriting_ == Rewriting::No)
+      return false;
     std::string whole;
     for (const Operand &one : value.operands)
       whole += unescaped(one.written);
@@ -234,6 +240,8 @@ private:
     const XagInt at = wholeFrom(value.operands[1].written, Type::Int64);
     if (at >= 0 && at < found->second) {
       // Asked and answered here, so nothing has to ask again while it runs.
+      if (rewriting_ == Rewriting::No)
+        return false;
       const bool already = value.settled;
       value.settled = true;
       return !already;
@@ -296,6 +304,8 @@ private:
     else
       return false; // a comparison answers a `bool`, and is left alone for now
 
+    if (rewriting_ == Rewriting::No)
+      return false;
     Operand answer{OperandKind::Written, 0, folded, value.type};
     value = RValue{RValueKind::Use, {}, {}, 0, {std::move(answer)}, value.type};
     return true;
@@ -304,6 +314,8 @@ private:
 
 } // namespace
 
-FoldResult fold(const Source &source, Mir &mir) { return Folder(source, mir).run(); }
+FoldResult fold(const Source &source, Mir &mir, Rewriting rewriting) {
+  return Folder(source, mir, rewriting).run();
+}
 
 } // namespace xag

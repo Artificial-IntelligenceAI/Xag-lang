@@ -32,7 +32,7 @@ void emits(const std::string &program, const std::string &wanted, int line) {
   xag::elaborate(built.mir);
   // The same road the compiler takes. Without this the module under test is not
   // the module that gets built.
-  xag::fold(source, built.mir);
+  xag::fold(source, built.mir, xag::Rewriting::Yes);
 
   for (bool optimise : {false, true}) {
     const xag::NativeResult emitted = xag::emitIr(built.mir, optimise);
@@ -75,7 +75,7 @@ void rejects(const std::string &program, const std::string &unwanted, int line) 
   xag::elaborate(built.mir);
   // The same road the compiler takes. Without this the module under test is not
   // the module that gets built.
-  xag::fold(source, built.mir);
+  xag::fold(source, built.mir, xag::Rewriting::Yes);
   const xag::NativeResult emitted = xag::emitIr(built.mir, false);
   if (!emitted.ok()) {
     std::cerr << "FAIL line " << line << ": " << emitted.trouble << '\n';
