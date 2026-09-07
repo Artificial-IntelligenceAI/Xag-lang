@@ -83,6 +83,33 @@ Ran run(const std::string &text) {
   return out;
 }
 
+// The same run, watching. Answers how many places a sum came round, and -1 when
+// the program did not get as far as running.
+int watched(const std::string &text) {
+  const xag::Source source("test.xag", text);
+  const xag::LexResult lexed = xag::lex(source);
+  if (!lexed.ok())
+    return -1;
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  if (!parsed.ok())
+    return -1;
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  if (!checked.ok())
+    return -1;
+  const xag::OwnResult owned = xag::own(source, parsed.program);
+  if (!owned.ok())
+    return -1;
+  xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::elaborate(built.mir);
+
+  std::FILE *sink = std::tmpfile();
+  xag_set_output(sink);
+  const xag::InterpretResult result = xag::interpretWatching(built.mir);
+  xag_set_output(nullptr);
+  std::fclose(sink);
+  return result.ran ? static_cast<int>(result.cameRound.size()) : -1;
+}
+
 void checkSays(const std::string &program, const std::string &expected, int line) {
   const Ran r = run(program);
   if (!r.compiled) {
@@ -566,6 +593,61 @@ void itKnowsWhatItWasGiven() {
 
 } // namespace
 
+// Watching does not change the answer, only whether the place is remembered.
+void itNoticesASumComeRound() {
+  // `wrapping` is what a program says when it means to come round, and it is
+  // still watched: the word says not to *complain*, and this is not complaining.
+  CHECK(watched("START {\n"
+                "    var.mut.wrapping.int8 'n' = [*127*];\n"
+                "    var.int8 'one' = [*1*];\n"
+                "    set 'n' = ['n' + 'one'];\n}\n") == 1);
+
+  // Nothing came round here, and the same program is watched all the same.
+  CHECK(watched("START {\n"
+                "    var.mut.int8 'n' = [*1*];\n"
+                "    var.int8 'one' = [*1*];\n"
+                "    set 'n' = ['n' + 'one'];\n}\n") == 0);
+
+  // The one the bounds get wrong: 100 trips, at most 2 each by the bound, and
+  // 52 in fact. Nothing comes round, and this is the run that can say so.
+  //
+  // `wrapping` is here only to get past the bound, which refuses this program
+  // (`E0534`) before anything can run and show it is fine. That is the ordering
+  // the pass above this will have to fix: a bound cannot be the last word if a
+  // run is meant to overturn it.
+  CHECK(watched("START {\n"
+                "    var.mut.wrapping.int8 'total' = [*0*];\n"
+                "    loop.range.int8 'i' = [*1*, *100*] {\n"
+                "        set 'total' = ['total' + 'i' / *50*];\n"
+                "    }\n}\n") == 0);
+
+  // And one that really does come round, inside a loop: reported once, not once
+  // per trip.
+  CHECK(watched("START {\n"
+                "    var.mut.wrapping.int8 'total' = [*0*];\n"
+                "    loop.range.int8 'i' = [*1*, *100*] {\n"
+                "        set 'total' = ['total' + 'i'];\n"
+                "    }\n}\n") == 1);
+
+  // Taking away below nothing is a sum that does not fit, the same as going
+  // over the top.
+  CHECK(watched("START {\n"
+                "    var.mut.wrapping.uint8 'n' = [*0*];\n"
+                "    var.uint8 'one' = [*1*];\n"
+                "    set 'n' = ['n' - 'one'];\n}\n") == 1);
+
+  // Multiplying, and a width where nothing is cut: a `int64` sum that fits is
+  // not noticed because the cut changed nothing.
+  CHECK(watched("START {\n"
+                "    var.mut.wrapping.int8 'n' = [*100*];\n"
+                "    var.int8 'two' = [*2*];\n"
+                "    set 'n' = ['n' x 'two'];\n}\n") == 1);
+  CHECK(watched("START {\n"
+                "    var.mut.int64 'n' = [*100*];\n"
+                "    var.int64 'two' = [*2*];\n"
+                "    set 'n' = ['n' x 'two'];\n}\n") == 0);
+}
+
 int main() {
   itPrints();
   itCounts();
@@ -593,6 +675,8 @@ int main() {
   itWritesThroughALoan();
   itReadsWhatItIsGiven();
   itKnowsWhatItWasGiven();
+
+  itNoticesASumComeRound();
 
   if (failures == 0)
     std::cout << "all interpreter tests passed\n";

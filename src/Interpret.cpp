@@ -38,7 +38,7 @@ struct Frame {
 
 class Machine {
 public:
-  explicit Machine(const Mir &mir) : mir_(mir) {}
+  Machine(const Mir &mir, bool watching) : mir_(mir), watching_(watching) {}
 
   InterpretResult run() {
     const Body *start = find("START");
@@ -50,14 +50,38 @@ public:
     if (trouble_.empty() && !xag_balance_is_clear())
       trouble_ = "the program ended still holding " +
                  std::to_string(xag_live_allocations()) + " thing(s)";
-    return InterpretResult{trouble_.empty(), trouble_};
+    return InterpretResult{trouble_.empty(), trouble_, cameRound_};
   }
 
 private:
   const Mir &mir_;
+  const bool watching_ = false;
   std::vector<Frame> frames_;
   std::string trouble_;
   uint64_t steps_ = 0;
+  // Set where the sum happened, read where the statement is — an RValue has no
+  // span of its own, and the statement holding it does.
+  bool roundedHere_ = false;
+  std::vector<Span> cameRound_;
+
+  // A sum came round exactly when cutting it to the type changed it. Nothing
+  // here decides what the answer is; the answer was already decided above.
+  void notice(XagInt raw, XagInt kept) {
+    if (watching_ && raw != kept)
+      roundedHere_ = true;
+  }
+
+  // One statement may hold several sums and is reported once. A statement run
+  // a million times round a loop is reported once too.
+  void roundedAt(Span span) {
+    if (!roundedHere_)
+      return;
+    roundedHere_ = false;
+    for (const Span &already : cameRound_)
+      if (already.begin == span.begin)
+        return;
+    cameRound_.push_back(span);
+  }
 
   static constexpr uint64_t kBudget = 50u * 1000u * 1000u;
 
@@ -549,12 +573,19 @@ private:
       const bool unsignedCompare = isWhole(given) && !isSigned(given);
       const __uint128_t ux = static_cast<__uint128_t>(x), uy = static_cast<__uint128_t>(y);
 
-      if (op == "+")
-        answer.number = xag_int_fit(static_cast<XagInt>(ux + uy), width, sign);
-      else if (op == "-")
-        answer.number = xag_int_fit(static_cast<XagInt>(ux - uy), width, sign);
-      else if (op == "x")
-        answer.number = xag_int_fit(static_cast<XagInt>(ux * uy), width, sign);
+      if (op == "+") {
+        const XagInt raw = static_cast<XagInt>(ux + uy);
+        answer.number = xag_int_fit(raw, width, sign);
+        notice(raw, answer.number);
+      } else if (op == "-") {
+        const XagInt raw = static_cast<XagInt>(ux - uy);
+        answer.number = xag_int_fit(raw, width, sign);
+        notice(raw, answer.number);
+      } else if (op == "x") {
+        const XagInt raw = static_cast<XagInt>(ux * uy);
+        answer.number = xag_int_fit(raw, width, sign);
+        notice(raw, answer.number);
+      }
       else if (op == "/") answer.number = xag_int_div(x, y, width, sign);
       else if (op == "mod") answer.number = xag_int_mod(x, y, width, sign);
       else if (op == "^") answer.number = xag_int_pow(x, y, width, sign);
@@ -780,6 +811,7 @@ private:
           continue;
         }
         Value produced = evaluate(s.value);
+        roundedAt(s.span);
         if (!trouble_.empty())
           break;
         put(s.place, s.parts, std::move(produced));
@@ -821,6 +853,12 @@ private:
 
 } // namespace
 
-InterpretResult interpret(const Mir &mir) { return Machine(mir).run(); }
+InterpretResult interpret(const Mir &mir) {
+  return Machine(mir, /*watching=*/false).run();
+}
+
+InterpretResult interpretWatching(const Mir &mir) {
+  return Machine(mir, /*watching=*/true).run();
+}
 
 } // namespace xag
