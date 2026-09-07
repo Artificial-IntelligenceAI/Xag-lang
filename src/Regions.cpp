@@ -86,7 +86,7 @@ private:
           continue;
         if (s.value.kind == RValueKind::Ref) {
           loans_.push_back(
-              Loan{s.value.local, s.value.op == "refmut", s.span, block.id, at});
+              Loan{s.value.local, s.value.op == "loanmut", s.span, block.id, at});
         } else if (reachesInside(s.value) && canHold(s.place) &&
                    !s.value.operands.empty() &&
                    s.value.operands[0].kind != OperandKind::Written) {
@@ -127,7 +127,7 @@ private:
     }
     std::vector<char> gathered(loans_.size(), 0);
     // Only something that *is* a loan can be holding one. A number that came
-    // out of `count[ref 'x']` is a number, and the loan it was worked out from
+    // out of `count[loan 'x']` is a number, and the loan it was worked out from
     // ended at the semicolon — reading it as still open made the pass refuse
     // programs that were perfectly good.
     if (!canHold(s.place)) {
@@ -138,7 +138,7 @@ private:
     if (s.value.kind == RValueKind::Ref) {
       for (unsigned i = 0; i < loans_.size(); ++i)
         if (loans_[i].referent == s.value.local && loans_[i].span.begin == s.span.begin &&
-            loans_[i].writes == (s.value.op == "refmut"))
+            loans_[i].writes == (s.value.op == "loanmut"))
           gathered[i] = 1;
       // Lending something that is itself holding a loan carries that loan along
       // with it: what the new one points at is only good while the old one is.
@@ -327,7 +327,7 @@ private:
       // Lending it again, when one of the two is for writing.
       if (s.kind == StatementKind::Assign && s.value.kind == RValueKind::Ref &&
           s.value.local == loan.referent && s.span.begin != loan.span.begin &&
-          (loan.writes || s.value.op == "refmut"))
+          (loan.writes || s.value.op == "loanmut"))
         complain(s.span, "E0410",
                  nameOf(loan.referent) + " is lent for writing while it is already lent.",
                  {"one loan for writing, or any number for reading, and never both"},

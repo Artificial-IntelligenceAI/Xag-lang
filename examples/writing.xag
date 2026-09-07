@@ -5,13 +5,13 @@
 # a number has no number in it, so `convert-to-number` answers `or-nothing` of
 # whichever number the chain asked for.
 
-fn.str 'label' [ref.str 'what', int64 'how-many'] {
+fn.str 'label' [loan.str 'what', int64 'how-many'] {
     give [str:*• * 'what' str:*: * convert-to-str['how-many']];
 }
 
 START {
     var.str 'apples' = [*apples*];
-    var.str 'line' = [label[ref 'apples', *12*]];
+    var.str 'line' = [label[loan 'apples', *12*]];
     print.stdout['line' \n];
 
     # It writes exactly what a print writes, because it is the same code
@@ -22,7 +22,7 @@ START {
 
     # And back again, which can fail, so it says so in its type.
     var.str 'typed' = [*7*];
-    var.or-nothing.int64 'read' = [convert-to-number[ref 'typed']];
+    var.or-nothing.int64 'read' = [convert-to-number[loan 'typed']];
     when 'read' {
         is 'n'     { print.stdout[str:*read * convert-to-str['n'] \n]; }
         is nothing { print.stdout[str:*that was not a number* \n]; }

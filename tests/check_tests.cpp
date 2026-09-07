@@ -185,11 +185,11 @@ void anImmutableNameDoesNotChange() {
 }
 
 void aBorrowSaysWhetherItWrites() {
-  CHECK(run("fn.nothing 'excite' [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
+  CHECK(run("fn.nothing 'excite' [loanmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
             "START { }\n").ok());
-  // `ref` lends for reading, so writing through it is the same mistake as
+  // `loan` lends for reading, so writing through it is the same mistake as
   // writing to anything else that does not change.
-  CHECK(run("fn.nothing 'excite' [ref.str 'text'] { set 'text' = ['text' *!*]; }\n"
+  CHECK(run("fn.nothing 'excite' [loan.str 'text'] { set 'text' = ['text' *!*]; }\n"
             "START { }\n").code(0) == "E0508");
 }
 
@@ -303,10 +303,10 @@ void whatIsWrittenDownIsWorkedOut() {
               "    print.stdout['s' \\n];\n}\n") == "");
 
   // Nothing is claimed about a place that is not known until it runs.
-  CHECK(built("fn.nothing 'at' [ref.many.int64 'xs', int64 'i'] {\n"
+  CHECK(built("fn.nothing 'at' [loan.many.int64 'xs', int64 'i'] {\n"
               "    print.stdout['xs'['i'] \\n];\n}\n"
               "START {\n    var.many.int64 'ns' = [*10* *20*];\n"
-              "    at[ref 'ns', *1*];\n}\n") == "");
+              "    at[loan 'ns', *1*];\n}\n") == "");
 }
 
 void aLoopThatCannotFinishIsRefused() {
@@ -385,15 +385,15 @@ void aNumberIsAskedToBecomeText() {
 
   // Text is already text.
   CHECK(inStart("var.str 't' = [*hi*];\n"
-                "    var.str 's' = [convert-to-str[ref 't']];").code(0) == "E0535");
+                "    var.str 's' = [convert-to-str[loan 't']];").code(0) == "E0535");
 
   // What holds several things has no one way of being written out — the same
   // reason showing one is refused — and there is no text of nothing.
   CHECK(inStart("var.many.int64 'xs' = [*1* *2*];\n"
-                "    var.str 's' = [convert-to-str[ref 'xs']];").code(0) == "E0535");
+                "    var.str 's' = [convert-to-str[loan 'xs']];").code(0) == "E0535");
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.point 'p' = [*1* *2*];\n"
-            "    var.str 's' = [convert-to-str[ref 'p']];\n}\n").code(0) == "E0535");
+            "    var.str 's' = [convert-to-str[loan 'p']];\n}\n").code(0) == "E0535");
   CHECK(inStart("var.or-nothing.int64 'n' = [*1*];\n"
                 "    var.str 's' = [convert-to-str['n']];").code(0) == "E0535");
 
@@ -452,9 +452,9 @@ void anElementIsOneOfWhatItHolds() {
 
 void countAsksHowManyOfEither() {
   CHECK(inStart("var.many.int64 'xs' = [*1* *2*];\n"
-                "    print.stdout[(count[ref 'xs']) \\n];").ok());
+                "    print.stdout[(count[loan 'xs']) \\n];").ok());
   CHECK(inStart("var.str 's' = [*hi*];\n"
-                "    print.stdout[(count[ref 's']) \\n];").ok());
+                "    print.stdout[(count[loan 's']) \\n];").ok());
   CHECK(inStart("var.int64 'n' = [*1*];\n"
                 "    print.stdout[(count['n']) \\n];").code(0) == "E0506");
 }
@@ -477,7 +477,7 @@ void aManyTravelsWhole() {
   CHECK(run("fn.many.int64 'f' [] {\n"
             "    var.many.int64 'xs' = [*1* *2*];\n"
             "    give ['xs'];\n}\n").ok());
-  CHECK(run("fn.int64 'g' [ref.many.int64 'xs'] { give ['xs'[*0*]]; }\n").ok());
+  CHECK(run("fn.int64 'g' [loan.many.int64 'xs'] { give ['xs'[*0*]]; }\n").ok());
 }
 
 void nothingNeedsSomewhereToBe() {
@@ -637,7 +637,7 @@ void aStructTravelsWithTheRest() {
   // It stands where a type stands: in a `many`, behind `or-nothing`, in a
   // function's parameters and in what it answers.
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
-            "fn.point 'middle' [ref.many.point 'ps'] {\n"
+            "fn.point 'middle' [loan.many.point 'ps'] {\n"
             "    var.point 'p' = [*0* *0*];\n    give [move 'p'];\n}\n").ok());
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.or-nothing.point 'p' = [nothing];\n"

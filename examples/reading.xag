@@ -7,8 +7,8 @@
 
 START {
     var.many.str 'given' = [arguments[]];
-    if (count[ref 'given']) > *0* {
-        print.stdout[str:*ignoring * (count[ref 'given']) str:* argument(s)* \n];
+    if (count[loan 'given']) > *0* {
+        print.stdout[str:*ignoring * (count[loan 'given']) str:* argument(s)* \n];
     }
 
     var.mut.deci64 'total' = [*0.00*];

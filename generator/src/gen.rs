@@ -241,9 +241,9 @@ impl<'a> Writer<'a> {
         self.out
             .push_str("fn.nothing 'consume' [str 't'] {\n    print.stdout['t' \\n];\n}\n\n");
         self.out.push_str(
-            "fn.nothing 'look' [ref.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n");
+            "fn.nothing 'look' [loan.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n");
         self.out.push_str(
-            "fn.nothing 'edit' [refmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n");
+            "fn.nothing 'edit' [loanmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n");
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
@@ -719,11 +719,11 @@ impl<'a> Writer<'a> {
         let holder = self.fresh();
         self.markLent(&borrowed, true);
         self.pad();
-        self.out.push_str("var.ref.");
+        self.out.push_str("var.loan.");
         self.out.push_str(ty.written());
         self.out.push_str(" '");
         self.out.push_str(&holder);
-        self.out.push_str("' = [ref '");
+        self.out.push_str("' = [loan '");
         self.out.push_str(&borrowed);
         self.out.push_str("'];\n");
 
@@ -738,7 +738,7 @@ impl<'a> Writer<'a> {
         self.markLent(&borrowed, false);
     }
 
-    /// `var.refmut.int64 'h' = [refmut 'v']; set 'h' = ['h' + *3*];`
+    /// `var.loanmut.int64 'h' = [loanmut 'v']; set 'h' = ['h' + *3*];`
     ///
     /// Writing a number through a loan. Native stored the value over the loan
     /// itself and then followed it as a pointer; the fast engine answered with
@@ -748,11 +748,11 @@ impl<'a> Writer<'a> {
         let holder = self.fresh();
         self.markLent(borrowed, true);
         self.pad();
-        self.out.push_str("var.refmut.");
+        self.out.push_str("var.loanmut.");
         self.out.push_str(ty.written());
         self.out.push_str(" '");
         self.out.push_str(&holder);
-        self.out.push_str("' = [refmut '");
+        self.out.push_str("' = [loanmut '");
         self.out.push_str(borrowed);
         self.out.push_str("'];\n");
 
@@ -800,9 +800,9 @@ impl<'a> Writer<'a> {
             // For the length of one call, and done with by the semicolon.
             self.pad();
             if writable {
-                self.out.push_str("edit[refmut '");
+                self.out.push_str("edit[loanmut '");
             } else {
-                self.out.push_str("look[ref '");
+                self.out.push_str("look[loan '");
             }
             self.out.push_str(&borrowed);
             self.out.push_str("'];\n");
@@ -813,10 +813,10 @@ impl<'a> Writer<'a> {
         let holder = self.fresh();
         self.markLent(&borrowed, true);
         self.pad();
-        self.out.push_str(if writable { "var.refmut.str '" } else { "var.ref.str '" });
+        self.out.push_str(if writable { "var.loanmut.str '" } else { "var.loan.str '" });
         self.out.push_str(&holder);
         self.out.push_str("' = [");
-        self.out.push_str(if writable { "refmut '" } else { "ref '" });
+        self.out.push_str(if writable { "loanmut '" } else { "loan '" });
         self.out.push_str(&borrowed);
         self.out.push_str("'];\n");
 
@@ -944,7 +944,7 @@ impl<'a> Writer<'a> {
         self.out.push_str(&name);
         self.out.push_str("'[*");
         self.out.push_str(&at.to_string());
-        self.out.push_str("*] str:* of * (count[ref '");
+        self.out.push_str("*] str:* of * (count[loan '");
         self.out.push_str(&name);
         self.out.push_str("']) \\n];\n");
     }
@@ -1147,7 +1147,7 @@ impl<'a> Writer<'a> {
             }
             1 if text.is_some() => {
                 let name = text.unwrap();
-                self.out.push_str("count[ref '");
+                self.out.push_str("count[loan '");
                 self.out.push_str(&name);
                 self.out.push_str("']");
             }
@@ -1252,7 +1252,7 @@ impl<'a> Writer<'a> {
                 let text = if ty == COUNTED { self.pick_name(Ty::Str) } else { None };
                 match text {
                     Some(name) => {
-                        self.out.push_str("count[ref '");
+                        self.out.push_str("count[loan '");
                         self.out.push_str(&name);
                         self.out.push_str("']");
                     }

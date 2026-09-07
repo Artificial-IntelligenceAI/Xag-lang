@@ -64,6 +64,24 @@ which of its characters were secretly instructions.
 Escapes: `\n`, `\t`, `\r`, `\\`. Inside a mark, `\*` and `\'` write the closing mark
 itself — the one character that could not otherwise appear there.
 
+## A loan is a loan
+
+```
+fn.int64 'size' [loan.str 'text'] { ... }     # the parameter borrows
+size[loan 'greeting'];                         # the caller lends
+```
+
+The word was `ref` until 2026-09-07, and it was the only word in the language
+naming a thing the language never talks about: the diagnostics say *loan* 127
+times, *lent* and *lends* 97, *borrowed* 51, and *reference* not once.
+
+It has to be a noun, and that is what `ref` was quietly getting right. The chain
+is a noun phrase — `loan.str 'text'` is "a loan of str" — and the call is an
+imperative — `size[loan 'greeting']` is "loan greeting", beside `move` in the
+same position. A verb would be right on one side and backwards on the other,
+because the two sides are opposite: the parameter borrows, the caller lends.
+`loan` is both the thing and the act, and the act is the lender's.
+
 ## A declaration marks what it names
 
 A **name** wears marks, so it may hold anything at all — spaces, punctuation,
@@ -345,7 +363,7 @@ type.
 
 ```
 var.mut.int64 'total' = [*0*];
-fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] { ... }
+fn.loan.str 'longer' [loan.str 'a', loan.str 'b'] { ... }
 loop.perm.range.int64 'i' = [*1*, *100*] { ... }
 ```
 
@@ -357,7 +375,7 @@ asking for something.**
 | segment | default | written when |
 | --- | --- | --- |
 | mutability | `immut` | `mut` — asking to change it |
-| ownership | `own` | `ref` / `refmut` — asking to borrow |
+| ownership | `own` | `loan` / `loanmut` — asking to borrow |
 | loop counter | `temp` | `perm` — asking to keep it after the loop |
 
 Visibility — `export` / `program` against a default of `file` — is where it will
@@ -400,12 +418,12 @@ A chain is a run of answers to questions, and both which questions get asked and
 the order they come in depend on what is being declared:
 
 ```
-var    . [mut] . [ref|refmut]              . [many] . type
-fn     . [ref|refmut] . ['loan']           . [many] . type
+var    . [mut] . [loan|loanmut]              . [many] . type
+fn     . [loan|loanmut] . ['loan']           . [many] . type
 const                                      . [many] . type
 loop   . [perm] . range                    .          type
 loop   . while
-param    [mut] . [ref|refmut] . ['loan']   . [many] . type
+param    [mut] . [loan|loanmut] . ['loan']   . [many] . type
 ```
 
 `many` is not one of the questions: it stands with the type, because it says
@@ -426,14 +444,14 @@ Rule(s) broken: every segment of a chain answers a question the language asks
 
 The rest follows from there. `mut` on a `fn` is a real word in a chain that never
 asks whether it changes (`E0203`); `var.mut.mut.int64` answers one question twice
-(`E0204`); and `var.ref.mut.str` says the same thing as `var.mut.ref.str`, which
+(`E0204`); and `var.loan.mut.str` says the same thing as `var.mut.loan.str`, which
 is one spelling too many (`E0205`):
 
 ```text
 this chain answers whether it owns or borrows before whether it changes, and
 they are read the other way round.
 
-  1 | var.ref.mut.str 's' = [*hi*];
+  1 | var.loan.mut.str 's' = [*hi*];
     |         ^^^ answered here
     |     ^^^ and this one before it
 
@@ -467,7 +485,7 @@ is unchanged, so it works wherever a type does.
 ```
 var.many.int64 'xs'                     # a name
 fn.many.int64 'first-few' [int64 'n']     # an answer
-fn.int64 'total' [ref.many.int64 'xs']    # a parameter, borrowed
+fn.int64 'total' [loan.many.int64 'xs']    # a parameter, borrowed
 ```
 
 `many.many.int64` is refused for now (`E0210`). One `many` is one level, and
@@ -523,7 +541,7 @@ asked of it:
 ```
 print.stdout['xs'[*0*] \n];        # read it, and leave it where it is
 set 'xs'[*0*] = [*99*];            # write it, ending what was there
-size[ref 'xs'[*0*]];               # lend it
+size[loan 'xs'[*0*]];               # lend it
 move 'xs'[*0*]                     # refused — E0412
 ```
 
@@ -789,7 +807,7 @@ converting is a thing you ask for, by name:
 var.int64 'n' = [*42*];
 var.str 's' = [str:*x = * convert-to-str['n']];        # "x = 42"
 
-var.or-nothing.int64 'back' = [convert-to-number[ref 's']];
+var.or-nothing.int64 'back' = [convert-to-number[loan 's']];
 ```
 
 The two are not mirror images, and the names say which is which. Every number
@@ -884,7 +902,7 @@ cannot stand on its own with nothing beside it to say, and that is `E0523`:
 ```text
 nothing here says what number this would be.
 
-  3 |     when convert-to-number[ref 'line'] {
+  3 |     when convert-to-number[loan 'line'] {
     |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ here
 
 Error code: E0523
@@ -911,8 +929,8 @@ same thing the type already says.
 A name owns its value until the value is moved, and then it holds nothing.
 
 ```
-fn.int64 'size' [ref.str 'text'] { ... }           # borrowed, read-only
-fn.nothing 'excite' [refmut.str 'text'] { ... }  # borrowed, writable
+fn.int64 'size' [loan.str 'text'] { ... }           # borrowed, read-only
+fn.nothing 'excite' [loanmut.str 'text'] { ... }  # borrowed, writable
 fn.nothing 'keep' [str 'text'] { ... }           # takes it — `own` is the default
 ```
 
@@ -921,8 +939,8 @@ fn.nothing 'keep' [str 'text'] { ... }           # takes it — `own` is the def
 Declarations default; transfers never do.
 
 ```
-size[ref 'greeting'];
-excite[refmut 'greeting'];
+size[loan 'greeting'];
+excite[loanmut 'greeting'];
 keep[move 'greeting'];
 ```
 
@@ -968,7 +986,7 @@ is an error where it stands: the second pass round would find nothing there.
 ### A borrow never outlasts what it borrows from
 
 ```
-fn.ref.str 'broken' [ref.str 'other'] {
+fn.loan.str 'broken' [loan.str 'other'] {
     var.str 'text' = [*hello*];
     give ['text'];
 }
@@ -999,7 +1017,7 @@ again for writing.
 
   15 |     keep[move 'greeting'];
      |     ^^^^^^^^^^^^^^^^^^^^^ handed over here
-  13 |     var.ref.str 'winner' = [longer[ref 'greeting', ref 'reply']];
+  13 |     var.loan.str 'winner' = [longer[loan 'greeting', loan 'reply']];
      |                                    ^^^^^^^^^^^^^^ and lent here, still in use after this
 
 Error code: E0408
@@ -1017,7 +1035,7 @@ When one parameter is borrowed, there is only one thing the answer could be
 borrowed from, so nothing has to be said:
 
 ```
-fn.ref.str 'echo' [ref.str 'text'] {
+fn.loan.str 'echo' [loan.str 'text'] {
     give ['text'];
 }
 ```
@@ -1026,7 +1044,7 @@ When two are, there is a choice, and the compiler does not get to make it. The
 loan is given a name, and everything on that loan is written with it:
 
 ```
-fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {
+fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {
     if ['a' > 'b'] {
         give ['a'];
     } else {
@@ -1040,7 +1058,7 @@ loan rather than for a value. Nothing about it is a special form, and it may be
 called whatever says what it is:
 
 ```
-fn.ref.'as long as both inputs'.str longer [...] { ... }
+fn.loan.'as long as both inputs'.str longer [...] { ... }
 ```
 
 Leaving it out where it is needed is its own error, and the compiler does not
@@ -1049,7 +1067,7 @@ guess:
 ```text
 this answer is borrowed, and so are two of the parameters.
 
-  1 | fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] {
+  1 | fn.loan.str 'longer' [loan.str 'a', loan.str 'b'] {
     |    ^^^ here
 
 Error code: E0402

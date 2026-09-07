@@ -8,7 +8,7 @@
 
 namespace xag {
 
-// One segment of a dot-chain. `isName` marks a lifetime — `ref.'life'.str` — which
+// One segment of a dot-chain. `isName` marks a lifetime — `loan.'life'.str` — which
 // is written like every other name because it is one.
 struct ChainSegment {
   Span span;
@@ -49,7 +49,7 @@ enum class ExprKind {
   Written, // *hello*                   text
   Escape,  // \n                        text
   Typed,   // str:*hello*               text is the type, one child
-  Borrow,  // ref 'x' / refmut / move   text is the word, one child
+  Borrow,  // loan 'x' / loanmut / move   text is the word, one child
   Index,   // 'xs'[*2*]                 text is the name, one child: the index
   Nothing, // nothing                   what an `or-nothing` holds when it holds none
   Field,   // 'p'.x                     text is the field, one child: what it is of

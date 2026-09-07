@@ -41,8 +41,8 @@ Held run(const std::string &text) {
 }
 
 const char *kHelpers =
-    "fn.int64 'size' [ref.str 't'] { give [count['t']]; }\n"
-    "fn.nothing 'edit' [refmut.str 't'] { set 't' = ['t' *!*]; }\n"
+    "fn.int64 'size' [loan.str 't'] { give [count['t']]; }\n"
+    "fn.nothing 'edit' [loanmut.str 't'] { set 't' = ['t' *!*]; }\n"
     "fn.nothing 'keep' [str 't'] { print.stdout['t' \n]; }\n";
 
 void expect(const std::string &body, const std::string &wanted, int line) {
@@ -86,31 +86,31 @@ void expectWith(const std::string &shapes, const std::string &body,
 void aLoanEndsWhenNobodyIsHoldingIt() {
   // Lent, looked at, done with — and then it may be handed over.
   HOLDS("var.str 's' = [*hi*];\n"
-        "    var.int64 'n' = [size[ref 's']];\n"
+        "    var.int64 'n' = [size[loan 's']];\n"
         "    keep[move 's'];");
   // Lent for writing, and the same.
   HOLDS("var.mut.str 's' = [*hi*];\n"
-        "    edit[refmut 's'];\n"
+        "    edit[loanmut 's'];\n"
         "    keep[move 's'];");
   // Two loans for reading at once is no trouble at all.
   HOLDS("var.str 's' = [*hi*];\n"
-        "    var.int64 'a' = [size[ref 's']];\n"
-        "    var.int64 'b' = [size[ref 's']];\n"
+        "    var.int64 'a' = [size[loan 's']];\n"
+        "    var.int64 'b' = [size[loan 's']];\n"
         "    print.stdout['a' 'b' \n];");
 }
 
 void aNumberIsNotHoldingALoan() {
-  // `count[ref 'a']` answers a number, and the loan it was worked out from
+  // `count[loan 'a']` answers a number, and the loan it was worked out from
   // ended at the semicolon. Reading the number as still holding it made the
   // pass refuse this, which the generator found within forty programs.
   HOLDS("var.mut.str 'a' = [*hello*];\n"
-        "    var.int64 'n' = [count[ref 'a']];\n"
-        "    edit[refmut 'a'];\n"
+        "    var.int64 'n' = [count[loan 'a']];\n"
+        "    edit[loanmut 'a'];\n"
         "    print.stdout['n' \n];");
   // The same, the other way round.
   HOLDS("var.mut.str 'a' = [*hello*];\n"
-        "    edit[refmut 'a'];\n"
-        "    var.int64 'n' = [size[ref 'a']];\n"
+        "    edit[loanmut 'a'];\n"
+        "    var.int64 'n' = [size[loan 'a']];\n"
         "    keep[move 'a'];\n"
         "    print.stdout['n' \n];");
 }
@@ -118,12 +118,12 @@ void aNumberIsNotHoldingALoan() {
 void aLoanHeldInANameLastsWhileItIsLookedAt() {
   // Held, looked at, done with — and what it borrowed is free again.
   HOLDS("var.str 'a' = [*hello*];\n"
-        "    var.ref.str 'w' = [ref 'a'];\n"
+        "    var.loan.str 'w' = [loan 'a'];\n"
         "    print.stdout['w' \n];\n"
         "    keep[move 'a'];");
   // Written through the loan, which is what being lent for writing is for.
   HOLDS("var.mut.str 'a' = [*hello*];\n"
-        "    var.refmut.str 'w' = [refmut 'a'];\n"
+        "    var.loanmut.str 'w' = [loanmut 'a'];\n"
         "    set 'w' = ['w' *!*];\n"
         "    print.stdout['w' \n];");
 }
@@ -131,7 +131,7 @@ void aLoanHeldInANameLastsWhileItIsLookedAt() {
 void whatIsLentStaysWhereItIs() {
   // The loan is still wanted after the move, which is the whole objection.
   REFUSES("var.str 'a' = [*hello*];\n"
-          "    var.ref.str 'w' = [ref 'a'];\n"
+          "    var.loan.str 'w' = [loan 'a'];\n"
           "    keep[move 'a'];\n"
           "    print.stdout['w' \n];",
           "E0408");
@@ -139,7 +139,7 @@ void whatIsLentStaysWhereItIs() {
 
 void whatIsLentIsNotChangedBehindTheLoansBack() {
   REFUSES("var.mut.str 'a' = [*hello*];\n"
-          "    var.ref.str 'w' = [ref 'a'];\n"
+          "    var.loan.str 'w' = [loan 'a'];\n"
           "    set 'a' = [*other*];\n"
           "    print.stdout['w' \n];",
           "E0409");
@@ -147,13 +147,13 @@ void whatIsLentIsNotChangedBehindTheLoansBack() {
 
 void oneLoanForWritingOrAnyNumberForReading() {
   REFUSES("var.mut.str 'a' = [*hello*];\n"
-          "    var.refmut.str 'x' = [refmut 'a'];\n"
-          "    var.refmut.str 'y' = [refmut 'a'];\n"
+          "    var.loanmut.str 'x' = [loanmut 'a'];\n"
+          "    var.loanmut.str 'y' = [loanmut 'a'];\n"
           "    print.stdout['x' 'y' \n];",
           "E0410");
   REFUSES("var.mut.str 'a' = [*hello*];\n"
-          "    var.ref.str 'x' = [ref 'a'];\n"
-          "    var.refmut.str 'y' = [refmut 'a'];\n"
+          "    var.loan.str 'x' = [loan 'a'];\n"
+          "    var.loanmut.str 'y' = [loanmut 'a'];\n"
           "    print.stdout['x' 'y' \n];",
           "E0410");
 }
@@ -162,12 +162,12 @@ void aLoanOfAManyIsALoanOfEveryPlaceInIt() {
   // Which place `'xs'[…]` names is not known until the program runs, so a loan
   // of the array covers all of them and writing one goes round the loan.
   REFUSES("var.mut.many.int64 'xs' = [*1* *2*];\n"
-          "    var.ref.many.int64 'w' = [ref 'xs'];\n"
+          "    var.loan.many.int64 'w' = [loan 'xs'];\n"
           "    set 'xs'[*0*] = [*9*];\n"
           "    print.stdout[(count['w']) \n];",
           "E0409");
   REFUSES("var.mut.many.str 'ws' = [*a* *b*];\n"
-          "    var.ref.many.str 'w' = [ref 'ws'];\n"
+          "    var.loan.many.str 'w' = [loan 'ws'];\n"
           "    var.many.str 'taken' = [move 'ws'];\n"
           "    print.stdout[(count['w']) \n];",
           "E0408");
@@ -180,13 +180,13 @@ void lendingAFieldLendsTheStruct() {
 
   SHAPED_REFUSES(kTag,
                  "var.tag 'a' = [*ada* *36*];\n"
-                 "    var.ref.str 'w' = [ref 'a'.name];\n"
+                 "    var.loan.str 'w' = [loan 'a'.name];\n"
                  "    var.tag 'gone' = [move 'a'];\n"
                  "    print.stdout[(size['w']) \n];",
                  "E0408");
   SHAPED_REFUSES(kTag,
                  "var.mut.tag 'a' = [*ada* *36*];\n"
-                 "    var.ref.str 'w' = [ref 'a'.name];\n"
+                 "    var.loan.str 'w' = [loan 'a'.name];\n"
                  "    set 'a'.name = [*bob*];\n"
                  "    print.stdout[(size['w']) \n];",
                  "E0409");
@@ -194,7 +194,7 @@ void lendingAFieldLendsTheStruct() {
   // Reading one out and being done with it leaves nothing standing.
   SHAPED_HOLDS(kTag,
                "var.tag 'a' = [*ada* *36*];\n"
-               "    var.int64 'n' = [size[ref 'a'.name]];\n"
+               "    var.int64 'n' = [size[loan 'a'.name]];\n"
                "    var.tag 'gone' = [move 'a'];\n"
                "    print.stdout['n' \n];");
 

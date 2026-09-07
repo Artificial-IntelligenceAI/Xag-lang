@@ -133,20 +133,20 @@ void onCallsAndBorrows() {
         "  loop.range.int64 'i' = [*1*, 'n'] { set 't' = ['t' + 'i']; }\n"
         "  give ['t']; }\n"
         "START { print.stdout[sum-to[*10*] \\n]; }\n");
-  AGREE("fn.int64 'size' [ref.str 't'] { give [count['t']]; }\n"
-        "START { var.str 's' = [*café*]; print.stdout[size[ref 's'] \\n]; }\n");
-  AGREE("fn.nothing 'edit' [refmut.str 't'] { set 't' = ['t' *!*]; }\n"
-        "START { var.mut.str 's' = [*hi*]; edit[refmut 's'];"
+  AGREE("fn.int64 'size' [loan.str 't'] { give [count['t']]; }\n"
+        "START { var.str 's' = [*café*]; print.stdout[size[loan 's'] \\n]; }\n");
+  AGREE("fn.nothing 'edit' [loanmut.str 't'] { set 't' = ['t' *!*]; }\n"
+        "START { var.mut.str 's' = [*hi*]; edit[loanmut 's'];"
         " print.stdout['s' \\n]; }\n");
   AGREE("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
         "START { var.str 's' = [*taken*]; keep[move 's']; }\n");
   AGREE("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
         "START { var.str 's' = [*hi*]; var.int64 'n' = [*1*];\n"
         "  if 'n' == *1* { keep[move 's']; } }\n");
-  AGREE("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+  AGREE("fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {\n"
         "  if count['a'] >== count['b'] { give ['a']; } else { give ['b']; } }\n"
         "START { var.str 'x' = [*hello*]; var.str 'y' = [*hi*];\n"
-        "  var.ref.str 'w' = [longer[ref 'x', ref 'y']];\n"
+        "  var.loan.str 'w' = [longer[loan 'x', loan 'y']];\n"
         "  print.stdout['w' \\n]; }\n");
   AGREE("const.int64 'LIMIT' = [*10*];\n"
         "START { print.stdout['LIMIT' \\n]; }\n");
@@ -156,23 +156,23 @@ void onCallsAndBorrows() {
 
 void onHoldingSeveralValues() {
   AGREE("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
-        "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[ref 'xs']) \\n]; }\n");
+        "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[loan 'xs']) \\n]; }\n");
   AGREE("START { var.mut.many.int64 'xs' = [fill[*3*, *5*]];\n"
         "  set 'xs'[*4*] = [*9*];\n"
         "  loop.range.int64 'i' = [*0*, *4*] { print.stdout['xs'['i'] \\n]; } }\n");
   AGREE("START { var.mut.many.str 'ws' = [*one* *two* *three*];\n"
         "  set 'ws'[*1*] = [*TWO*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[ref 'ws'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*0*, (count[loan 'ws'] - *1*)] {\n"
         "    print.stdout['ws'['i'] str:* * (count['ws'['i']]) \\n]; } }\n");
-  AGREE("fn.int64 'total' [ref.many.int64 'xs'] {\n"
+  AGREE("fn.int64 'total' [loan.many.int64 'xs'] {\n"
         "  var.mut.int64 't' = [*0*];\n"
         "  loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {\n"
         "    set 't' = ['t' + 'xs'['i']]; }\n"
         "  give ['t']; }\n"
         "START { var.many.int64 'xs' = [*1* *2* *3* *4*];\n"
-        "  print.stdout[total[ref 'xs'] \\n]; }\n");
+        "  print.stdout[total[loan 'xs'] \\n]; }\n");
   AGREE("START { var.many.int64 'none' = [];\n"
-        "  print.stdout[(count[ref 'none']) \\n]; }\n");
+        "  print.stdout[(count[loan 'none']) \\n]; }\n");
 }
 
 void onHoldingNothing() {
@@ -185,7 +185,7 @@ void onHoldingNothing() {
   AGREE("START { var.or-nothing.str 'a' = [*text*];\n"
         "  if 'a' holds 't' { print.stdout['t' str:* * (count['t']) \\n]; } }\n");
   AGREE("START { var.or-nothing.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  if 'xs' holds 'held' { print.stdout[(count[ref 'held']) \\n]; } }\n");
+        "  if 'xs' holds 'held' { print.stdout[(count[loan 'held']) \\n]; } }\n");
 }
 
 void onChoosingBetweenCases() {
@@ -218,10 +218,10 @@ void onGroupingNamedThings() {
   // A struct of structs, read and written down a path.
   AGREE("struct 'point' [int64 'x', int64 'y']\n"
         "struct 'runner' [str 'name', point 'at']\n"
-        "fn.nothing 'bump' [refmut.runner 'r'] { set 'r'.at.x = ['r'.at.x + *1*]; }\n"
+        "fn.nothing 'bump' [loanmut.runner 'r'] { set 'r'.at.x = ['r'.at.x + *1*]; }\n"
         "START { var.mut.point 'a' = [*1* *2*];\n"
         "  var.mut.runner 'r' = [*ada* move 'a'];\n"
-        "  bump[refmut 'r'];\n"
+        "  bump[loanmut 'r'];\n"
         "  print.stdout['r'.name str:* * 'r'.at.x str:* * 'r'.at.y \\n]; }\n");
   // One field handed over on its own, with the rest still there to read.
   AGREE("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
@@ -238,9 +238,9 @@ void onGroupingNamedThings() {
         "  print.stdout['ts'[*0*].name str:* * 'ts'[*1*].name \\n]; }\n");
   // A struct behind a loan, through a function.
   AGREE("struct 'point' [int64 'x', int64 'y']\n"
-        "fn.int64 'across' [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
+        "fn.int64 'across' [loan.point 'p'] { give ['p'.x + 'p'.y]; }\n"
         "START { var.point 'p' = [*20* *22*];\n"
-        "  print.stdout[(across[ref 'p']) \\n]; }\n");
+        "  print.stdout[(across[loan 'p']) \\n]; }\n");
   // A struct behind `or-nothing`, both ways, under `when`.
   AGREE("struct 'tag' [str 'name']\n"
         "START { var.or-nothing.tag 't' = [*ada*];\n"
@@ -273,42 +273,42 @@ void onTurningNumbersIntoText() {
         "START { var.int64 'n' = [*7*];\n"
         "  loop.range.int64 'i' = [*1*, *3*] {\n"
         "    var.str 's' = [spell['n']];\n"
-        "    print.stdout['s' str:* * (count[ref 's']) \\n]; } }\n");
+        "    print.stdout['s' str:* * (count[loan 's']) \\n]; } }\n");
   // Behind a loan, which is the shape that once answered 0 from the test
   // interpreter and would not build natively; and printing a borrowed number,
   // which had been wrong the same way for as long as printing has existed.
-  AGREE("fn.str 'spell' [ref.int64 'n'] { give [convert-to-str['n']]; }\n"
+  AGREE("fn.str 'spell' [loan.int64 'n'] { give [convert-to-str['n']]; }\n"
         "START { var.int64 'n' = [*7*];\n"
-        "  var.str 's' = [spell[ref 'n']];\n"
-        "  print.stdout['s' str:* * (count[ref 's']) \\n]; }\n");
-  AGREE("fn.nothing 'show' [ref.int64 'a', ref.deci64 'c'] {\n"
+        "  var.str 's' = [spell[loan 'n']];\n"
+        "  print.stdout['s' str:* * (count[loan 's']) \\n]; }\n");
+  AGREE("fn.nothing 'show' [loan.int64 'a', loan.deci64 'c'] {\n"
         "  print.stdout['a' str:* * 'c' str:* * convert-to-str['c'] \\n]; }\n"
         "START { var.int64 'a' = [*300*]; var.deci64 'c' = [*1.10*];\n"
-        "  show[ref 'a', ref 'c']; }\n");
+        "  show[loan 'a', loan 'c']; }\n");
   // Arithmetic and comparison on borrowed numbers, and a number written
   // through a loan. Every loan any program had made was a loan of text until
   // one lent a number, and the sum of two borrowed numbers was no step at all.
-  AGREE("fn.nothing 'add-into' [refmut.int64 'total', ref.int64 'step'] {\n"
+  AGREE("fn.nothing 'add-into' [loanmut.int64 'total', loan.int64 'step'] {\n"
         "  loop.range.int64 'i' = [*1*, *3*] { set 'total' = ['total' + 'step']; } }\n"
         "START { var.mut.int64 't' = [*0*]; var.int64 's' = [*3*];\n"
-        "  add-into[refmut 't', ref 's'];\n"
+        "  add-into[loanmut 't', loan 's'];\n"
         "  print.stdout['t' \\n]; }\n");
-  AGREE("fn.nothing 'scale' [refmut.bin64 'x', ref.deci64 'd'] {\n"
+  AGREE("fn.nothing 'scale' [loanmut.bin64 'x', loan.deci64 'd'] {\n"
         "  set 'x' = ['x' x *2.5*];\n"
         "  print.stdout['x' str:* * ('d' + deci64:*0.01*) \\n]; }\n"
         "START { var.mut.bin64 'x' = [*0.1*]; var.deci64 'd' = [*1.10*];\n"
-        "  scale[refmut 'x', ref 'd'];\n"
+        "  scale[loanmut 'x', loan 'd'];\n"
         "  print.stdout['x' \\n]; }\n");
-  AGREE("fn.str 'order' [ref.int64 'a', ref.int64 'b'] {\n"
+  AGREE("fn.str 'order' [loan.int64 'a', loan.int64 'b'] {\n"
         "  if 'a' < 'b' { give [*less*]; }\n"
         "  if 'a' == 'b' { give [*same*]; }\n"
         "  give [*more*]; }\n"
         "START { var.int64 'p' = [*2*]; var.int64 'q' = [*10*];\n"
-        "  print.stdout[(order[ref 'p', ref 'q']) str:* * (order[ref 'q', ref 'p'])"
-        " str:* * (order[ref 'p', ref 'p']) \\n]; }\n");
+        "  print.stdout[(order[loan 'p', loan 'q']) str:* * (order[loan 'q', loan 'p'])"
+        " str:* * (order[loan 'p', loan 'p']) \\n]; }\n");
   // And the other way, under its new name.
   AGREE("START { var.str 't' = [*250*];\n"
-        "  var.or-nothing.uint8 'n' = [convert-to-number[ref 't']];\n"
+        "  var.or-nothing.uint8 'n' = [convert-to-number[loan 't']];\n"
         "  when 'n' {\n"
         "    is 'v'     { print.stdout['v' \\n]; }\n"
         "    is nothing { print.stdout[str:*none* \\n]; } } }\n");

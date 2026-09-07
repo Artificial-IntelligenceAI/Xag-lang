@@ -39,9 +39,9 @@ Mode modeOfChain(const Chain &chain) {
   for (const ChainSegment &seg : chain.segments) {
     if (seg.isName)
       continue;
-    if (seg.text == "refmut")
+    if (seg.text == "loanmut")
       return Mode::RefMut;
-    if (seg.text == "ref")
+    if (seg.text == "loan")
       return Mode::Ref;
   }
   return Mode::Owned;
@@ -56,8 +56,8 @@ std::string loanOfChain(const Chain &chain) {
 
 const char *word(Mode mode) {
   switch (mode) {
-  case Mode::Ref:    return "ref";
-  case Mode::RefMut: return "refmut";
+  case Mode::Ref:    return "loan";
+  case Mode::RefMut: return "loanmut";
   case Mode::Owned:  return "move";
   }
   return "move";
@@ -98,11 +98,11 @@ Binding heldBinding(Span where) {
   return out;
 }
 
-// `mut` on what a name owns, `refmut` on what it borrows. Either way the name
+// `mut` on what a name owns, `loanmut` on what it borrows. Either way the name
 // may be written through, and nothing else may.
 bool changeable(const Chain &chain) {
   for (const ChainSegment &seg : chain.segments)
-    if (!seg.isName && (seg.text == "mut" || seg.text == "refmut"))
+    if (!seg.isName && (seg.text == "mut" || seg.text == "loanmut"))
       return true;
   return false;
 }
@@ -412,11 +412,11 @@ private:
         return;
       }
 
-      // `ref` / `refmut`. A loan gives away no more than the lender had, so a
+      // `loan` / `loanmut`. A loan gives away no more than the lender had, so a
       // name that does not change cannot be lent for writing — whether it does
       // not change because it owns something quietly, or because what it holds
       // was itself only lent for reading.
-      if (binding && e.text == "refmut" && !binding->changes)
+      if (binding && e.text == "loanmut" && !binding->changes)
         complain(e.span, "E0407",
                  binding->mode == Mode::Ref
                      ? "this was lent for reading, and cannot be lent for writing."
@@ -472,7 +472,7 @@ private:
         complain(e.span, "E0406",
                  "`" + path + "` asks for `" + wanted + "` here, and this says `" + e.text + "`.",
                  {"a transfer is spelled where it happens, and says which one it is"},
-                 {"`ref` lends for reading, `refmut` lends for writing, and `move` hands "
+                 {"`loan` lends for reading, `loanmut` lends for writing, and `move` hands "
                   "the value over for good."});
       use(e, Use::Consume, param.mode, param.copies);
       return;

@@ -326,7 +326,7 @@ private:
     }
   }
 
-  // `mut` on what a name owns, `refmut` on what it borrows. `ref` lends without
+  // `mut` on what a name owns, `loanmut` on what it borrows. `loan` lends without
   // letting go of that, and a bare chain changes nothing at all.
   // `perm` asks to keep the counter after the loop, which is what a `break`
   // leaves behind and the only reason to keep one at all.
@@ -472,7 +472,7 @@ private:
     const Expr &of = inside(*counting.args.values[0].items[0]);
     if (of.kind == ExprKind::Name)
       return of.text;
-    // `count[ref 'xs']` counts the same places `'xs'` has.
+    // `count[loan 'xs']` counts the same places `'xs'` has.
     if (of.kind == ExprKind::Borrow && of.children.size() == 1 &&
         of.children[0]->kind == ExprKind::Name)
       return of.children[0]->text;
@@ -641,7 +641,7 @@ private:
 
   static bool changeable(const Chain &chain) {
     for (const ChainSegment &seg : chain.segments)
-      if (!seg.isName && (seg.text == "mut" || seg.text == "refmut"))
+      if (!seg.isName && (seg.text == "mut" || seg.text == "loanmut"))
         return true;
     return false;
   }

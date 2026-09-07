@@ -192,9 +192,9 @@ private:
     if (value.kind == RValueKind::Collect && assignments_[s.place] == 1)
       lengths_[s.place] = static_cast<std::int64_t>(value.operands.size());
 
-    // Lending something puts it beyond what is known about it. A `refmut` is
+    // Lending something puts it beyond what is known about it. A `loanmut` is
     // written through, so what the name held before says nothing about what it
-    // holds after — and a `ref` is not written through, but reading one out is
+    // holds after — and a `loan` is not written through, but reading one out is
     // not worth the risk of being wrong about which. This was missing, and a
     // number lent for writing kept the value it was given: the compiler folded
     // `print.stdout['t']` to the `*0*` it started as, while the interpreters,

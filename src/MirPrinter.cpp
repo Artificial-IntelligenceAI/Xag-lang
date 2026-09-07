@@ -8,9 +8,9 @@ namespace xag {
 std::string spell(const MirType &type) {
   std::string out;
   if (type.lending == MirType::Lending::Write)
-    out += "refmut ";
+    out += "loanmut ";
   else if (type.lending == MirType::Lending::Read)
-    out += "ref ";
+    out += "loan ";
   if (type.orNothing)
     out += "or-nothing ";
   if (type.many)

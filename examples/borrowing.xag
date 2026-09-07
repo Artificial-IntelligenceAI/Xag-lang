@@ -1,10 +1,10 @@
 # Lending for reading, lending for writing, and handing over for good.
 
-fn.int64 'size' [ref.str 'text'] {
+fn.int64 'size' [loan.str 'text'] {
     give [count['text']];
 }
 
-fn.nothing 'shout' [refmut.str 'text'] {
+fn.nothing 'shout' [loanmut.str 'text'] {
     set 'text' = ['text' *!*];
 }
 
@@ -13,7 +13,7 @@ fn.nothing 'keep' [str 'text'] {
 }
 
 # Two things are lent and one comes back, so the loan is named.
-fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {
+fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {
     if count['a'] >== count['b'] {
         give ['a'];
     } else {
@@ -26,14 +26,14 @@ START {
     var.str 'reply' = [*hi*];
 
     # Lent for reading. 'greeting' still holds what it held.
-    print.stdout[str:*size: * size[ref 'greeting'] \n];
+    print.stdout[str:*size: * size[loan 'greeting'] \n];
 
     # Lent for writing, which is why the chain says `mut`.
-    shout[refmut 'greeting'];
+    shout[loanmut 'greeting'];
     print.stdout[str:*after: * 'greeting' \n];
 
     # The answer is borrowed from whichever of the two was longer.
-    var.ref.str 'winner' = [longer[ref 'greeting', ref 'reply']];
+    var.loan.str 'winner' = [longer[loan 'greeting', loan 'reply']];
     print.stdout[str:*longer: * 'winner' \n];
 
     # Handed over for good. 'spare' holds nothing after this line.

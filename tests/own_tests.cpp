@@ -55,8 +55,8 @@ Owned run(const std::string &text) {
 }
 
 const char *kKeep = "fn.nothing 'keep' [str 'text'] { print.stdout['text' \n]; }\n";
-const char *kLook = "fn.int64 'look' [ref.str 'text'] { give [count['text']]; }\n";
-const char *kEdit = "fn.nothing 'edit' [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n";
+const char *kLook = "fn.int64 'look' [loan.str 'text'] { give [count['text']]; }\n";
+const char *kEdit = "fn.nothing 'edit' [loanmut.str 'text'] { set 'text' = ['text' *!*]; }\n";
 
 Owned withHelpers(const std::string &body) {
   return run(std::string(kKeep) + kLook + kEdit + "START {\n" + body + "\n}\n");
@@ -89,7 +89,7 @@ void aMistakeWithTwoPlacesPointsAtBoth() {
 
   // The loan rule points at every parameter it counted.
   const Owned loan =
-      run("fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] { give ['a']; }\nSTART { }\n");
+      run("fn.loan.str 'longer' [loan.str 'a', loan.str 'b'] { give ['a']; }\nSTART { }\n");
   const xag::Diagnostic *named = loan.find("E0402");
   CHECK(named != nullptr);
   if (named)
@@ -100,9 +100,9 @@ void aTransferIsSpelled() {
   // Handing an owned `str` to a function that takes it needs the word.
   CHECK(withHelpers("var.str 's' = [*hi*];\n    keep['s'];").code(0) == "E0406");
   // And the word has to be the one the parameter asked for.
-  CHECK(withHelpers("var.str 's' = [*hi*];\n    keep[ref 's'];").code(0) == "E0406");
+  CHECK(withHelpers("var.str 's' = [*hi*];\n    keep[loan 's'];").code(0) == "E0406");
   CHECK(withHelpers("var.str 's' = [*hi*];\n    look[move 's'];").code(0) == "E0406");
-  CHECK(withHelpers("var.str 's' = [*hi*];\n    var.int64 'n' = [look[ref 's']];").ok());
+  CHECK(withHelpers("var.str 's' = [*hi*];\n    var.int64 'n' = [look[loan 's']];").ok());
 }
 
 void smallValuesAreNotMoved() {
@@ -117,31 +117,31 @@ void smallValuesAreNotMoved() {
 
 void aBorrowIsNotYoursToGiveAway() {
   CHECK(run(std::string(kKeep) +
-            "fn.nothing 'pass' [ref.str 'text'] { keep[move 'text']; }\nSTART { }\n")
+            "fn.nothing 'pass' [loan.str 'text'] { keep[move 'text']; }\nSTART { }\n")
             .code(0) == "E0404");
   // Passing a loan along is not a transfer, so nothing is spelled again.
   CHECK(run(std::string(kLook) +
-            "fn.int64 'pass' [ref.str 'text'] { give [look['text']]; }\nSTART { }\n").ok());
+            "fn.int64 'pass' [loan.str 'text'] { give [look['text']]; }\nSTART { }\n").ok());
 }
 
 void aLoanIsLentBeforeItIsWritten() {
   CHECK(run(std::string(kEdit) +
-            "fn.nothing 'pass' [ref.str 'text'] { edit[refmut 'text']; }\nSTART { }\n")
+            "fn.nothing 'pass' [loan.str 'text'] { edit[loanmut 'text']; }\nSTART { }\n")
             .code(0) == "E0407");
   // A name that does not change cannot be lent for writing either.
-  CHECK(withHelpers("var.str 's' = [*hi*];\n    edit[refmut 's'];").code(0) == "E0407");
-  CHECK(withHelpers("var.mut.str 's' = [*hi*];\n    edit[refmut 's'];").ok());
+  CHECK(withHelpers("var.str 's' = [*hi*];\n    edit[loanmut 's'];").code(0) == "E0407");
+  CHECK(withHelpers("var.mut.str 's' = [*hi*];\n    edit[loanmut 's'];").ok());
 }
 
 void aBorrowNeverOutlastsWhatItBorrowsFrom() {
   // One parameter is lent, so the loan is not in question — only the answer is.
-  CHECK(run("fn.ref.str 'broken' [ref.str 'other'] {"
+  CHECK(run("fn.loan.str 'broken' [loan.str 'other'] {"
             " var.str 'text' = [*hello*]; give ['text']; }\nSTART { }\n")
             .code(0) == "E0401");
-  CHECK(run("fn.ref.str 'echo' [ref.str 'text'] { give ['text']; }\nSTART { }\n").ok());
+  CHECK(run("fn.loan.str 'echo' [loan.str 'text'] { give ['text']; }\nSTART { }\n").ok());
 
   // With nothing lent at all, the signature is wrong before the body is read.
-  const Owned both = run("fn.ref.str 'broken' [] {"
+  const Owned both = run("fn.loan.str 'broken' [] {"
                          " var.str 'text' = [*hello*]; give ['text']; }\nSTART { }\n");
   CHECK(both.reports("E0402"));
   CHECK(both.reports("E0401"));
@@ -149,17 +149,17 @@ void aBorrowNeverOutlastsWhatItBorrowsFrom() {
 
 void aLoanIsNamedWhenThereIsAChoice() {
   // One borrowed parameter: only one loan the answer could be on.
-  CHECK(run("fn.ref.str 'echo' [ref.str 'a'] { give ['a']; }\nSTART { }\n").ok());
+  CHECK(run("fn.loan.str 'echo' [loan.str 'a'] { give ['a']; }\nSTART { }\n").ok());
   // Two: the compiler does not get to choose.
-  CHECK(run("fn.ref.str 'longer' [ref.str 'a', ref.str 'b'] { give ['a']; }\nSTART { }\n")
+  CHECK(run("fn.loan.str 'longer' [loan.str 'a', loan.str 'b'] { give ['a']; }\nSTART { }\n")
             .code(0) == "E0402");
-  CHECK(run("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b']"
+  CHECK(run("fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b']"
             " { give ['a']; }\nSTART { }\n").ok());
   // A loan nobody was lent on.
-  CHECK(run("fn.ref.'life'.str 'odd' [ref.str 'a'] { give ['a']; }\nSTART { }\n")
+  CHECK(run("fn.loan.'life'.str 'odd' [loan.str 'a'] { give ['a']; }\nSTART { }\n")
             .code(0) == "E0402");
   // Nothing lent at all.
-  CHECK(run("fn.ref.str 'nothingLent' [] { give [*x*]; }\nSTART { }\n").code(0) == "E0402");
+  CHECK(run("fn.loan.str 'nothingLent' [] { give [*x*]; }\nSTART { }\n").code(0) == "E0402");
 }
 
 void anArmThatMovesMovesForEveryArm() {
@@ -225,14 +225,14 @@ void nothingIsTakenOutOfAMany() {
                     "    keep['ws'[*0*]];").code(0) == "E0412");
   // Reading one and lending one are both fine, because neither leaves a hole.
   CHECK(withHelpers("var.many.str 'ws' = [*a* *b*];\n"
-                    "    print.stdout[(look[ref 'ws'[*0*]]) \\n];").ok());
+                    "    print.stdout[(look[loan 'ws'[*0*]]) \\n];").ok());
 }
 
 void lendingAnElementLendsTheWholeArray() {
   // Which place `'ws'['i']` names is not known until the program runs, so the
   // loan is of the array and E0408 reads exactly as it always did.
   CHECK(withHelpers("var.many.str 'ws' = [*a* *b*];\n"
-                    "    var.int64 'n' = [look[ref 'ws'[*0*]]];\n"
+                    "    var.int64 'n' = [look[loan 'ws'[*0*]]];\n"
                     "    print.stdout['n' \\n];").ok());
   CHECK(withHelpers("var.many.str 'ws' = [*a*];\n"
                     "    keep[move 'ws'];\n"
@@ -244,7 +244,7 @@ void whatHoldsLendsIsNotYoursToGiveAway() {
                     "    if 's' holds 'text' { keep[move 'text']; }").code(0) == "E0404");
   // Reading it and lending it are both fine.
   CHECK(withHelpers("var.or-nothing.str 's' = [*hi*];\n"
-                    "    if 's' holds 'text' { print.stdout[(look[ref 'text']) \n]; }").ok());
+                    "    if 's' holds 'text' { print.stdout[(look[loan 'text']) \n]; }").ok());
 }
 
 // A struct is known field by field where it is written, so one of them may be

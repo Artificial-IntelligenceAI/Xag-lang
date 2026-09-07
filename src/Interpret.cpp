@@ -139,7 +139,7 @@ private:
     Value *target = &frame.locals[slot];
     // Writing a *value* to a name that holds a loan writes through it, which is
     // what being lent for writing means. Writing a *loan* to it replaces the
-    // loan — the second time round a loop, `_2 = ref _1` would otherwise write
+    // loan — the second time round a loop, `_2 = loan _1` would otherwise write
     // the new loan through the old one and into `_1`, leaving `_1` lent to
     // itself and anything following it going round forever.
     if (target->kind == Value::Kind::Loan && value.kind != Value::Kind::Loan)
@@ -277,7 +277,7 @@ private:
   }
 
   // What a name holds, whether it holds it or only borrows it. Asking a
-  // `ref int64` what kind of number it is has no answer; asking what it lends
+  // `loan int64` what kind of number it is has no answer; asking what it lends
   // does — and that difference printed a borrowed number as `true` for months,
   // back when every engine took the spelling apart for itself.
   Type kindOf(TypeRef type) const { return shapeOf(type).lent().held; }

@@ -8,8 +8,8 @@ namespace xag {
 namespace {
 
 // A type as the middle layer holds it: spelled, the way it is written apart
-// from the dots. `many int64` and `ref many int64` are read back by prefix, the
-// way `ref str` already was.
+// from the dots. `many int64` and `loan many int64` are read back by prefix, the
+// way `loan str` already was.
 std::string spell(Ty type) {
   return type.kind == Type::Unknown ? "?" : name(type);
 }
@@ -24,7 +24,7 @@ bool owns(Ty type) { return type.kind == Type::Str || type.holds(); }
 
 // A loan is not a thing to end: it goes back to whoever lent it.
 bool isLoanType(const std::string &spelled) {
-  return spelled.rfind("ref ", 0) == 0 || spelled.rfind("refmut ", 0) == 0;
+  return spelled.rfind("loan ", 0) == 0 || spelled.rfind("loanmut ", 0) == 0;
 }
 
 class Builder {
@@ -91,7 +91,7 @@ public:
         names_.back()[param.name] = local;
         ++body_.parameters;
         // A parameter taken by value belongs to the callee, and ends with it.
-        if (!copiesNamed(type) && type.rfind("ref", 0) != 0)
+        if (!copiesNamed(type) && type.rfind("loan", 0) != 0)
           scopes_.back().push_back(local);
       }
 
@@ -161,10 +161,12 @@ private:
                               typeNamed(type) != Type::Unknown);
   }
 
-  // A parameter's type is written on its chain, loan and all: `ref str`.
+  // A parameter's type is written on its chain, loan and all: `loan str`.
   // What is left of a spelled type once `or-nothing` is off it.
   static std::string within(const std::string &spelled) {
-    return spelled.rfind("or-nothing ", 0) == 0 ? spelled.substr(11) : spelled;
+    return opensWith(spelled, "or-nothing ")
+               ? spelled.substr(std::string_view("or-nothing ").size())
+               : spelled;
   }
 
   static std::string chainType(const Chain &chain) {
@@ -172,7 +174,7 @@ private:
     for (const ChainSegment &seg : chain.segments) {
       if (seg.isName)
         continue;
-      if (seg.text == "ref" || seg.text == "refmut")
+      if (seg.text == "loan" || seg.text == "loanmut")
         mode = seg.text + " ";
     }
     if (chain.segments.empty())
@@ -193,16 +195,24 @@ private:
 
   // What is left of a spelled type once its loan word is off, and what one of
   // its places holds when it is a `many`.
+  // Taking a word off the front, counted from the word rather than by hand.
+  // Renaming `loan` to `loan` left the hand-written 4 behind, and a type came
+  // back with a space on the front and meant nothing at all.
+  static bool opensWith(std::string_view spelled, std::string_view word) {
+    return spelled.rfind(word, 0) == 0;
+  }
+
   static std::string withoutLoan(const std::string &spelled) {
-    if (spelled.rfind("ref ", 0) == 0)
-      return spelled.substr(4);
-    if (spelled.rfind("refmut ", 0) == 0)
-      return spelled.substr(7);
+    if (opensWith(spelled, "loanmut "))
+      return spelled.substr(std::string_view("loanmut ").size());
+    if (opensWith(spelled, "loan "))
+      return spelled.substr(std::string_view("loan ").size());
     return spelled;
   }
   static std::string elementOf(const std::string &spelled) {
     const std::string bare = withoutLoan(spelled);
-    return bare.rfind("many ", 0) == 0 ? bare.substr(5) : std::string("?");
+    return opensWith(bare, "many ") ? bare.substr(std::string_view("many ").size())
+                                    : std::string("?");
   }
 
   TypeRef typeRef(const std::string &name) {
@@ -218,20 +228,20 @@ private:
 
   MirType takeApart(std::string_view spelled) const {
     MirType out;
-    if (spelled.rfind("refmut ", 0) == 0) {
+    if (opensWith(spelled, "loanmut ")) {
       out.lending = MirType::Lending::Write;
-      spelled.remove_prefix(7);
-    } else if (spelled.rfind("ref ", 0) == 0) {
+      spelled.remove_prefix(std::string_view("loanmut ").size());
+    } else if (opensWith(spelled, "loan ")) {
       out.lending = MirType::Lending::Read;
-      spelled.remove_prefix(4);
+      spelled.remove_prefix(std::string_view("loan ").size());
     }
     if (spelled.rfind("or-nothing ", 0) == 0) {
       out.orNothing = true;
-      spelled.remove_prefix(11);
+      spelled.remove_prefix(std::string_view("or-nothing ").size());
     }
     if (spelled.rfind("many ", 0) == 0) {
       out.many = true;
-      spelled.remove_prefix(5);
+      spelled.remove_prefix(std::string_view("many ").size());
     }
     out.held = typeNamed(spelled);
     if (out.held == Type::Unknown)
@@ -413,7 +423,7 @@ private:
         return temporary(typeRef("?"), true);
       const std::string held = elementOf(body_.types[body_.locals[*of].type.index]);
       const bool copiesElement = copiesNamed(held);
-      const std::string spelled = copiesElement ? held : "ref " + held;
+      const std::string spelled = copiesElement ? held : "loan " + held;
       const unsigned into = temporary(typeRef(spelled), copiesElement);
       std::vector<Operand> parts;
       parts.push_back(Operand{OperandKind::Copy, *of, {}, body_.locals[*of].type});
@@ -447,7 +457,7 @@ private:
       // What copies is read out; what has an owner is lent where it stands, the
       // same as an element of a `many`.
       const bool copiesIt = copiesNamed(inner);
-      const std::string as = copiesIt ? inner : "ref " + inner;
+      const std::string as = copiesIt ? inner : "loan " + inner;
       const unsigned into = temporary(typeRef(as), copiesIt);
       emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Part, e.text, {}, which,
@@ -651,7 +661,7 @@ private:
       return;
     const std::string inner = within(spelled);
     const bool copies = copiesNamed(inner);
-    const std::string as = copies ? inner : "ref " + inner;
+    const std::string as = copies ? inner : "loan " + inner;
     const unsigned into = addLocal(holds, typeRef(as), copies);
     emit(Statement{StatementKind::Assign, where, into, {}, {},
                    RValue{RValueKind::Inside, {}, {}, 0,
@@ -668,7 +678,7 @@ private:
       const unsigned local = addLocal(s.name, typeRef(spelled), copiesNamed(spelled));
       assignInto(local, s.value, s.span);
       names_.back()[s.name] = local;
-      if (!body_.locals[local].copies && spelled.rfind("ref", 0) != 0)
+      if (!body_.locals[local].copies && spelled.rfind("loan", 0) != 0)
         scopes_.back().push_back(local);
       break;
     }

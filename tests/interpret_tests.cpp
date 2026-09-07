@@ -273,11 +273,11 @@ void itKnowsItsConstants() {
 }
 
 void itLendsAndTakes() {
-  SAYS("fn.int64 'size' [ref.str 'text'] { give [count['text']]; }\n"
-       "START { var.str 's' = [*café*]; print.stdout[size[ref 's'] \\n]; }\n",
+  SAYS("fn.int64 'size' [loan.str 'text'] { give [count['text']]; }\n"
+       "START { var.str 's' = [*café*]; print.stdout[size[loan 's'] \\n]; }\n",
        "4\n");
-  SAYS("fn.nothing 'shout' [refmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
-       "START { var.mut.str 's' = [*hi*]; shout[refmut 's'];"
+  SAYS("fn.nothing 'shout' [loanmut.str 'text'] { set 'text' = ['text' *!*]; }\n"
+       "START { var.mut.str 's' = [*hi*]; shout[loanmut 's'];"
        " print.stdout['s' \\n]; }\n",
        "hi!\n");
   SAYS("fn.nothing 'keep' [str 'text'] { print.stdout['text' \\n]; }\n"
@@ -311,15 +311,15 @@ void aRunawayProgramIsStopped() {
 
 void itHoldsSeveralValues() {
   SAYS("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
-       "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[ref 'xs']) \\n]; }\n",
+       "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[loan 'xs']) \\n]; }\n",
        "10 30 of 3\n");
   SAYS("START { var.mut.many.int64 'xs' = [*1* *2*];\n"
        "  set 'xs'[*1*] = [*9*];\n"
        "  print.stdout['xs'[*1*] \\n]; }\n", "9\n");
   SAYS("START { var.many.int64 'xs' = [fill[*7*, *4*]];\n"
-       "  print.stdout['xs'[*3*] str:* of * (count[ref 'xs']) \\n]; }\n", "7 of 4\n");
+       "  print.stdout['xs'[*3*] str:* of * (count[loan 'xs']) \\n]; }\n", "7 of 4\n");
   SAYS("START { var.many.int64 'none' = [];\n"
-       "  print.stdout[(count[ref 'none']) \\n]; }\n", "0\n");
+       "  print.stdout[(count[loan 'none']) \\n]; }\n", "0\n");
 }
 
 void itEndsEveryPlaceItHeld() {
@@ -445,9 +445,9 @@ void itHoldsAGroupOfNamedThings() {
        "    is 'one'   { print.stdout['one'.name \\n]; }\n"
        "    is nothing { print.stdout[str:*none* \\n]; } } }\n", "none\n");
   SAYS("struct 'point' [int64 'x', int64 'y']\n"
-       "fn.int64 'across' [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
+       "fn.int64 'across' [loan.point 'p'] { give ['p'.x + 'p'.y]; }\n"
        "START { var.point 'p' = [*20* *22*];\n"
-       "  print.stdout[(across[ref 'p']) \\n]; }\n", "42\n");
+       "  print.stdout[(across[loan 'p']) \\n]; }\n", "42\n");
 }
 
 // A number written into text is written by the very code that prints it, so the
@@ -480,46 +480,46 @@ void itWritesANumberIntoText() {
        "    print.stdout['s' \\n]; } }\n", "7\n7\n7\n");
 }
 
-// A borrowed number is a number. Its spelled type is `ref int64`, which names
+// A borrowed number is a number. Its spelled type is `loan int64`, which names
 // no type at all — asking about that instead of what is behind it printed a
 // borrowed `int64` as `true` and a borrowed `deci64` as whatever a width of
 // zero produces. Both engines had it, and no generated program had ever printed
 // a borrowed number, so no vote between three of them ever noticed.
 void itLooksBehindALoan() {
-  SAYS("fn.nothing 'show' [ref.int64 'a', ref.int8 'b', ref.deci64 'c', ref.bin32 'd'] {\n"
+  SAYS("fn.nothing 'show' [loan.int64 'a', loan.int8 'b', loan.deci64 'c', loan.bin32 'd'] {\n"
        "  print.stdout['a' str:* * 'b' str:* * 'c' str:* * 'd' \\n]; }\n"
        "START { var.int64 'a' = [*300*];\n  var.int8 'b' = [*-5*];\n"
        "  var.deci64 'c' = [*1.10*];\n  var.bin32 'd' = [*0.5*];\n"
-       "  show[ref 'a', ref 'b', ref 'c', ref 'd'];\n"
+       "  show[loan 'a', loan 'b', loan 'c', loan 'd'];\n"
        "  print.stdout['a' str:* * 'b' str:* * 'c' str:* * 'd' \\n]; }\n",
        "300 -5 1.10 0.5\n300 -5 1.10 0.5\n");
 
   // And the same through `convert-to-str`, which asked the same question.
-  SAYS("fn.str 'spell' [ref.int64 'n'] { give [convert-to-str['n']]; }\n"
+  SAYS("fn.str 'spell' [loan.int64 'n'] { give [convert-to-str['n']]; }\n"
        "START { var.int64 'n' = [*7*];\n"
-       "  var.str 's' = [spell[ref 'n']];\n"
-       "  print.stdout['s' str:* * (count[ref 's']) \\n]; }\n",
+       "  var.str 's' = [spell[loan 'n']];\n"
+       "  print.stdout['s' str:* * (count[loan 's']) \\n]; }\n",
        "7 1\n");
-  SAYS("fn.str 'spell' [ref.deci64 'd'] { give [convert-to-str['d']]; }\n"
+  SAYS("fn.str 'spell' [loan.deci64 'd'] { give [convert-to-str['d']]; }\n"
        "START { var.deci64 'd' = [*1.10*];\n"
-       "  print.stdout[(spell[ref 'd']) \\n]; }\n",
+       "  print.stdout[(spell[loan 'd']) \\n]; }\n",
        "1.10\n");
 }
 
 // Writing a number or a `bool` through a loan, which two engines got wrong in
 // two different ways because every loan ever generated was a loan of text.
 void itWritesThroughALoan() {
-  SAYS("fn.nothing 'add-into' [refmut.int64 'total', ref.int64 'step'] {\n"
+  SAYS("fn.nothing 'add-into' [loanmut.int64 'total', loan.int64 'step'] {\n"
        "  loop.range.int64 'i' = [*1*, *3*] { set 'total' = ['total' + 'step']; } }\n"
        "START { var.mut.int64 't' = [*0*];\n  var.int64 's' = [*3*];\n"
-       "  add-into[refmut 't', ref 's'];\n  print.stdout['t' \\n]; }\n", "9\n");
-  SAYS("fn.nothing 'flip' [refmut.bool 'b'] { set 'b' = [not 'b']; }\n"
-       "START { var.mut.bool 'b' = [*false*];\n  flip[refmut 'b'];\n"
+       "  add-into[loanmut 't', loan 's'];\n  print.stdout['t' \\n]; }\n", "9\n");
+  SAYS("fn.nothing 'flip' [loanmut.bool 'b'] { set 'b' = [not 'b']; }\n"
+       "START { var.mut.bool 'b' = [*false*];\n  flip[loanmut 'b'];\n"
        "  print.stdout['b' \\n]; }\n", "true\n");
   SAYS("struct 'tag' [str 'name', int64 'n']\n"
-       "fn.int64 'peek' [ref.tag 't'] { give ['t'.n]; }\n"
+       "fn.int64 'peek' [loan.tag 't'] { give ['t'.n]; }\n"
        "START { var.tag 't' = [*ada* *7*];\n"
-       "  print.stdout[(peek[ref 't']) \\n]; }\n", "7\n");
+       "  print.stdout[(peek[loan 't']) \\n]; }\n", "7\n");
 }
 
 void itReadsWhatItIsGiven() {
@@ -559,7 +559,7 @@ void itKnowsWhatItWasGiven() {
   char *passed[] = {first, second};
   xag_set_arguments(2, passed);
   SAYS("START { var.many.str 'a' = [arguments[]];\n"
-       "  print.stdout[(count[ref 'a']) str:* * 'a'[*0*] str:* * 'a'[*1*] \\n]; }\n",
+       "  print.stdout[(count[loan 'a']) str:* * 'a'[*0*] str:* * 'a'[*1*] \\n]; }\n",
        "2 alpha beta\n");
   xag_set_arguments(0, nullptr);
 }

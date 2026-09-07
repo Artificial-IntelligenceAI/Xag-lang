@@ -120,11 +120,11 @@ void switchIsGeneralFromTheStart() {
 }
 
 void typesAreSymbolic() {
-  const Built b = run("fn.str 'greet' [ref.str 'who'] { give [*hi*]; }\nSTART { }\n");
+  const Built b = run("fn.str 'greet' [loan.str 'who'] { give [*hi*]; }\nSTART { }\n");
   CHECK(b.clean());
   // A body carries its own table, and a loan is a type in it like any other.
   CHECK(!b.body(0).types.empty());
-  CHECK(b.has(": ref str"));
+  CHECK(b.has(": loan str"));
 }
 
 void whatIsOwnedIsDropped() {

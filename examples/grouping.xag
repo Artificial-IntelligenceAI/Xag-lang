@@ -6,18 +6,18 @@ struct 'point' [int64 'x', int64 'y']
 
 struct 'runner' [str 'name', point 'at']
 
-fn.int64 'across' [ref.point 'p'] {
+fn.int64 'across' [loan.point 'p'] {
     give ['p'.x + 'p'.y];
 }
 
 START {
     var.mut.point 'p' = [*20* *22*];
-    print.stdout[str:*across: * (across[ref 'p']) \n];
+    print.stdout[str:*across: * (across[loan 'p']) \n];
 
     # One of them is named with a dot. The mark stays on the name, because the
     # name is the variable and `x` is one of the things it holds.
     set 'p'.y = [*0*];
-    print.stdout[str:*after setting y: * (across[ref 'p']) \n];
+    print.stdout[str:*after setting y: * (across[loan 'p']) \n];
 
     # A struct is handed over rather than copied, as a `many` is: the places it
     # holds are its own. Whether an item going in needs `move` is that field's

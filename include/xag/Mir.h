@@ -19,7 +19,7 @@ struct TypeRef {
 // What a local holds, taken apart once rather than spelled and re-read.
 //
 // It used to be only the spelling, and every engine pulled it apart again with
-// its own `rfind("ref ")` — thirty-odd places across five files, each free to
+// its own `rfind("loan ")` — thirty-odd places across five files, each free to
 // forget a case. Two of them forgot the same one, and a borrowed number printed
 // as `true` for months while three engines agreed. Taking a type apart where it
 // is made, once, is the difference between that mistake being untested and
@@ -39,7 +39,7 @@ struct MirType {
   bool writesThrough() const { return lending == Lending::Write; }
 
   // The same type with the loan taken off, which is what a borrow is a borrow
-  // of. Asking a `ref int64` what kind of number it is has no answer; asking
+  // of. Asking a `loan int64` what kind of number it is has no answer; asking
   // this does.
   MirType lent() const {
     MirType out = *this;
@@ -71,7 +71,7 @@ struct MirType {
 };
 
 // Spelled the way the middle layer prints it, and the way it was written before
-// this was a structure: `ref many int64`.
+// this was a structure: `loan many int64`.
 std::string spell(const MirType &type);
 
 // A named slot. The first `parameters` locals of a body are its parameters, and
@@ -115,7 +115,7 @@ enum class RValueKind {
 
 struct RValue {
   RValueKind kind = RValueKind::Use;
-  std::string op;      // Binary, Unary, or "ref"/"refmut" for Ref
+  std::string op;      // Binary, Unary, or "loan"/"loanmut" for Ref
   std::string callee;  // Call
   unsigned local = 0;  // Ref
   std::vector<Operand> operands;

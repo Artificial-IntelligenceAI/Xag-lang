@@ -35,7 +35,7 @@ enum class Slot {
   Kind,       // var, fn, const, loop
   Visibility, // export / program, default file
   Mutability, // mut, default immut
-  Ownership,  // ref / refmut, default own
+  Ownership,  // loan / loanmut, default own
   Lifetime,   // 'life' — a name for a loan
   Counter,    // perm, default temp
   Form,       // range / while
@@ -66,7 +66,7 @@ Slot slotOf(std::string_view word) {
     return Slot::Visibility;
   if (word == "mut" || word == "immut")
     return Slot::Mutability;
-  if (word == "ref" || word == "refmut" || word == "own")
+  if (word == "loan" || word == "loanmut" || word == "own")
     return Slot::Ownership;
   if (word == "perm" || word == "temp")
     return Slot::Counter;
@@ -492,8 +492,8 @@ private:
         return make(ExprKind::Nothing, token.span, "nothing");
       }
 
-      // `ref 'x'`, `refmut 'x'`, `move 'x'` — a transfer, always spelled.
-      if (token.text == "ref" || token.text == "refmut" || token.text == "move") {
+      // `loan 'x'`, `loanmut 'x'`, `move 'x'` — a transfer, always spelled.
+      if (token.text == "loan" || token.text == "loanmut" || token.text == "move") {
         advance();
         ExprPtr inner = primary();
         Span span{token.span.begin, inner->span.end};

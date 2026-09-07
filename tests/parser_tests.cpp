@@ -155,10 +155,10 @@ void writingADefaultIsAnError() {
 }
 
 void transfersAreSpelled() {
-  const Parsed p = inStart("keep[move 'greeting'];\n    size[ref 'greeting'];");
+  const Parsed p = inStart("keep[move 'greeting'];\n    size[loan 'greeting'];");
   CHECK(p.ok());
   CHECK(p.has("transfer move"));
-  CHECK(p.has("transfer ref"));
+  CHECK(p.has("transfer loan"));
 }
 
 void armsOfAnIf() {
@@ -222,7 +222,7 @@ void eachChainAsksItsOwnQuestions() {
   CHECK(inStart("var.perm.int64 'n' = [*1*];").code(0) == "E0203");
 
   // A lifetime names the loan an answer is on, and a `var` is not an answer.
-  CHECK(inStart("var.ref.'life'.str 's' = [*hi*];").code(0) == "E0203");
+  CHECK(inStart("var.loan.'life'.str 's' = [*hi*];").code(0) == "E0203");
 
   // The kind is said once, and first.
   CHECK(inStart("var.var.int64 'n' = [*1*];").code(0) == "E0203");
@@ -236,10 +236,10 @@ void oneQuestionIsAnsweredOnce() {
 }
 
 void aChainHasOneOrder() {
-  const Parsed p = inStart("var.ref.mut.str 's' = [*hi*];");
+  const Parsed p = inStart("var.loan.mut.str 's' = [*hi*];");
   CHECK(!p.parsed.ok());
   CHECK(p.code(0) == "E0205");
-  CHECK(inStart("var.mut.ref.str 's' = [*hi*];").ok());
+  CHECK(inStart("var.mut.loan.str 's' = [*hi*];").ok());
 }
 
 void visibilityHasNowhereToGoYet() {
@@ -274,18 +274,18 @@ void anElementIsReadAndWritten() {
 
 void manyStandsWithTheType() {
   CHECK(inStart("var.many.int64 'xs' = [*1* *2*];").ok());
-  CHECK(run("fn.many.int64 'f' [ref.many.str 'ws'] { give [*1*]; }\n").ok());
+  CHECK(run("fn.many.int64 'f' [loan.many.str 'ws'] { give [*1*]; }\n").ok());
   CHECK(inStart("var.many.many.int64 'g' = [];").code(0) == "E0210");
   CHECK(inStart("var.many.mut.int64 'xs' = [*1*];").code(0) == "E0209");
 }
 
 void chainsThatWereAlwaysGoodStillAre() {
-  CHECK(run("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+  CHECK(run("fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {\n"
             "    give ['a'];\n}\n").ok());
-  CHECK(run("fn.nothing 'edit' [refmut.str 't'] { set 't' = ['t' *!*]; }\n").ok());
+  CHECK(run("fn.nothing 'edit' [loanmut.str 't'] { set 't' = ['t' *!*]; }\n").ok());
   CHECK(run("const.int64 'LIMIT' = [*10*];\n").ok());
   CHECK(inStart("var.mut.int64 'n' = [*1*];").ok());
-  CHECK(inStart("var.refmut.str 's' = [refmut 'other'];").ok());
+  CHECK(inStart("var.loanmut.str 's' = [loanmut 'other'];").ok());
 }
 
 void aTypeMaySayItHoldsNothing() {
@@ -339,7 +339,7 @@ void aDeclarationMarksWhatItNames() {
             "START { var.point 'p' = [*1*]; }\n").ok());
 
   // The loan name in a chain was already marked, and still is.
-  CHECK(run("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+  CHECK(run("fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {\n"
             "    give ['a'];\n}\n").ok());
 }
 

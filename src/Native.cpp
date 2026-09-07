@@ -399,11 +399,11 @@ private:
     // it sees two pointers and must assume the worst of them, where the region
     // pass has already refused every program in which the worst is possible.
     //
-    // A `refmut` is the only loan of what it points at while it lasts — lending
+    // A `loanmut` is the only loan of what it points at while it lasts — lending
     // the same thing twice for writing, or for writing and reading at once, is
     // `E0410`. So it cannot alias anything else the function was handed.
     //
-    // A `ref` may share with other `ref`s, so it is not `noalias`. Nothing is
+    // A `loan` may share with other `loan`s, so it is not `noalias`. Nothing is
     // ever written through one, so it is `readonly`.
     for (unsigned i = 1; i <= body.parameters && i < body.locals.size(); ++i) {
       const MirType &held = typing(body.locals[i].type);
@@ -669,7 +669,7 @@ private:
     // lends. Only text was ever asked here, so writing through a loan of a
     // number stored the number *over the loan* and the next read of it followed
     // a pointer that was a `3`.
-    // Writing *through* a loan, not making one. `_3 = refmut 't'` puts the
+    // Writing *through* a loan, not making one. `_3 = loanmut 't'` puts the
     // address of `'t'` into `_3`; `set 't' = […]` through that loan puts a value
     // where `_3` points. Telling them apart is what the value's own type says:
     // a loan going in is a loan being made. Getting this wrong stored through a
@@ -916,7 +916,7 @@ private:
   llvm::Value *binary(const RValue &value) {
     const std::string &op = value.op;
     // What the loan lends, not the loan. Every loan used to be taken for a loan
-    // of text, because for a long time every loan was one — so `refmut int64`
+    // of text, because for a long time every loan was one — so `loanmut int64`
     // came in here and two pointers-to-a-number went to `xag_str_compare`.
     const MirType leftType = withoutLoan(typing(value.operands[0].type));
     const bool onText = isText(leftType);
@@ -1106,7 +1106,7 @@ private:
     if (value.callee == "print.stdout") {
       for (const Operand &operand : value.operands) {
         // What is behind the loan, not the loan: a borrowed number is a number,
-        // and asking `ref int64` what type it is answers nothing at all.
+        // and asking `loan int64` what type it is answers nothing at all.
         const MirType type = withoutLoan(typing(operand.type));
         const Type named = type.held;
         if (isDecimal(named))

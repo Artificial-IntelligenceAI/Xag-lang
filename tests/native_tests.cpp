@@ -101,15 +101,15 @@ void itEmitsWholePrograms() {
 void itEmitsFunctionsAndLoans() {
   EMITS("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
         "START { print.stdout[twice[*21*] \\n]; }\n", "xag_twice");
-  EMITS("fn.int64 'size' [ref.str 'text'] { give [count['text']]; }\n"
-        "START { var.str 's' = [*café*]; print.stdout[size[ref 's'] \\n]; }\n",
+  EMITS("fn.int64 'size' [loan.str 'text'] { give [count['text']]; }\n"
+        "START { var.str 's' = [*café*]; print.stdout[size[loan 's'] \\n]; }\n",
         "xag_str_count");
   // A function that lends its answer back must not look like one that hands it
   // over: getting that wrong once made the optimiser delete the program.
-  EMITS("fn.ref.'life'.str 'longer' [ref.'life'.str 'a', ref.'life'.str 'b'] {\n"
+  EMITS("fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {\n"
         "  if count['a'] >== count['b'] { give ['a']; } else { give ['b']; } }\n"
         "START { var.str 'x' = [*hello*]; var.str 'y' = [*hi*];\n"
-        "  var.ref.str 'w' = [longer[ref 'x', ref 'y']];\n"
+        "  var.loan.str 'w' = [longer[loan 'x', loan 'y']];\n"
         "  print.stdout['w' \\n]; }\n",
         "xag_longer");
 }
@@ -134,12 +134,12 @@ void itEmitsAMany() {
   // The check is written out rather than called, so what a reach past the end
   // reaches is the half that stops — and only that half. The place has to be
   // one nobody knows yet, since a written one is settled before this runs.
-  EMITS("fn.nothing 'at' [ref.many.int64 'xs', int64 'i'] {\n"
+  EMITS("fn.nothing 'at' [loan.many.int64 'xs', int64 'i'] {\n"
         "  print.stdout['xs'['i'] \\n]; }\n"
         "START { var.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  at[ref 'xs', *0*]; }\n", "call void @xag_many_out_of_range");
+        "  at[loan 'xs', *0*]; }\n", "call void @xag_many_out_of_range");
   EMITS("START { var.many.int64 'xs' = [*1* *2*];\n"
-        "  print.stdout[(count[ref 'xs']) \\n]; }\n", "xag_many_new");
+        "  print.stdout[(count[loan 'xs']) \\n]; }\n", "xag_many_new");
   // A `many` of text lets go of what sits in every place, not only the buffer.
   EMITS("START { var.many.str 'ws' = [*a* *b*];\n"
         "  print.stdout['ws'[*1*] \\n]; }\n", "xag_many_drop_str");
@@ -162,9 +162,9 @@ void aLoanPassedOnIsTheLoan() {
   // Lending something already borrowed passes the loan along rather than making
   // a loan of the pointer. Every borrow through two functions read rubbish
   // before this, and no vote between the interpreters would have said so.
-  EMITS("fn.int64 'size' [ref.str 't'] { give [count['t']]; }\n"
-        "fn.int64 'outer' [ref.str 'u'] { give [size[ref 'u']]; }\n"
-        "START { var.str 's' = [*hello*]; print.stdout[(outer[ref 's']) \\n]; }\n",
+  EMITS("fn.int64 'size' [loan.str 't'] { give [count['t']]; }\n"
+        "fn.int64 'outer' [loan.str 'u'] { give [size[loan 'u']]; }\n"
+        "START { var.str 's' = [*hello*]; print.stdout[(outer[loan 's']) \\n]; }\n",
         "xag_str_count");
 }
 
@@ -197,9 +197,9 @@ void itEmitsAGroupOfNamedThings() {
         "  print.stdout['ps'[*1*].x \\n]; }\n",
         "xag_many_new");
   EMITS("struct 'point' [int64 'x', int64 'y']\n"
-        "fn.int64 'across' [ref.point 'p'] { give ['p'.x + 'p'.y]; }\n"
+        "fn.int64 'across' [loan.point 'p'] { give ['p'.x + 'p'.y]; }\n"
         "START { var.point 'p' = [*20* *22*];\n"
-        "  print.stdout[(across[ref 'p']) \\n]; }\n",
+        "  print.stdout[(across[loan 'p']) \\n]; }\n",
         "@xag_across");
   // A `many` of them, and one behind `or-nothing`. The second was invalid IR:
   // the group was built as though the absence were one of the fields.
@@ -295,30 +295,30 @@ void aSettledPlaceIsNotAskedAgain() {
           "call void @xag_many_out_of_range");
 
   // A place that is not known until it runs is still asked about.
-  EMITS("fn.nothing 'at' [ref.many.int64 'xs', int64 'i'] {\n"
+  EMITS("fn.nothing 'at' [loan.many.int64 'xs', int64 'i'] {\n"
         "  print.stdout['xs'['i'] \\n]; }\n"
         "START { var.many.int64 'ns' = [*10* *20*];\n"
-        "  at[ref 'ns', *1*]; }\n",
+        "  at[loan 'ns', *1*]; }\n",
         "xag_many_out_of_range");
 
   // A loop counting the places a `many` has reaches one it has every time
   // round, because a `many` is a fixed length once it is made. This is the
   // shape every program that walks an array writes.
   REJECTS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
-          "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+          "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
           "    print.stdout['xs'['i'] \\n]; } }\n",
           "call void @xag_many_out_of_range");
 
   // Counting one and reaching into another says nothing about the other.
   EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
         "  var.many.int64 'ys' = [*1* *2*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
         "    print.stdout['ys'['i'] \\n]; } }\n",
         "call void @xag_many_out_of_range");
 
   // Nor does reaching with anything but the counter.
   EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
         "    var.int64 'j' = ['i' + *5*];\n"
         "    print.stdout['xs'['j'] \\n]; } }\n",
         "call void @xag_many_out_of_range");
@@ -326,7 +326,7 @@ void aSettledPlaceIsNotAskedAgain() {
   // A `many` never changes length, but a name can be given a different one —
   // and then how many places it has is no longer what was counted.
   EMITS("START { var.mut.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[ref 'xs'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
         "    set 'xs' = [*9*];\n"
         "    print.stdout['xs'['i'] \\n]; } }\n",
         "call void @xag_many_out_of_range");
@@ -357,14 +357,14 @@ void itWritesANumberIntoText() {
 // A borrowed number is read through the loan, not widened as a pointer — which
 // LLVM would not even build.
 void itLooksBehindALoan() {
-  EMITS("fn.nothing 'show' [ref.int64 'a', ref.deci64 'c'] {\n"
+  EMITS("fn.nothing 'show' [loan.int64 'a', loan.deci64 'c'] {\n"
         "  print.stdout['a' str:* * 'c' \\n]; }\n"
         "START { var.int64 'a' = [*300*];\n  var.deci64 'c' = [*1.10*];\n"
-        "  show[ref 'a', ref 'c']; }\n",
+        "  show[loan 'a', loan 'c']; }\n",
         "xag_print_int");
-  EMITS("fn.str 'spell' [ref.int64 'n'] { give [convert-to-str['n']]; }\n"
+  EMITS("fn.str 'spell' [loan.int64 'n'] { give [convert-to-str['n']]; }\n"
         "START { var.int64 'n' = [*7*];\n"
-        "  print.stdout[(spell[ref 'n']) \\n]; }\n",
+        "  print.stdout[(spell[loan 'n']) \\n]; }\n",
         "xag_str_of_int");
 }
 
@@ -372,24 +372,24 @@ void itLooksBehindALoan() {
 // `not` on one each took the loan for the thing it lends — for as long as every
 // loan anybody wrote was a loan of text.
 void aLoanIsNotAlwaysOfText() {
-  EMITS("fn.nothing 'add-into' [refmut.int64 'total', ref.int64 'step'] {\n"
+  EMITS("fn.nothing 'add-into' [loanmut.int64 'total', loan.int64 'step'] {\n"
         "  set 'total' = ['total' + 'step']; }\n"
         "START { var.mut.int64 't' = [*0*];\n  var.int64 's' = [*3*];\n"
-        "  add-into[refmut 't', ref 's'];\n  print.stdout['t' \\n]; }\n",
+        "  add-into[loanmut 't', loan 's'];\n  print.stdout['t' \\n]; }\n",
         "add i64");
-  EMITS("fn.nothing 'flip' [refmut.bool 'b'] { set 'b' = [not 'b']; }\n"
-        "START { var.mut.bool 'b' = [*false*];\n  flip[refmut 'b'];\n"
+  EMITS("fn.nothing 'flip' [loanmut.bool 'b'] { set 'b' = [not 'b']; }\n"
+        "START { var.mut.bool 'b' = [*false*];\n  flip[loanmut 'b'];\n"
         "  print.stdout['b' \\n]; }\n",
         "xor i1");
 
   // What the borrow rules promise, said where the optimiser can read it.
-  EMITS("fn.nothing 'edit' [refmut.str 'a', ref.str 'b'] { set 'a' = ['a' 'b']; }\n"
+  EMITS("fn.nothing 'edit' [loanmut.str 'a', loan.str 'b'] { set 'a' = ['a' 'b']; }\n"
         "START { var.mut.str 'x' = [*x*];\n  var.str 'y' = [*y*];\n"
-        "  edit[refmut 'x', ref 'y']; }\n",
+        "  edit[loanmut 'x', loan 'y']; }\n",
         "noalias");
-  EMITS("fn.nothing 'edit' [refmut.str 'a', ref.str 'b'] { set 'a' = ['a' 'b']; }\n"
+  EMITS("fn.nothing 'edit' [loanmut.str 'a', loan.str 'b'] { set 'a' = ['a' 'b']; }\n"
         "START { var.mut.str 'x' = [*x*];\n  var.str 'y' = [*y*];\n"
-        "  edit[refmut 'x', ref 'y']; }\n",
+        "  edit[loanmut 'x', loan 'y']; }\n",
         "readonly");
 }
 

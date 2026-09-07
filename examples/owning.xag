@@ -1,10 +1,10 @@
 # What a name owns, what it lends, and what it gives away.
 
-fn.int64 'size' [ref.str 'text'] {
+fn.int64 'size' [loan.str 'text'] {
     give [count['text']];
 }
 
-fn.nothing 'excite' [refmut.str 'text'] {
+fn.nothing 'excite' [loanmut.str 'text'] {
     set 'text' = ['text' *!*];
 }
 
@@ -16,9 +16,9 @@ fn.nothing 'keep' [str 'text'] {
 START {
     var.mut.str 'greeting' = [*Hello, * *world*];
 
-    print.stdout[str:*size = * size[ref 'greeting'] \n];
+    print.stdout[str:*size = * size[loan 'greeting'] \n];
 
-    excite[refmut 'greeting'];
+    excite[loanmut 'greeting'];
     print.stdout['greeting' \n];
 
     keep[move 'greeting'];
