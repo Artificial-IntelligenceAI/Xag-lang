@@ -207,18 +207,56 @@ START {
 down for everything it is entered with, and builds it into a program of its own
 called `START`. That program is run both ways like any other.
 
-A loop qualifies on three rules, each about being *sure* rather than about being
+A loop qualifies on two rules, each about being *sure* rather than about being
 *able*:
 
-- **Everything it touches is a plain number or a `bool`.** Text, a `many`, a
-  struct or a borrow would have to be built up again outside the loop, and
-  handing a loop something it does not really own is how a compile-time run
-  starts freeing what a program still holds.
 - **It calls nothing.** A call reaches code with its own state and its own
   reads, and following it is following the whole program again.
-- **Every value it is entered with is assigned exactly once outside the loop,
-  and assigned a written value.** One assignment outside means no other value
-  can reach it, which settles the question without asking which paths run.
+- **Every value it is entered with is changed exactly once outside the loop, and
+  that change is one that can be made again out of what is written in it.** One
+  change outside means no other value can reach it, which settles the question
+  without asking which paths run.
+
+The second rule used to be about *types* — plain numbers and `bool`s only,
+because text or a `many` "would have to be built up again outside the loop, and
+handing a loop something it does not really own is how a compile-time run starts
+freeing what a program still holds". That worry was misplaced. Nothing is
+handed over: a `many` of written numbers is **built again**, so the lifted loop
+owns a copy of its own and shares nothing. What matters is whether the value can
+be made again, not what type it is.
+
+### What "changed" means, which cost two bugs
+
+A name is changed three ways and only one of them is an assignment:
+
+```cpp
+bool couldChange(const Statement &s, unsigned id) {
+  if ((s.kind == StatementKind::Assign || s.kind == StatementKind::Store) &&
+      s.place == id) return true;
+  return s.value.kind == RValueKind::Ref && s.value.op == "loanmut" &&
+         s.value.local == id;
+}
+```
+
+Writing one place of a `many` is a `Store` and leaves the name alone. Lending a
+name out for writing hands the changing to somebody else. Counting only
+assignments made both invisible, in both directions:
+
+```
+var.mut.many.int64 'xs' = [*0* *0* *0*];
+set 'xs'[*0*] = [*7*];                      # invisible
+loop … { set 'sum' = ['sum' + 'xs'['i']]; }
+```
+
+was lifted with the array as first written, so the compiler folded the loop into
+a sum of zeroes while both interpreters said 15. **The oracle found that one**,
+and the report said `native is the one out of step` — which is what a bad
+rewrite looks like, native being the only engine given rewritten code.
+
+The other direction is the same mistake: a loop writing through a `loanmut`
+never assigns to the name behind it, so folding the loop threw the writes away.
+`n = 5` interpreted, `n = 0` built. Nothing found that; it was sitting beside
+the first one.
 
 **A lifted loop may only drop a bound, never raise one.** It says what happens
 when the loop is entered; whether it is *ever* entered is a question about the

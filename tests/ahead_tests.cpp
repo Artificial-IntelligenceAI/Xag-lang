@@ -451,6 +451,63 @@ void aLoopThatFillsAnArrayIsNotWrittenAway() {
   CHECK(xag::writeInWhatTheLoopsAnswer(built.mir) == 0);
 }
 
+
+// A name is changed by more than being assigned to, and both of the other two
+// ways were invisible. The oracle found the first; the second was the same
+// mistake sitting next to it.
+void aNameIsChangedByMoreThanBeingAssignedTo() {
+  // Filling places of a `many` before the loop is a `Store`, not an assignment.
+  // Counting only assignments, the loop was taken out with the array as it was
+  // first written — and the compiler folded the loop into a sum of zeroes while
+  // both interpreters said 15.
+  const std::string stored =
+      "START {\n"
+      "    var.mut.many.int64 'xs' = [*0* *0* *0*];\n"
+      "    set 'xs'[*0*] = [*7*];\n"
+      "    set 'xs'[*1*] = [*8*];\n"
+      "    var.mut.int64 'sum' = [*0*];\n"
+      "    loop.range.int64 'i' = [*0*, *2*] {\n"
+      "        set 'sum' = ['sum' + 'xs'['i']];\n"
+      "    }\n}\n";
+  const auto mirOf = [](const std::string &text) {
+    const xag::Source source("test.xag", text);
+    const xag::LexResult lexed = xag::lex(source);
+    const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+    const xag::CheckResult checked = xag::check(source, parsed.program);
+    xag::MirResult built = xag::build(source, parsed.program, checked);
+    xag::elaborate(built.mir);
+    return built;
+  };
+  xag::MirResult one = mirOf(stored);
+  CHECK(xag::writeInWhatTheLoopsAnswer(one.mir) == 0);
+
+  // Writing through a loan changes what the loan points at, and the name it
+  // points at is never assigned to. Folding the loop threw the writes away.
+  const std::string through =
+      "START {\n"
+      "    var.mut.int64 'n' = [*0*];\n"
+      "    var.mut.int64 'k' = [*0*];\n"
+      "    loop.range.int64 'i' = [*1*, *5*] {\n"
+      "        var.loanmut.int64 'p' = [loanmut 'n'];\n"
+      "        set 'p' = ['p' + *1*];\n"
+      "        set 'k' = ['k' + *1*];\n"
+      "    }\n}\n";
+  xag::MirResult two = mirOf(through);
+  CHECK(xag::writeInWhatTheLoopsAnswer(two.mir) == 0);
+
+  // And one with nothing hidden in it still folds, or the fix would just be a
+  // way of never folding anything.
+  xag::MirResult three = mirOf("START {\n"
+                               "    var.mut.int64 'total' = [*0*];\n"
+                               "    loop.range.int64 'i' = [*1*, *1000*] {\n"
+                               "        if ('i' mod *7*) == *0* {\n"
+                               "            set 'total' = ['total' + 'i' x 'i'];\n"
+                               "        } else { set 'total' = ['total' - *3*]; }\n"
+                               "    }\n"
+                               "    print.stdout[str:*t = * 'total' \\n];\n}\n");
+  CHECK(xag::writeInWhatTheLoopsAnswer(three.mir) == 1);
+}
+
 } // namespace
 
 int main() {
@@ -461,6 +518,7 @@ int main() {
   aLoopBeforeAReadIsAnswered();
   aLoopOverAWrittenManyStandsAlone();
   aLoopThatFillsAnArrayIsNotWrittenAway();
+  aNameIsChangedByMoreThanBeingAssignedTo();
   aProgramThatReadsIsRunUpToTheRead();
   aProgramThatStopsIsSaidSo();
   aLoopWithAnAnswerIsWrittenAsItsAnswer();

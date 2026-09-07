@@ -120,9 +120,25 @@ void readsOf(const RValue &value, std::vector<unsigned> &out) {
     readsOf(one, out);
 }
 
-// The one assignment to a local outside the loop, and how many there were.
-// More than one and no single value reaches the loop; none and there is nothing
-// to put back.
+// Whether a statement could change what a local holds.
+//
+// Three ways, and only the first is an assignment. Writing one place of a
+// `many` is a `Store` and leaves the name alone. Lending a name out for writing
+// hands the changing to somebody else, and what comes back is not what went in.
+// Counting only assignments meant both of those were invisible: a `many` filled
+// in before a loop was taken out as it was first written, and a loop writing
+// through a loan was answered as though it had written nothing.
+bool couldChange(const Statement &s, unsigned id) {
+  if ((s.kind == StatementKind::Assign || s.kind == StatementKind::Store) &&
+      s.place == id)
+    return true;
+  return s.value.kind == RValueKind::Ref && s.value.op == "loanmut" &&
+         s.value.local == id;
+}
+
+// The one change to a local outside the loop, and how many there were. More
+// than one and no single value reaches the loop; none and there is nothing to
+// put back.
 const Statement *onlyOneOutside(const Body &body, const std::set<unsigned> &loop,
                                 unsigned id, unsigned &howMany) {
   const Statement *only = nullptr;
@@ -131,7 +147,7 @@ const Statement *onlyOneOutside(const Body &body, const std::set<unsigned> &loop
     if (loop.count(block.id))
       continue;
     for (const Statement &s : block.statements)
-      if (s.kind == StatementKind::Assign && s.place == id) {
+      if (couldChange(s, id)) {
         ++howMany;
         only = &s;
       }
@@ -309,8 +325,7 @@ std::vector<Lifted> loopsThatStandAlone(const Mir &mir) {
         bool changedInside = false;
         for (unsigned at : circle.blocks)
           for (const Statement &s : body.blocks[at].statements)
-            if ((s.kind == StatementKind::Assign || s.kind == StatementKind::Store) &&
-                s.place == id)
+            if (couldChange(s, id))
               changedInside = true;
         if (!changedInside)
           continue;
