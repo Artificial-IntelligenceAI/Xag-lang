@@ -48,7 +48,11 @@ and `XAG_RUNTIME` overrides it if you keep the runtime elsewhere.
 
 `xagc run <file>` runs a program on the test interpreter — the engine built to be
 obviously correct rather than fast, which walks the IR as written and does nothing
-clever anywhere. It is the one to believe when the engines disagree.
+clever anywhere. When the engines disagree it is the one to look at first, which is
+not the same as the one to believe: on 2026-09-07 it and the native backend shared
+a mistake for months and the fast interpreter was the only one right. Three engines
+say *that* they disagree and *which one stands apart*. Which is correct is a
+question for whoever reads the program.
 
 `xagc fast <file>` runs it on the fast interpreter, which turns the graph into
 flat code once and then runs it without looking anything up again. It shares
