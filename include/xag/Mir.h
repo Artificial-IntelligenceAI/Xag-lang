@@ -16,6 +16,55 @@ struct TypeRef {
   unsigned index = 0;
 };
 
+// What a local holds, taken apart once rather than spelled and re-read.
+//
+// It used to be only the spelling, and every engine pulled it apart again with
+// its own `rfind("ref ")` — thirty-odd places across five files, each free to
+// forget a case. Two of them forgot the same one, and a borrowed number printed
+// as `true` for months while three engines agreed. Taking a type apart where it
+// is made, once, is the difference between that mistake being untested and
+// being unwritable.
+struct MirType {
+  enum class Lending { None, Read, Write };
+
+  Lending lending = Lending::None;
+  bool orNothing = false;
+  bool many = false;
+  // What is left once the words above are off it. `named` says which struct,
+  // when `held` is one.
+  Type held = Type::Unknown;
+  unsigned named = 0;
+
+  bool isLoan() const { return lending != Lending::None; }
+  bool writesThrough() const { return lending == Lending::Write; }
+
+  // The same type with the loan taken off, which is what a borrow is a borrow
+  // of. Asking a `ref int64` what kind of number it is has no answer; asking
+  // this does.
+  MirType lent() const {
+    MirType out = *this;
+    out.lending = Lending::None;
+    return out;
+  }
+
+  // Past the absence, and then past the `many`: what one place holds.
+  MirType within() const {
+    MirType out = lent();
+    out.orNothing = false;
+    return out;
+  }
+
+  MirType element() const {
+    MirType out = within();
+    out.many = false;
+    return out;
+  }
+};
+
+// Spelled the way the middle layer prints it, and the way it was written before
+// this was a structure: `ref many int64`.
+std::string spell(const MirType &type);
+
 // A named slot. The first `parameters` locals of a body are its parameters, and
 // local 0 is where the answer goes when there is one.
 struct Local {
@@ -123,6 +172,9 @@ struct Body {
   std::vector<Local> locals;
   std::vector<BasicBlock> blocks;
   std::vector<std::string> types; // TypeRef indexes this
+  // The same types, taken apart. Filled where a type is made, so the two cannot
+  // drift; the spellings stay until every engine reads this instead.
+  std::vector<MirType> typed;
 };
 
 // What this project decided, once, for every file in it. Only the settings that

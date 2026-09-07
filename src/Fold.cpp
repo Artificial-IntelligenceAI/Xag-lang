@@ -102,9 +102,9 @@ private:
                                              {}, Severity::Error});
   }
 
-  const std::string &nameOf(TypeRef type) const {
-    static const std::string unknown = "?";
-    return type.index < body_->types.size() ? body_->types[type.index] : unknown;
+  const MirType &shapeOf(TypeRef type) const {
+    static const MirType nothing;
+    return type.index < body_->typed.size() ? body_->typed[type.index] : nothing;
   }
 
   static bool written(const Operand &operand) {
@@ -124,11 +124,7 @@ private:
   bool worthKnowing(unsigned local) const {
     if (local >= body_->locals.size())
       return false;
-    const TypeRef type = body_->locals[local].type;
-    const std::string &spelled =
-        type.index < body_->types.size() ? body_->types[type.index] : std::string();
-    const Type named = typeNamed(spelled);
-    return isWhole(named);
+    return isWhole(shapeOf(body_->locals[local].type).lent().held);
   }
 
   bool statement(Statement &s) {
@@ -260,8 +256,8 @@ private:
     if (value.operands.size() != 2 || !written(value.operands[0]) ||
         !written(value.operands[1]))
       return false;
-    const Type given = typeNamed(nameOf(value.operands[0].type));
-    const Type made = typeNamed(nameOf(value.type));
+    const Type given = shapeOf(value.operands[0].type).lent().held;
+    const Type made = shapeOf(value.type).lent().held;
     if (!isWhole(given) || !looksWhole(value.operands[0].written) ||
         !looksWhole(value.operands[1].written))
       return false;

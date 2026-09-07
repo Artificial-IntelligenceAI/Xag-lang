@@ -215,7 +215,7 @@ private:
         value.kind = Value::Kind::Number;
         value.number = operand.written == "true" ? 1 : 0;
       } else if (operand.written == "nothing" &&
-                 type.rfind("or-nothing ", 0) == 0) {
+                 shapeOf(operand.type).orNothing) {
         // Holding none of whatever it may hold.
         value.kind = Value::Kind::Nothing;
       } else {
@@ -263,29 +263,24 @@ private:
     return written;
   }
 
-  // What is left of a spelled type once the `or-nothing` is off it.
-  static std::string withoutNothing(const std::string &spelled) {
-    return spelled.rfind("or-nothing ", 0) == 0 ? spelled.substr(11) : spelled;
-  }
-
   const std::string &typeOf(TypeRef type) const {
     static const std::string unknown = "?";
     const Body &body = *frames_.back().body;
     return type.index < body.types.size() ? body.types[type.index] : unknown;
   }
 
-  // What a name holds, whether it holds it or only borrows it. A loan's spelled
-  // type is `ref int64`, which names no type at all — asking about that instead
-  // of what is behind it made a borrowed number print as `true`, and a borrowed
-  // decimal print as whatever a width of zero produces.
-  Type kindOf(TypeRef type) const {
-    const std::string &spelled = typeOf(type);
-    if (spelled.rfind("refmut ", 0) == 0)
-      return typeNamed(spelled.substr(7));
-    if (spelled.rfind("ref ", 0) == 0)
-      return typeNamed(spelled.substr(4));
-    return typeNamed(spelled);
+  // The type as the middle layer took it apart, rather than as it spelled it.
+  const MirType &shapeOf(TypeRef type) const {
+    static const MirType nothing;
+    const Body &body = *frames_.back().body;
+    return type.index < body.typed.size() ? body.typed[type.index] : nothing;
   }
+
+  // What a name holds, whether it holds it or only borrows it. Asking a
+  // `ref int64` what kind of number it is has no answer; asking what it lends
+  // does — and that difference printed a borrowed number as `true` for months,
+  // back when every engine took the spelling apart for itself.
+  Type kindOf(TypeRef type) const { return shapeOf(type).lent().held; }
 
   // ---- doing
 
@@ -513,7 +508,7 @@ private:
     } else if (a && b && a->kind == Value::Kind::Real) {
       // IEEE all the way down: dividing by zero is infinity, and a
       // not-a-number compares equal to nothing at all, itself included.
-      const Type made = typeNamed(typeOf(value.type));
+      const Type made = shapeOf(value.type).lent().held;
       const unsigned width = widthOf(isBinary(made) ? made
                                                     : kindOf(value.operands[0].type));
       const double x = a->real, y = b->real;
@@ -547,7 +542,7 @@ private:
       // A comparison answers a `bool`, so what it was *given* decides how the
       // two sides are read; everything else answers with its own type.
       const Type given = kindOf(value.operands[0].type);
-      const Type made = typeNamed(typeOf(value.type));
+      const Type made = shapeOf(value.type).lent().held;
       const Type arithmetic = isWhole(made) ? made : given;
       const unsigned width = widthOf(arithmetic);
       const int sign = isSigned(arithmetic) ? 1 : 0;
@@ -662,7 +657,7 @@ private:
           at && at->kind == Value::Kind::Text
               ? std::string(at->text.bytes ? at->text.bytes : "", at->text.length)
               : std::string();
-      const Type wanted = typeNamed(withoutNothing(typeOf(value.type)));
+      const Type wanted = shapeOf(value.type).within().held;
       Value answer; // nothing, unless the whole of it reads as a number
       if (at && at->kind == Value::Kind::Text) {
         if (isWhole(wanted)) {

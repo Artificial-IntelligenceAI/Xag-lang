@@ -3,6 +3,22 @@
 #include <ostream>
 
 namespace xag {
+
+// The spelling a type was written with, built back from its pieces.
+std::string spell(const MirType &type) {
+  std::string out;
+  if (type.lending == MirType::Lending::Write)
+    out += "refmut ";
+  else if (type.lending == MirType::Lending::Read)
+    out += "ref ";
+  if (type.orNothing)
+    out += "or-nothing ";
+  if (type.many)
+    out += "many ";
+  out += type.held == Type::Struct ? name(structNamed(type.named)) : name(type.held);
+  return out;
+}
+
 namespace {
 
 struct Printer {

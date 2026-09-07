@@ -210,7 +210,38 @@ private:
       if (body_.types[i] == name)
         return TypeRef{i};
     body_.types.push_back(name);
+    // Taken apart here, once, where the type is made. Everything downstream
+    // reads the pieces rather than the spelling.
+    body_.typed.push_back(takeApart(name));
     return TypeRef{static_cast<unsigned>(body_.types.size() - 1)};
+  }
+
+  MirType takeApart(std::string_view spelled) const {
+    MirType out;
+    if (spelled.rfind("refmut ", 0) == 0) {
+      out.lending = MirType::Lending::Write;
+      spelled.remove_prefix(7);
+    } else if (spelled.rfind("ref ", 0) == 0) {
+      out.lending = MirType::Lending::Read;
+      spelled.remove_prefix(4);
+    }
+    if (spelled.rfind("or-nothing ", 0) == 0) {
+      out.orNothing = true;
+      spelled.remove_prefix(11);
+    }
+    if (spelled.rfind("many ", 0) == 0) {
+      out.many = true;
+      spelled.remove_prefix(5);
+    }
+    out.held = typeNamed(spelled);
+    if (out.held == Type::Unknown)
+      for (unsigned which = 0; which < checked_.shapes.size(); ++which)
+        if (checked_.shapes[which].name == spelled) {
+          out.held = Type::Struct;
+          out.named = which;
+          break;
+        }
+    return out;
   }
 
   unsigned addLocal(const std::string &name, TypeRef type, bool copyable) {

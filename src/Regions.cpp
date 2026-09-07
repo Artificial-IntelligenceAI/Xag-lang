@@ -112,8 +112,7 @@ private:
     const TypeRef type = body_.locals[local].type;
     if (type.index >= body_.types.size())
       return false;
-    const std::string &spelled = body_.types[type.index];
-    return spelled.rfind("ref ", 0) == 0 || spelled.rfind("refmut ", 0) == 0;
+    return body_.typed[type.index].isLoan();
   }
 
   // What a statement leaves each local holding.
