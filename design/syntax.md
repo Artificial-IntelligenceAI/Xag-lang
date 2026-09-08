@@ -1104,8 +1104,7 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   may come round and there is nothing anybody could write to say it is meant to,
   so nothing is said about it — see `design/compile-time.md`.
 - **`UNSAFE`.** Capitals, like `START`, and it has a job now — the first thing
-  that needed permitting turned up before calling out to C did. Nothing of it is
-  built.
+  that needed permitting turned up before calling out to C did. Built.
 
   A run the compiler does has no limit, so a long loop can cost real time at
   build. `no-itmt` is a loop saying not to bother:
@@ -1131,8 +1130,15 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   thing itself borrows nothing: `no-verif` was tried first and imported
   "verification", which nothing else in the language is called.
 
-  Open with it: where it sits in the chain (`loop . [no-itmt] . [perm] . range .
-  type` is the proposal), and which code refuses it outside `UNSAFE`.
+  The chain asks it first — `loop . [no-itmt] . [perm] . range . type` — because
+  it is about the loop, where `perm` is about the counter the loop declares. A
+  `while` may ask too, and is the one that most needs to: its ends are not
+  written down, so a run of it may never finish. Asking outside `UNSAFE` is
+  `E0212`, and there is no word for the ordinary case, because not writing one
+  is it.
+
+  Twenty million rounds with a branch in them: nine seconds of build without it,
+  three hundredths with. The same program either way, and the same answer.
 
 ## Capitals
 

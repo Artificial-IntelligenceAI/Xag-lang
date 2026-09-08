@@ -348,14 +348,16 @@ AheadResult ahead(const Source &, const Mir &mir,
   // It reached a read and stopped there. Everything before that happened, and
   // nothing after it is known — what a program does on what it was given is not
   // what it does on nothing.
-  const bool partly = result.wouldRead;
+  const bool partly = result.wouldRead || result.wouldTakeTime;
   out.ran = true;
 
   // The second answer. Without one, only the interpreter has spoken, and one
   // engine may drop a bound but may not stand one up.
   const Compiled twice = building ? building(mir) : Compiled{};
   if (twice.asked) {
-    const bool bothStoppedTheSameWay = twice.wouldRead == partly && twice.ran == !partly;
+    const bool bothStoppedTheSameWay = twice.wouldRead == result.wouldRead &&
+                                      twice.wouldTakeTime == result.wouldTakeTime &&
+                                      twice.ran == !partly;
     if (!bothStoppedTheSameWay || twice.said != said) {
       out.diagnostics.push_back(disagreed(said, twice));
       return out;

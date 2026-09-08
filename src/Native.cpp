@@ -375,6 +375,7 @@ private:
     add("xag_set_arguments", voidTy, {i32, ptr});
     add("xag_read_line", i32, {ptr});
     add("xag_would_read", voidTy, {});
+    add("xag_would_take_time", voidTy, {});
     add("xag_arguments", voidTy, {ptr});
     add("xag_int_reads", i32, {i32, i32, ptr, i64, ptr});
     add("xag_deci_reads", i32, {i32, ptr, i64, ptr});
@@ -467,6 +468,14 @@ private:
 
     for (const BasicBlock &block : body.blocks) {
       builder_.SetInsertPoint(blocks_[block.id]);
+      // A loop told not to be run while compiling. Only the build the compiler
+      // makes stops here, and it stops in the same place the interpreter does,
+      // so what happened before it still compares between the two.
+      if (watching_ && block.noItmt) {
+        builder_.CreateCall(runtime_["xag_would_take_time"], {});
+        builder_.CreateUnreachable();
+        continue;
+      }
       for (const Statement &s : block.statements)
         statement(s);
       terminator(block.terminator, function);

@@ -458,6 +458,12 @@ void xag_would_read(void) {
   std::fprintf(stderr, "xag-would-read\n");
   std::exit(0);
 }
+
+void xag_would_take_time(void) {
+  std::fflush(output());
+  std::fprintf(stderr, "xag-would-take-time\n");
+  std::exit(0);
+}
 int xag_balance_is_clear(void) { return live == 0 ? 1 : 0; }
 
 void xag_many_out_of_range(int64_t index, uint64_t length) {

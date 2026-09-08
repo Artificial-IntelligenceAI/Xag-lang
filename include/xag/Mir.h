@@ -172,6 +172,10 @@ struct BasicBlock {
   unsigned id = 0;
   std::vector<Statement> statements;
   Terminator terminator;
+  // The block a `no-itmt` loop jumps back to. A run the compiler is doing stops
+  // when it gets here, the way it stops at a read: the loop was told not to be
+  // run while compiling, and running the program around it would run it anyway.
+  bool noItmt = false;
 };
 
 struct Body {

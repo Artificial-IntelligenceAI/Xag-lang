@@ -104,6 +104,7 @@ enum class StmtKind {
   Break,     // break;
   Give,      // give […];
   Call,      // print.stdout[…];
+  Unsafe,    // UNSAFE { … }
 };
 
 struct Stmt {

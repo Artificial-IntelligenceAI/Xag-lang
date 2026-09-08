@@ -292,6 +292,12 @@ void xag_forget_allocations(int64_t backTo);
 // build the compiler makes calls this; a reader's program reads.
 void xag_would_read(void);
 
+// Says that the program has reached a loop it was told not to run while
+// compiling, and stops there. Same reason as a read: what comes after depends
+// on something the compiler was not given — here, on a loop it was asked to
+// leave alone. Only the build the compiler makes calls this.
+void xag_would_take_time(void);
+
 // Says that a sum came round, and where in the source it was written.
 //
 // Nothing a reader ever runs calls this. It exists for the build the compiler

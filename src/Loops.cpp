@@ -75,7 +75,9 @@ std::vector<Circle> circlesIn(const Body &body) {
   std::vector<Circle> found;
   for (const BasicBlock &block : body.blocks)
     for (unsigned to : goesTo(block))
-      if (to <= block.id && reaches(body, to, block.id)) {
+      // A loop told not to be run while compiling is not taken out either.
+      // Taking it out and running it on its own is the same time spent.
+      if (to <= block.id && !body.blocks[to].noItmt && reaches(body, to, block.id)) {
         Circle one;
         one.header = to;
         one.blocks = around(body, to, block.id);

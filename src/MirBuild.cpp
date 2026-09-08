@@ -671,6 +671,14 @@ private:
     names_.back()[holds] = into;
   }
 
+  // A loop whose chain said `no-itmt`, remembered on the block everything jumps
+  // back to — which is where a run has to stop.
+  void markIfToldNotToRun(const Chain &chain, unsigned header) {
+    for (const ChainSegment &seg : chain.segments)
+      if (!seg.isName && seg.text == "no-itmt")
+        body_.blocks[header].noItmt = true;
+  }
+
   void statement(const Stmt &s) {
     switch (s.kind) {
     case StmtKind::Declare: {
@@ -768,6 +776,13 @@ private:
       break;
     }
 
+    // Nothing of its own to lower: what it grants is asked for by name, and the
+    // asking is carried on the loop that asked.
+    case StmtKind::Unsafe:
+      for (const StmtPtr &inner : s.body.stmts)
+        statement(*inner);
+      break;
+
     case StmtKind::If: {
       const unsigned after = addBlock();
       for (const Branch &branch : s.branches) {
@@ -822,6 +837,7 @@ private:
       const unsigned header = addBlock();
       const unsigned inside = addBlock();
       const unsigned after = addBlock();
+      markIfToldNotToRun(s.chain, header);
       finish(Terminator{TerminatorKind::Goto, s.span, {}, {}, {header}, false, {}});
 
       current_ = header;
@@ -861,6 +877,7 @@ private:
       const unsigned header = addBlock();
       const unsigned inside = addBlock();
       const unsigned after = addBlock();
+      markIfToldNotToRun(s.chain, header);
       finish(Terminator{TerminatorKind::Goto, s.span, {}, {}, {header}, false, {}});
 
       current_ = header;

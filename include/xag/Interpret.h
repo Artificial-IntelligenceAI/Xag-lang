@@ -29,6 +29,9 @@ struct InterpretResult {
   // Every statement it actually got to. A bound about a statement the run never
   // reached is a bound nothing has answered.
   std::vector<Span> reached;
+  // It reached a loop whose chain said `no-itmt` and stopped there. Same shape
+  // as a read: everything before happened, nothing after is known.
+  bool wouldTakeTime = false;
 };
 
 // The test interpreter: it walks the graph as written, calls the runtime for

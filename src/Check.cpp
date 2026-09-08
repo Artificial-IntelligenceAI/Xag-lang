@@ -203,6 +203,8 @@ private:
   const Source &source_;
   const Program &program_;
   CheckResult result_;
+  // How many `UNSAFE` blocks this statement sits inside.
+  unsigned insideUnsafe_ = 0;
   std::vector<std::unordered_map<std::string, Symbol>> scopes_;
   std::unordered_map<std::string, Signature> functions_;
   std::vector<std::string> names_; // struct names, indexed the way `Ty` names them
@@ -646,6 +648,24 @@ private:
         return &found->second;
     }
     return nullptr;
+  }
+
+  // `no-itmt` asks for something and `UNSAFE` grants it; neither alone does
+  // anything. Asking outside is refused rather than quietly obeyed, because the
+  // whole use of the word being in capitals is that grepping for it finds every
+  // place a check was turned off — and a `no-itmt` that worked without one
+  // would be a check turned off where nothing says so.
+  void askedOutsideUnsafe(const Chain &chain) {
+    if (insideUnsafe_ > 0)
+      return;
+    for (const ChainSegment &seg : chain.segments)
+      if (!seg.isName && seg.text == "no-itmt")
+        complain(seg.span, "E0212",
+                 "`no-itmt` asks for something only `UNSAFE` gives.",
+                 {"what is unsafe is asked for by name, inside a block that says so"},
+                 {"`UNSAFE` is in capitals so that looking for it finds every place a "
+                  "check was turned off; one that worked without it would be a check "
+                  "turned off where nothing says so."});
   }
 
   static bool wrapsChain(const Chain &chain) {
@@ -1512,6 +1532,13 @@ private:
       break;
     }
 
+    case StmtKind::Unsafe: {
+      ++insideUnsafe_;
+      block(s.body);
+      --insideUnsafe_;
+      break;
+    }
+
     case StmtKind::If:
       for (const Branch &branch : s.branches) {
         if (!branch.condition) {
@@ -1529,6 +1556,7 @@ private:
       break;
 
     case StmtKind::LoopRange: {
+      askedOutsideUnsafe(s.chain);
       const Ty type = typeOfChain(s.chain);
       result_.declarations[&s] = type;
       if (s.value.values.size() != 2)
@@ -1587,6 +1615,7 @@ private:
     }
 
     case StmtKind::LoopWhile: {
+      askedOutsideUnsafe(s.chain);
       Ty carried;
       if (s.condition)
         carried = asked(*s.condition, s.holds, s.holdsSpan, "a `loop.while`");

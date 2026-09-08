@@ -66,7 +66,8 @@ public:
       trouble_ = "the program ended still holding " +
                  std::to_string(xag_live_allocations() - already) + " thing(s)";
     return InterpretResult{trouble_.empty(), trouble_, cameRound_, whereNow_,
-                           false,             ended_,   wouldRead_, reached_};
+                           false,     ended_,    wouldRead_, reached_,
+                           wouldTakeTime_};
   }
 
 private:
@@ -96,6 +97,7 @@ private:
   Span whereNow_;
   // Reached a read, and stopped there instead of reading it.
   bool wouldRead_ = false;
+  bool wouldTakeTime_ = false;
   std::vector<Span> reached_;
   std::set<unsigned> reachedAlready_;
 
@@ -859,6 +861,13 @@ private:
     unsigned at = 0;
     while (at < body.blocks.size() && trouble_.empty()) {
       const BasicBlock &block = body.blocks[at];
+      // Told not to be run while compiling. A run the compiler is doing stops
+      // here; a reader's run pays it no attention at all.
+      if ((watching_ || keeping_) && block.noItmt) {
+        wouldTakeTime_ = true;
+        trouble_ = "it was told not to run this one";
+        break;
+      }
       for (const Statement &s : block.statements) {
         if (!patient_ && ++steps_ > kBudget) {
           trouble_ = "the program ran longer than this engine will wait";

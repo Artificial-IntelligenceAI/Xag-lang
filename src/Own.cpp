@@ -666,6 +666,13 @@ private:
       break;
     }
 
+    // The block changes nothing about what is inside it: what it grants is
+    // asked for by name, and ownership is not one of the things it grants.
+    case StmtKind::Unsafe:
+      for (const StmtPtr &inner : s.body.stmts)
+        statement(*inner);
+      break;
+
     case StmtKind::If: {
       // A name given away down any arm is gone afterwards, because the compiler
       // does not get to assume which arm ran.

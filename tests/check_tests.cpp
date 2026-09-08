@@ -687,6 +687,42 @@ void aStructIsHandedOverRatherThanCopied() {
 
 } // namespace
 
+// `no-itmt` asks for something and `UNSAFE` grants it, and neither alone does
+// anything. The word is in capitals so that looking for it finds every place a
+// check was turned off, and one that worked without it would be a check turned
+// off where nothing says so.
+void askingToSkipNeedsSayingSo() {
+  CHECK(run("START {\n"
+            "    UNSAFE {\n"
+            "        loop.no-itmt.range.int64 'i' = [*1*, *3*] { }\n"
+            "    }\n}\n")
+            .ok());
+  CHECK(inStart("loop.no-itmt.range.int64 'i' = [*1*, *3*] { }").code(0) == "E0212");
+  // A `while` may ask too, and is the one that most needs to: its ends are not
+  // written down, so a run of it may never finish.
+  CHECK(run("START {\n"
+            "    var.mut.int64 'n' = [*0*];\n"
+            "    UNSAFE {\n"
+            "        loop.no-itmt.while 'n' < *3* { set 'n' = ['n' + *1*]; }\n"
+            "    }\n}\n")
+            .ok());
+  // The chain is the parser's to judge, so these are asked of it rather than of
+  // the checker. It comes before the counter, because it is about the loop and
+  // `perm` is about the name the loop declares.
+  const auto readAs = [](const std::string &text) {
+    const Checked c = run(text);
+    return c.parsed.diagnostics.empty() ? std::string("(none)")
+                                        : c.parsed.diagnostics.front().code;
+  };
+  CHECK(readAs("START {\n"
+               "    UNSAFE {\n"
+               "        loop.perm.no-itmt.range.int64 'i' = [*1*, *3*] { }\n"
+               "    }\n}\n") == "E0205");
+  // And there is no word for the ordinary case, because not writing one is it.
+  CHECK(readAs("START {\n"
+               "    loop.itmt.range.int64 'i' = [*1*, *3*] { }\n}\n") == "E0202");
+}
+
 int main() {
   aNameMustBeDeclared();
   aNameIsDeclaredOnce();
@@ -721,6 +757,7 @@ int main() {
   countAsksHowManyOfEither();
   fillNeedsAValueThatCopies();
   showingAManyIsRefused();
+  askingToSkipNeedsSayingSo();
   showingAMaybeIsRefused();
   aManyTravelsWhole();
   nothingNeedsSomewhereToBe();

@@ -37,6 +37,8 @@ struct Compiled {
   // the compiler makes does that. The interpreter does the same, so the two
   // still stop in the same place and what came before still compares.
   bool wouldRead = false;
+  // It reached a loop told not to be run while compiling, and stopped there.
+  bool wouldTakeTime = false;
 };
 
 // How to get that second answer. `ahead` does not know how to build a program

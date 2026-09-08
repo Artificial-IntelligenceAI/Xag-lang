@@ -409,8 +409,7 @@ which is the moment to write it down rather than later.
 
 ## A loop that says not to bother
 
-Decided 2026-09-08, none of it built. See `design/syntax.md` under **Open** for
-the spelling. A loop marked `no-itmt`, inside an `UNSAFE` block, is one ITMT
+Decided and built 2026-09-08. See `design/syntax.md` for the spelling. A loop marked `no-itmt`, inside an `UNSAFE` block, is one ITMT
 does not run: not taken out on its own, not folded, and nothing raised about it
 — no `E0537`, no `E0538`, no `E0534` confirmed by a run. The bounds still apply,
 because they reason rather than run, and `wrapping` is still the word for saying
@@ -419,6 +418,10 @@ a sum is meant to come round.
 The word names ITMT because ITMT is what it turns off. `no-run` would read as a
 loop that never executes, when it runs at runtime exactly as written, and a word
 like `no-verif` would borrow a concept nothing else here is called.
+
+The whole program stops there too, the way it stops at a read — both engines at
+the same block, or nothing they say could be compared. Otherwise the run would
+take the time the loop asked it not to, on its way past.
 
 It exists because a run has no limit. A loop that costs minutes at build is a
 loop somebody will want to skip, and the honest way to let them is to make the

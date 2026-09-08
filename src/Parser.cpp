@@ -40,6 +40,7 @@ enum class Slot {
   Counter,    // perm, default temp
   Form,       // range / while
   Overflow,   // wrapping, default checked
+  Trying,     // no-itmt — the compiler does not run this one while compiling
 };
 
 // The question a slot answers, said the way the reader would ask it.
@@ -53,6 +54,7 @@ const char *question(Slot slot) {
   case Slot::Counter:    return "whether the counter outlives the loop";
   case Slot::Form:       return "which kind of loop this is";
   case Slot::Overflow:   return "whether a sum that does not fit is a mistake";
+  case Slot::Trying:     return "whether the compiler runs this one while compiling";
   case Slot::Unknown:    break;
   }
   return "nothing";
@@ -74,6 +76,8 @@ Slot slotOf(std::string_view word) {
     return Slot::Form;
   if (word == "wrapping" || word == "checked")
     return Slot::Overflow;
+  if (word == "no-itmt")
+    return Slot::Trying;
   return Slot::Unknown;
 }
 
@@ -99,10 +103,13 @@ const Role kStruct{"a `struct`", "struct", false,
                    {Slot::Unknown, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 const Role kConst{"a `const`", "const", true,
                   {Slot::Visibility, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
+// `no-itmt` comes first, because it is about the loop rather than about the name
+// the loop declares — `perm` answers a question about the counter, and this does
+// not.
 const Role kLoopRange{"a counted `loop`", "loop", true,
-                      {Slot::Counter, Slot::Form, Slot::Unknown, Slot::Unknown}};
+                      {Slot::Trying, Slot::Counter, Slot::Form, Slot::Unknown}};
 const Role kLoopWhile{"a `loop.while`", "loop", false,
-                      {Slot::Form, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
+                      {Slot::Trying, Slot::Form, Slot::Unknown, Slot::Unknown}};
 
 // Where a slot sits in this role's order, or -1 when the role never asks it.
 int placeIn(const Role &role, Slot slot) {
@@ -819,6 +826,18 @@ private:
         }
         expect(TokenKind::RBrace, "`}`");
       }
+      s->span.end = previous().span.end;
+      return s;
+    }
+
+    // A block where the compiler is allowed to be told to do less. It holds
+    // statements like any other block and changes nothing about them; what it
+    // grants is asked for inside it, by name, so that grepping for the word
+    // finds every place a check was turned off.
+    if (checkWord("UNSAFE")) {
+      advance(); // UNSAFE
+      s->kind = StmtKind::Unsafe;
+      s->body = block();
       s->span.end = previous().span.end;
       return s;
     }

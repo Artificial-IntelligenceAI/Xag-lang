@@ -437,6 +437,8 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
     const std::string where = "xag-stopped-at ";
     if (line == "xag-would-read")
       out.wouldRead = true;
+    else if (line == "xag-would-take-time")
+      out.wouldTakeTime = true;
     else if (line.rfind(stopped, 0) == 0)
       out.why = line.substr(stopped.size());
     else if (line.rfind(where, 0) == 0) {
@@ -452,7 +454,7 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   // done what was asked. It did not *finish*, though, and saying it did had the
   // two engines disagreeing about every program that reads: one had stopped at
   // the read and the other was said to have run to the end.
-  if (out.wouldRead)
+  if (out.wouldRead || out.wouldTakeTime)
     return out;
 
   if (status != 0) {
