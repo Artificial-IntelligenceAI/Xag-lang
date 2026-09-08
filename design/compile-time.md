@@ -407,6 +407,22 @@ A run also has to give the same answer on every machine, or the same source
 builds into different programs. There is no FFI, so that is nearly free today,
 which is the moment to write it down rather than later.
 
+## A loop that says not to bother
+
+Decided 2026-09-08, none of it built. See `design/syntax.md` under **Open** for
+the spelling. A loop marked `no-verif`, inside an `UNSAFE` block, is one ITMT
+does not run: not taken out on its own, not folded, and nothing raised about it
+— no `E0537`, no `E0538`, no `E0534` confirmed by a run. The bounds still apply,
+because they reason rather than run, and `wrapping` is still the word for saying
+a sum is meant to come round.
+
+It exists because a run has no limit. A loop that costs minutes at build is a
+loop somebody will want to skip, and the honest way to let them is to make the
+skipping visible rather than to put the limit back.
+
+What it costs is the check that would have caught the bug — which is why it is
+`UNSAFE` and why the word is greppable.
+
 ## Open
 
 - Whether the compiler says what it is doing before a long run, or simply goes

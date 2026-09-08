@@ -1103,12 +1103,35 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   declared, and a sum happens between values. `('n' x *4*)` inside a comparison
   may come round and there is nothing anybody could write to say it is meant to,
   so nothing is said about it — see `design/compile-time.md`.
-- **`UNSAFE`.** The spelling is settled: capitals, like `START`. What it permits
-  is not, because today nothing needs permitting — there are no raw addresses,
-  no calls out to C, and nothing the checker refuses that a program could ask to
-  do anyway. The first thing that gives `UNSAFE` a job is calling the C ABI the
-  runtime already speaks. Whether it is a block, a word in a function's chain, or
-  both is open with it.
+- **`UNSAFE`.** Capitals, like `START`, and it has a job now — the first thing
+  that needed permitting turned up before calling out to C did. Nothing of it is
+  built.
+
+  A run the compiler does has no limit, so a long loop can cost real time at
+  build. `no-verif` is a loop saying not to bother:
+
+  ```
+  UNSAFE {
+      loop.no-verif.range.int64 'i' = [*1*, *1000000000*] {
+          set 'total' = ['total' + churn['i']];
+      }
+  }
+  ```
+
+  **The word is on the loop, and `UNSAFE` is the region.** A chain says what is
+  unusual about the thing being declared, and not being run at build time is
+  about *this loop*; `UNSAFE` around it is what a reader greps for. The chain
+  word asks and `UNSAFE` grants, and neither alone does anything.
+
+  **Not `no-run`.** The loop does run — at runtime, every time, exactly as
+  written. It is only the compiler that does not run it, and a word built on
+  *run* in that position reads as a loop that never executes. That is why the
+  word names the checking rather than the running.
+
+  Open with it: where it sits in the chain (`loop . [no-verif] . [perm] . range .
+  type` is the proposal), which code refuses it outside `UNSAFE`, and whether
+  "verify" is the right word for something that runs a program rather than
+  proving anything about it.
 
 ## Capitals
 
