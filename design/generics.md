@@ -69,13 +69,15 @@ compiling and only the chosen arm survives into the program. A word appears
 where there is a choice, and that is a real one — and the word says the choosing
 rather than the asking, which is what is actually happening.
 
-### The number families are asked about both ways
+### The words
 
-`is number` covers all twenty-odd of them, and `is int`, `is uint`, `is bin` and
-`is deci` each cover one family. Both, because one branch usually suffices and
-sometimes it does not — a whole number and a decimal are not handled alike.
+`number`, and under it `int`, `uint`, `bin`, `deci` — one level or the other, not
+both. Then `text`, `struct`, `bool`, `many`, `or-nothing`, and one for a borrow.
 
-`int` is free to mean this because it is deliberately not a type: *there is no
+All of them can turn up: a struct's field may be any of these, borrows included,
+which was checked rather than assumed.
+
+`int` is free to mean a family precisely because it is not a type — *there is no
 `int` on its own, because there is no size to assume*. It is not a type and it
 is a family, which is exactly what a word here has to be.
 
@@ -120,8 +122,9 @@ express.
 
 ## Open
 
-- Which family words there are beyond the numbers: `text`, `struct`, `many`,
-  and whether `bool`, `or-nothing` and a loan are asked about the same way.
+- What a borrow's family word is called. `is loan` would collide with the chain
+  word for taking one, and a field may hold either a `loan` or a `loanmut`, so
+  one word has to cover both or there have to be two.
 - Whether the same words constrain a generic — `loan.many.any.int 'xs'` — so the
   vocabulary for *what a thing is* and for *what a generic asks of it* is one
   list, learned once.
