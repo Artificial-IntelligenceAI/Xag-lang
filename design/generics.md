@@ -139,14 +139,37 @@ exhaustiveness instead. `whichever` asks a closed question with a fixed set of
 answers and no values in it, so there is no "this particular one, then any" to
 express.
 
+### A generic may say what it asks for
+
+The same words, in the other direction:
+
+```
+fn.any.number 'largest' [loan.many.any.number 'xs']
+```
+
+`is number` asks what something is; `any.number` says what will be taken. One
+list, learned once, read both ways.
+
+`whichever` came first and nearly made this unnecessary — a generic that can ask
+what it was handed can cope with anything, so nothing has to be refused in
+advance. What is left is that some generics do not *want* everything. The
+largest `point` is not a thing, and the author would rather say so than write a
+branch for it.
+
+What it buys is where the failure lands. Without it, `largest` uses `>` and a
+caller passing points is told about a line inside `largest` that they did not
+write. With it:
+
+```text
+`point` is not a number, and `largest` asks for one.
+```
+
+Bare `any` stays the floor: it takes anything, and what can be done with it is
+what can be done with every type — hold it, move it, lend it, hand it back.
+Every word added buys one thing more.
+
 ## Open
 
-- Whether the same words constrain a generic — `loan.many.any.int 'xs'` — so the
-  vocabulary for *what a thing is* and for *what a generic asks of it* is one
-  list, learned once.
-- Whether constraints are wanted at all now that `whichever` exists. A generic that
-  can ask what it was given can handle anything; a constraint says what it
-  refuses in advance, and buys an error at the call rather than inside the body.
 - Whether `loop.parts` also walks a `many`, where every element is the same type
   and an ordinary loop would do.
 - How a type parameter is spelled where it needs a name, and the collision that
