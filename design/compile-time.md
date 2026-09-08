@@ -259,10 +259,19 @@ never assigns to the name behind it, so folding the loop threw the writes away.
 `n = 5` interpreted, `n = 0` built. Nothing found that; it was sitting beside
 the first one.
 
-**A lifted loop may only drop a bound, never raise one.** It says what happens
-when the loop is entered; whether it is *ever* entered is a question about the
-program around it, which was not run. Clearing a suspicion needs only that the
-loop is harmless when it runs; raising one would need to know that it does.
+**A lifted loop says what happens when the loop runs, and nothing about whether
+it does** — that is a question about the program around it, which was not run.
+It may drop a bound on those terms without qualification: a loop that is
+harmless when it runs is harmless if it never runs either.
+
+Raising one says only as much as it knows (decided by Tankun, 2026-09-08):
+
+```text
+Tip(s): I took this loop out of the program and ran it on its own, both ways I
+        have of running one, and both watched the sum come round — so it does,
+        every time this loop runs. Whether it runs at all is a question about
+        the program around it, which I did not run.
+```
 
 ### A program that stops
 
@@ -403,8 +412,6 @@ which is the moment to write it down rather than later.
 - Whether the compiler says what it is doing before a long run, or simply goes
   quiet until it is finished. A run may now take as long as the program does,
   which makes the silence longer than it was.
-- Whether a loop taken out on its own may *raise* a bound and not only drop one,
-  worded as what it is: if this loop runs, this sum comes round.
 - What else a run should look for. Two are free and neither is built: statements
   a run never reached, in a program that reads nothing, are certainly dead; and
   a `mut` on a name that never changed is a word that was not needed.

@@ -239,6 +239,22 @@ Both runBothWays(const Mir &mir, const Building &building) {
 // Whether some loop, run on its own, showed that this bound was worrying about
 // nothing. The bound points at a statement; the loop holding that statement is
 // the one that answers for it.
+// What a loop taken out on its own can say: what happens when it runs, and
+// nothing about whether it does. It says so.
+Diagnostic whenItRuns(Diagnostic bound) {
+  const std::string may = "` may reach past";
+  const size_t at = bound.message.find(may);
+  if (at != std::string::npos)
+    bound.message.replace(at, may.size(), "` reaches past");
+  bound.severity = Severity::Error;
+  bound.tips = {"I took this loop out of the program and ran it on its own, both ways "
+                "I have of running one, and both watched the sum come round — so it "
+                "does, every time this loop runs. Whether it runs at all is a "
+                "question about the program around it, which I did not run. "
+                "`wrapping` says coming round is meant."};
+  return bound;
+}
+
 // Whether this loop holds the statement a bound is about.
 bool holdsTheStatement(const Lifted &loop, Span bound) {
   for (const Span &place : loop.places)
@@ -262,6 +278,7 @@ std::vector<Diagnostic> whatTheLoopsLeave(const Mir &mir,
   std::vector<Diagnostic> left;
   for (const Diagnostic &bound : aboutSums) {
     bool cleared = false;
+    bool stood = false;
     for (unsigned i = 0; i < loops.size() && !cleared; ++i) {
       if (!holdsTheStatement(loops[i], bound.span))
         continue;
@@ -269,12 +286,22 @@ std::vector<Diagnostic> whatTheLoopsLeave(const Mir &mir,
         answered[i] = runBothWays(loops[i].mir, building);
         asked[i] = true;
       }
-      cleared = answered[i].agreed && !inside(bound.span, answered[i].cameRound);
+      if (!answered[i].agreed)
+        continue;
+      if (inside(bound.span, answered[i].cameRound))
+        stood = true;
+      else
+        cleared = true;
     }
-    if (cleared)
+    if (cleared) {
       any = true;
-    else
-      left.push_back(bound);
+      continue;
+    }
+    // Both engines took the loop out, ran it, and watched the sum come round —
+    // so it does, whenever the loop runs. Whether the loop runs at all is a
+    // question about the program around it, which was not run, and the wording
+    // says exactly that much and no more.
+    left.push_back(stood ? whenItRuns(bound) : bound);
   }
   return left;
 }
