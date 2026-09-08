@@ -629,7 +629,13 @@ impl<'a> Writer<'a> {
             4 => self.assignment(),
             5..=6 => self.print(),
             7 => self.branch(),
-            8 => self.counted_loop(),
+            8 => {
+                if self.rng.chance(30) {
+                    self.while_loop()
+                } else {
+                    self.counted_loop()
+                }
+            }
             9 => self.lending(),
             10 => self.lending_number(),
             11..=12 => self.array_declaration(),
@@ -1061,6 +1067,61 @@ impl<'a> Writer<'a> {
             self.indent -= 1;
             self.pad();
         }
+        self.out.push_str("}\n");
+    }
+
+    /// A `loop.while`, which nothing wrote until 2026-09-08 — so the oracle had
+    /// never compared a single one on any engine, and the compiler running
+    /// programs while compiling them had no test at all for the one loop shape
+    /// that may never finish.
+    ///
+    /// Its counter is written and stepped by this, not by the loop, so it is
+    /// bounded by construction: a generated program that never ends is not a
+    /// disagreement, it is a case nobody can compare.
+    fn while_loop(&mut self) {
+        let counter = self.fresh();
+        let ty = self.pick_whole();
+        let rounds = self.rng.between(1, 4);
+        self.pad();
+        self.out.push_str("var.mut.");
+        self.out.push_str(ty.written());
+        self.out.push_str(" '");
+        self.out.push_str(&counter);
+        self.out.push_str("' = [*0*];\n");
+        self.declare(Var {
+            name: counter.clone(),
+            ty,
+            mutable: true,
+            many: None,
+            moved: false,
+            lent: false,
+            group: None,
+            parts_moved: Vec::new(),
+        });
+
+        self.pad();
+        self.out.push_str("loop.while '");
+        self.out.push_str(&counter);
+        self.out.push_str("' < *");
+        push_number(self.out, rounds);
+        self.out.push_str("* {\n");
+        self.indent += 1;
+        self.scopes.push(Vec::new());
+        let statements = self.rng.below(2) + 1;
+        self.body(statements);
+        // Stepped last, so the body sees every value from zero up and the loop
+        // still stops. Written here rather than left to chance: a body that
+        // happened not to step it would be a program nothing could compare.
+        self.pad();
+        self.out.push_str("set '");
+        self.out.push_str(&counter);
+        self.out.push_str("' = ['");
+        self.out.push_str(&counter);
+        self.out.push_str("' + *1*];\n");
+        self.finish_scope();
+        self.scopes.pop();
+        self.indent -= 1;
+        self.pad();
         self.out.push_str("}\n");
     }
 
