@@ -424,6 +424,17 @@ It exists because a run has no limit. A loop that costs minutes at build is a
 loop somebody will want to skip, and the honest way to let them is to make the
 skipping visible rather than to put the limit back.
 
+Everything that does not involve running still happens: types and sizes,
+ownership, loans, showing, dividing by a written zero, and the bounds — `E0534`
+and `W0001` reason from the loop's written ends and run nothing, so a `no-itmt`
+loop still gets its estimate.
+
+**It can only make the compiler say more, never less.** Dropping a bound takes a
+run: that is how the loop bounded at 200 and reaching 52 gets cleared. Take the
+run away and the estimate stands, as a warning. So what `no-itmt` gives up is
+learning anything further, and never staying quiet about something already
+known — which is the right shape for a word reached for to save time.
+
 What it costs is the check that would have caught the bug — which is why it is
 `UNSAFE` and why the word is greppable.
 
