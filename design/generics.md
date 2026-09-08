@@ -49,7 +49,7 @@ Walking a `struct 'line' [point 'from', point 'to']`, a field is itself a struct
 and `convert-to-str` does not take one. So the writer can ask:
 
 ```
-kind 'part'.value {
+whichever 'part'.value {
     is number { ... }
     is text   { ... }
     is struct { show[loan 'part'.value] }
@@ -63,10 +63,11 @@ doing the same thing and an `else` catching every struct anybody will ever write
 what lets `show` call itself, which is how a `line` made of `point`s is shown at
 all.
 
-**`kind`, not `when`.** They look alike and are not: `when` is a choice the
-program makes while running, with both arms in it. `kind` is decided while
+**`whichever`, not `when`.** They look alike and are not: `when` is a choice the
+program makes while running, with both arms in it. `whichever` is decided while
 compiling and only the chosen arm survives into the program. A word appears
-where there is a choice, and that is a real one.
+where there is a choice, and that is a real one — and the word says the choosing
+rather than the asking, which is what is actually happening.
 
 ## Open
 
@@ -75,7 +76,7 @@ where there is a choice, and that is a real one.
 - Whether the same words constrain a generic — `loan.many.any.int 'xs'` — so the
   vocabulary for *what a thing is* and for *what a generic asks of it* is one
   list, learned once.
-- Whether constraints are wanted at all now that `kind` exists. A generic that
+- Whether constraints are wanted at all now that `whichever` exists. A generic that
   can ask what it was given can handle anything; a constraint says what it
   refuses in advance, and buys an error at the call rather than inside the body.
 - Whether `loop.parts` also walks a `many`, where every element is the same type
