@@ -69,10 +69,20 @@ compiling and only the chosen arm survives into the program. A word appears
 where there is a choice, and that is a real one — and the word says the choosing
 rather than the asking, which is what is actually happening.
 
+### The number families are asked about both ways
+
+`is number` covers all twenty-odd of them, and `is int`, `is uint`, `is bin` and
+`is deci` each cover one family. Both, because one branch usually suffices and
+sometimes it does not — a whole number and a decimal are not handled alike.
+
+`int` is free to mean this because it is deliberately not a type: *there is no
+`int` on its own, because there is no size to assume*. It is not a type and it
+is a family, which is exactly what a word here has to be.
+
 ## Open
 
-- Which family words there are: `number`, `text`, `struct`, `many` at least —
-  and whether `number` splits into `int`, `bin`, `deci`.
+- Which family words there are beyond the numbers: `text`, `struct`, `many`,
+  and whether `bool`, `or-nothing` and a loan are asked about the same way.
 - Whether the same words constrain a generic — `loan.many.any.int 'xs'` — so the
   vocabulary for *what a thing is* and for *what a generic asks of it* is one
   list, learned once.
