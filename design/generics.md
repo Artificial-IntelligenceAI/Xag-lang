@@ -79,6 +79,33 @@ sometimes it does not — a whole number and a decimal are not handled alike.
 `int` on its own, because there is no size to assume*. It is not a type and it
 is a family, which is exactly what a word here has to be.
 
+### Two arms that overlap are refused
+
+A field holding an `int64` answers to both `is int` and `is number`, so one
+`whichever` may not ask both. Pick a level: `is number`, or the four families.
+
+Most-specific-wins was argued for first and withdrawn. The case for it was
+"handle numbers generally, except decimals" — and that case does not exist:
+`convert-to-str` already answers every family correctly, keeping a decimal's
+trailing zero. A rule was being added for a need nobody had.
+
+Refusing costs nothing today, adds no idea of one word being *more specific*
+than another — which the language has nowhere else — and is the least powerful
+answer, which is the rule. It is also the safe direction: going from refused to
+allowed later breaks nothing written before it, and going the other way breaks
+everything.
+
+Nobody writes an overlap deliberately. It arrives when somebody *extends* a
+`whichever` written months earlier, which is exactly the moment nothing else
+would say anything.
+
+Other languages allow it because for them overlap is the mechanism rather than
+the mistake: `Some(0)` before `Some(x)` is how a pattern says "this case, then
+the general one", and a wildcard overlaps everything on purpose. They check
+exhaustiveness instead. `whichever` asks a closed question with a fixed set of
+answers and no values in it, so there is no "this particular one, then any" to
+express.
+
 ## Open
 
 - Which family words there are beyond the numbers: `text`, `struct`, `many`,
