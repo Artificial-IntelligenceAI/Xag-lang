@@ -1108,11 +1108,11 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   built.
 
   A run the compiler does has no limit, so a long loop can cost real time at
-  build. `no-verif` is a loop saying not to bother:
+  build. `no-itmt` is a loop saying not to bother:
 
   ```
   UNSAFE {
-      loop.no-verif.range.int64 'i' = [*1*, *1000000000*] {
+      loop.no-itmt.range.int64 'i' = [*1*, *1000000000*] {
           set 'total' = ['total' + churn['i']];
       }
   }
@@ -1125,13 +1125,14 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
   **Not `no-run`.** The loop does run — at runtime, every time, exactly as
   written. It is only the compiler that does not run it, and a word built on
-  *run* in that position reads as a loop that never executes. That is why the
-  word names the checking rather than the running.
+  *run* in that position reads as a loop that never executes.
 
-  Open with it: where it sits in the chain (`loop . [no-verif] . [perm] . range .
-  type` is the proposal), which code refuses it outside `UNSAFE`, and whether
-  "verify" is the right word for something that runs a program rather than
-  proving anything about it.
+  It names ITMT because ITMT is what it turns off, and because a word for the
+  thing itself borrows nothing: `no-verif` was tried first and imported
+  "verification", which nothing else in the language is called.
+
+  Open with it: where it sits in the chain (`loop . [no-itmt] . [perm] . range .
+  type` is the proposal), and which code refuses it outside `UNSAFE`.
 
 ## Capitals
 
