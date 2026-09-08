@@ -298,6 +298,37 @@ enum Verdict {
     Differed(Vec<(&'static str, Answer)>),
 }
 
+/// An answer with the compiler's own diagnostics cut out of it.
+///
+/// Not off the front: what a program writes goes to stdout and what the
+/// compiler says goes to stderr, and the two are joined with stderr last — so
+/// the block sits at the *end*, after the program's output, and taking
+/// everything before it away threw the answer out instead of the noise.
+///
+/// A block opens with the greeting and closes with the line offering the issue
+/// tracker. Anything the program itself put on stderr — `the program stopped:`
+/// most of all — is outside those bounds and stays.
+fn withoutTheCompilersVoice(mut answer: Answer) -> Answer {
+    const OPENING: &str = "Hello, ";
+    const CLOSING: &str = "please tell me: ";
+    loop {
+        let opened = match answer.said.find(OPENING) {
+            Some(at) => at,
+            None => break,
+        };
+        let closed = match answer.said[opened..].find(CLOSING) {
+            Some(at) => opened + at,
+            None => break,
+        };
+        let end = match answer.said[closed..].find('\n') {
+            Some(at) => closed + at + 1,
+            None => answer.said.len(),
+        };
+        answer.said.replace_range(opened..end, "");
+    }
+    answer
+}
+
 /// One program, put to every engine.
 fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
     let source = room.join("case.xag");
@@ -331,9 +362,15 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
         return Verdict::Skipped;
     }
 
+    // What the *program* said, without what the compiler said about it.
+    //
+    // `xagc run` and `xagc fast` print diagnostics before running, and a built
+    // program prints none — so a single warning made native the odd one out on
+    // every case that had one. `W0003` arrived and did that to 230 of 250,
+    // which is how a fragility that had been there all along was finally seen.
     let answers = vec![
-        ("test interpreter", interpreted),
-        ("fast interpreter", quick),
+        ("test interpreter", withoutTheCompilersVoice(interpreted)),
+        ("fast interpreter", withoutTheCompilersVoice(quick)),
         ("native", native),
     ];
     let alike = answers
