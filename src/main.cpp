@@ -52,6 +52,10 @@ void usage() {
                "                                 program's, not xagc's\n\n"
                "    --out-of-range=stops|wraps   for this run only, over what\n"
                "    --decimal=software|hardware  Xag-Config.toml decided\n\n"
+               "    --no-itmt                    (check only) do not run the\n"
+               "                                 program while checking it. Faster\n"
+               "                                 by far, and it stops looking for\n"
+               "                                 what only a run can find.\n\n"
                "    --anyway                     build even where the two ways I\n"
                "                                 have of running a program did\n"
                "                                 not agree about it. What comes\n"
@@ -262,6 +266,20 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built,
 // an answer the compiler cannot stand behind is the one thing that must not
 // reach anybody.
 bool anyway = false;
+
+// Set by `--no-itmt`, and only `xagc check` takes it: do not run the program
+// while checking it.
+//
+// The whole cost of a check is that run — the front end is free, and building
+// and starting a program is half a second. Somebody writing code wants the
+// spelling and the types back at once, and can ask for the rest when they are
+// done. What is given up is exactly the three things that need a program to
+// have run: `E0537`, `E0538`, and a bound turning from *may* into *does*.
+//
+// Not on `build`, because that is shipping something nothing ever ran, and in
+// the source the same word needs an `UNSAFE` block around it to say so. A flag
+// has no block to be inside.
+bool noItmt = false;
 
 int lexFile(const std::string &path) {
   std::string text;
@@ -513,11 +531,14 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // Last, because it runs the program, and a program is only run once it has
   // been read and found sound. A file holding both a mistake and a very long
   // loop has to report the mistake, and it cannot if it is still counting.
+  // Asked not to run anything: the bounds stand as the estimates they are, and
+  // nothing that needs a run is looked for.
   xag::AheadResult ran =
-      xag::ahead(source, built.mir, checked.aboutSums, checked.intoPlainNames,
-                 buildAndStart,
-                 xag::HowLong{static_cast<long long>(checked.mostRounds),
-                              checked.longestLoop});
+      noItmt ? xag::AheadResult{checked.aboutSums, false, false}
+             : xag::ahead(source, built.mir, checked.aboutSums,
+                          checked.intoPlainNames, buildAndStart,
+                          xag::HowLong{static_cast<long long>(checked.mostRounds),
+                                       checked.longestLoop});
   bool disagreed = false;
   for (xag::Diagnostic &one : ran.diagnostics)
     if (one.severity == xag::Severity::Mine) {
@@ -684,6 +705,11 @@ int main(int argc, char **argv) {
       args.erase(args.begin() + i);
       continue;
     }
+    if (one == "--no-itmt") {
+      noItmt = true;
+      args.erase(args.begin() + i);
+      continue;
+    }
     ++i;
   }
   argv = args.data();
@@ -701,6 +727,21 @@ int main(int argc, char **argv) {
   argc = static_cast<int>(args.size());
 
   const std::string command = argc > 1 ? argv[1] : "--help";
+
+  // Only `check` may be told not to run anything. On `build` it would be
+  // shipping a program nothing ever ran, and in the source the same word needs
+  // an `UNSAFE` block around it to say so — a flag has none.
+  if (noItmt && command != "check") {
+    std::cerr << "xagc: `--no-itmt` is for `xagc check`, where it is a faster "
+                 "answer while you write.\n"
+                 "      `xagc "
+              << command
+              << "` runs the program to find what only running finds, and a\n"
+                 "      program that ships is one that was run. Say `no-itmt` on the "
+                 "loop\n      you mean, inside `UNSAFE`, and it is said where anybody "
+                 "reading can see it.\n";
+    return 1;
+  }
 
   if (command == "lex" && argc > 2)
     return lexFile(argv[2]);

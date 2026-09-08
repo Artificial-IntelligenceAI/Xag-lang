@@ -320,6 +320,22 @@ It becomes a refusal in one place and no other: both engines ran the loop and
 both watched the sum come round. Then it says `reaches` rather than `may reach`,
 and the tip says how it knows.
 
+### A faster answer while you are writing
+
+`xagc check --no-itmt` does everything except run the program. The whole cost of
+a check is that run — 1.87 seconds against 0.01 on the same file — because the
+front end is free and building and starting a program is not.
+
+It still finds spelling, types, ownership, loans, showing, dividing by a written
+zero, and the bounds as the estimates they are. It stops finding exactly the
+three things that need a program to have run: `E0537`, `E0538`, and a bound
+turning from *may reach* into *reaches*.
+
+**Only `check` takes it.** On `build` it would be shipping something nothing ever
+ran, and the same word in the source needs an `UNSAFE` block around it to say so
+— a flag has none, so `xagc build --no-itmt` is refused and says where the word
+belongs instead.
+
 ### A way past the compiler contradicting itself
 
 **Decided by Tankun, 2026-09-08.** `--anyway` turns a disagreement into a warning
