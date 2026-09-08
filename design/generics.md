@@ -79,6 +79,18 @@ sometimes it does not — a whole number and a decimal are not handled alike.
 `int` on its own, because there is no size to assume*. It is not a type and it
 is a family, which is exactly what a word here has to be.
 
+### A part is an ordinary struct
+
+`'part'` is a real value with a real type: a struct of a `str` called `name` and
+whatever the field holds, called `value`. It can be handed about like anything
+else.
+
+Its type differs from turn to turn — `[str 'name', int64 'value']` walking one
+field, `[str 'name', str 'value']` walking the next — and that needs nothing new,
+because the loop is unrolled. Each turn is its own copy of the body with one
+concrete struct in it. Nothing in the type system has to hold a type that
+changes; the *copies* differ, and each copy is ordinary.
+
 ### Two arms that overlap are refused
 
 A field holding an `int64` answers to both `is int` and `is number`, so one
@@ -118,8 +130,6 @@ express.
   refuses in advance, and buys an error at the call rather than inside the body.
 - Whether `loop.parts` also walks a `many`, where every element is the same type
   and an ordinary loop would do.
-- What `'part'` is, exactly. It is reached like a struct, and no struct has a
-  field whose type changes per turn.
 - How a type parameter is spelled where it needs a name, and the collision that
   comes with it — `fn.loan.'life'.'held'` puts a loan name and a type name side
   by side, told apart by counting, which is a syntax nobody could read.
