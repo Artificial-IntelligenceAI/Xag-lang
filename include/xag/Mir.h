@@ -176,6 +176,10 @@ struct BasicBlock {
   // when it gets here, the way it stops at a read: the loop was told not to be
   // run while compiling, and running the program around it would run it anyway.
   bool noItmt = false;
+  // The block a `loop.while` jumps back to. Its ends are not written down, so
+  // it may never finish — which is the one thing that stops a run the compiler
+  // is doing from being allowed to take as long as it likes.
+  bool mayNotFinish = false;
 };
 
 struct Body {

@@ -332,6 +332,21 @@ matters: a rewrite worked out from an answer the compiler cannot stand behind is
 the one thing that must not reach anybody, and `--anyway` is exactly the case
 where it cannot stand behind it.
 
+### Saying what it is about to spend
+
+A run may take as long as the program does, so a build can be quiet for a long
+time. Before a long one it says so, using the trip count, which is free — both
+ends are written down:
+
+```text
+xagc: about to run this program to find out what it does. A loop at line 3 goes
+      round 20000000 times, so this may take a moment.
+      `no-itmt` on that loop, inside `UNSAFE`, says not to bother.
+```
+
+Not for a loop that already said `no-itmt`, where the advice would be to write
+the word that is already there.
+
 ### Which sums are anybody's business
 
 `E0537` is only ever said about a sum whose answer becomes a **name** that did
@@ -361,7 +376,7 @@ it is watched, agreed about, and said nothing about.
 
 **Decided by Tankun, 2026-09-07: not limited.** Not the running, and not the
 loop either — a range is never refused for being large. An ITMT run has no step
-budget at all, where a reader's run gives up after fifty million: twenty million
+budget, where a reader's run gives up after fifty million: twenty million
 rounds with a branch in them used to be three and a half seconds of running
 followed by nothing, and is now eight seconds and an answer. A `loop.range` has its
 ends written down, so it always finishes, and there is no halting problem to
@@ -390,8 +405,14 @@ numbers, multiplied through any nesting, before a single iteration runs. It is
 the same on every machine, and it is what any message about a long run would be
 built from.
 
-A `while` is the other case. Its trip count is not written down, so it can fail
-to finish for real, and something has to stop it. The test interpreter already
+A `while` is the other case, and it keeps the budget. Its trip count is not
+written down, so it may never finish, and then waiting is the compiler hanging
+with nothing to show. One anywhere in the program puts the budget back over the
+whole of it — coarse, and the cheap way to be sure, since which loop a run is
+*inside* is not something the walk keeps track of.
+
+Nothing tested that until 2026-09-08, because the generator had never written a
+`loop.while` at all. It does now. The test interpreter already
 counts its steps (`kBudget` in `src/Interpret.cpp`) — but that budget is an
 engine limit today, one the oracle sets aside cases for reaching. If running a
 loop can reach it, running out has to become an answer: a diagnostic pointing at
@@ -443,12 +464,12 @@ What it costs is the check that would have caught the bug — which is why it is
 
 ## Open
 
-- Whether the compiler says what it is doing before a long run, or simply goes
-  quiet until it is finished. A run may now take as long as the program does,
-  which makes the silence longer than it was.
-- What else a run should look for. Two are free and neither is built: statements
-  a run never reached, in a program that reads nothing, are certainly dead; and
-  a `mut` on a name that never changed is a word that was not needed.
+- What else a run should look for. Statements a run never reached was written and
+  taken out again: a run only reaches the end for a program that reads nothing,
+  and those are exactly the programs where every condition is decided, so every
+  `if` and `when` has an arm it does not take. It found two in one example and
+  both were the example working. The version worth having — *no path can reach
+  this* — needs no run and is not this pass's question.
 
 ### What it costs the oracle
 

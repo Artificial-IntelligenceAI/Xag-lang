@@ -77,9 +77,16 @@ struct AheadResult {
 // Comparing output alone, a sum coming round in a value nothing prints leaves
 // both runs silent — and two engines silent in the same way is not two engines
 // agreeing, which is the shape of every hole found in this project so far.
+// What the checker worked out that a run wants to know before it starts: the
+// most times a counted loop goes round, and where that loop is.
+struct HowLong {
+  long long rounds = 0;
+  Span where;
+};
+
 AheadResult ahead(const Source &source, const Mir &mir,
                   const std::vector<Diagnostic> &aboutSums,
                   const std::vector<Span> &intoPlainNames = {},
-                  const Building &building = {});
+                  const Building &building = {}, HowLong howLong = {});
 
 } // namespace xag

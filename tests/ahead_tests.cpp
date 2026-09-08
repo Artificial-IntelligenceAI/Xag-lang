@@ -508,6 +508,7 @@ void aNameIsChangedByMoreThanBeingAssignedTo() {
   CHECK(xag::writeInWhatTheLoopsAnswer(three.mir) == 1);
 }
 
+
 } // namespace
 
 int main() {

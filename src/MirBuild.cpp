@@ -878,6 +878,7 @@ private:
       const unsigned inside = addBlock();
       const unsigned after = addBlock();
       markIfToldNotToRun(s.chain, header);
+      body_.blocks[header].mayNotFinish = true;
       finish(Terminator{TerminatorKind::Goto, s.span, {}, {}, {header}, false, {}});
 
       current_ = header;

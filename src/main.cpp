@@ -515,7 +515,9 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // loop has to report the mistake, and it cannot if it is still counting.
   xag::AheadResult ran =
       xag::ahead(source, built.mir, checked.aboutSums, checked.intoPlainNames,
-                 buildAndStart);
+                 buildAndStart,
+                 xag::HowLong{static_cast<long long>(checked.mostRounds),
+                              checked.longestLoop});
   bool disagreed = false;
   for (xag::Diagnostic &one : ran.diagnostics)
     if (one.severity == xag::Severity::Mine) {

@@ -5,6 +5,7 @@
 #include "xag_runtime.h"
 
 #include <cstdio>
+#include <iostream>
 
 namespace xag {
 namespace {
@@ -97,13 +98,15 @@ bool samePlaces(const std::vector<Span> &a, const std::vector<Span> &b) {
 
 // Whether running this program could find anything at all.
 //
+// Whether running this program could find anything at all.
+//
 // There are two things to find: a sum that comes round, and a stop. A sum needs
 // `+`, `-` or `x` on whole numbers; a stop needs a divide, a remainder, a power,
 // or reaching into a `many`. A program with none of those has nothing to learn
 // about, and building and starting it costs half a second to find that out.
 bool worthRunning(const Mir &mir) {
   for (const Body &body : mir.bodies)
-    for (const BasicBlock &block : body.blocks)
+    for (const BasicBlock &block : body.blocks) {
       for (const Statement &s : block.statements) {
         if (s.kind == StatementKind::Store)
           return true;
@@ -118,6 +121,7 @@ bool worthRunning(const Mir &mir) {
             isWhole(body.typed[s.value.type.index].held))
           return true;
       }
+    }
   return false;
 }
 
@@ -306,9 +310,14 @@ std::vector<Diagnostic> whatTheLoopsLeave(const Mir &mir,
   return left;
 }
 
-AheadResult ahead(const Source &, const Mir &mir,
+// Enough rounds to be worth mentioning. Below this a run is over before anybody
+// wonders whether it is; above it, silence looks like being stuck.
+constexpr long long kWorthMentioning = 1000000;
+
+AheadResult ahead(const Source &source, const Mir &mir,
                   const std::vector<Diagnostic> &aboutSums,
-                  const std::vector<Span> &intoPlainNames, const Building &building) {
+                  const std::vector<Span> &intoPlainNames, const Building &building,
+                  HowLong howLong) {
   AheadResult out;
   // Something to settle, or a second engine to settle it with. With neither,
   // running the program would answer a question nobody asked.
@@ -316,6 +325,18 @@ AheadResult ahead(const Source &, const Mir &mir,
       (aboutSums.empty() && !worthRunning(mir))) {
     out.diagnostics = aboutSums;
     return out;
+  }
+
+  // Said before it starts rather than after, because after is no use to
+  // somebody watching a build and wondering whether it has stopped. A run may
+  // now take as long as the program does, so it can be a long quiet.
+  if (howLong.rounds >= kWorthMentioning) {
+    const Source::Position at = source.positionOf(howLong.where.begin);
+    std::cerr << "xagc: about to run this program to find out what it does. A loop "
+                 "at line "
+              << at.line << " goes round " << howLong.rounds
+              << " times, so this may take a moment.\n"
+                 "      `no-itmt` on that loop, inside `UNSAFE`, says not to bother.\n";
   }
 
   // What the program writes while it is being compiled is not what anybody

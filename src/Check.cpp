@@ -174,6 +174,12 @@ struct Symbol {
   // starting point rather than guessed at.
   bool knownStart = false;
   __int128 start = 0;
+  // Whether anything ever changes it: a `set`, a place or a field written, or
+  // being lent out for writing. A `mut` that none of those happen to is a word
+  // that was not needed — the chain says what is unusual, and nothing unusual
+  // happened.
+  bool everChanged = false;
+  std::string name;
 };
 
 struct Signature {
@@ -564,6 +570,16 @@ private:
     if (last < first)
       return; // it runs no times, and adds nothing up
     const __int128 trips = last - first + 1;
+    // A loop already told not to be run is not one to warn anybody about the
+    // length of: the answer would be to write the word that is already there.
+    bool toldNot = false;
+    for (const ChainSegment &seg : s.chain.segments)
+      if (!seg.isName && seg.text == "no-itmt")
+        toldNot = true;
+    if (!toldNot && trips > result_.mostRounds) {
+      result_.mostRounds = trips;
+      result_.longestLoop = s.span;
+    }
     const __int128 widest = (first < 0 ? -first : first) > (last < 0 ? -last : last)
                                 ? (first < 0 ? -first : first)
                                 : (last < 0 ? -last : last);
@@ -874,6 +890,13 @@ private:
     case ExprKind::Borrow:
       // What a transfer means is the ownership pass's business; the type of the
       // thing transferred is the type of what it names.
+      //
+      // Lending for writing is one of the ways a name changes without a `set`
+      // of it appearing anywhere, so it is noted here.
+      if (e.text == "loanmut" && !e.children.empty() &&
+          e.children[0]->kind == ExprKind::Name)
+        if (Symbol *held = lookupToChange(e.children[0]->text))
+          held->everChanged = true;
       return e.children.empty() ? Type::Unknown : expr(*e.children[0], expected);
 
     case ExprKind::Group:
@@ -1392,7 +1415,22 @@ private:
     scopes_.emplace_back();
     for (const StmtPtr &s : b.stmts)
       statement(*s);
+    sayWhatWasNotNeeded(scopes_.back());
     scopes_.pop_back();
+  }
+
+  // Said as the scope closes, when everything that could have changed a name
+  // has been read.
+  void sayWhatWasNotNeeded(const std::unordered_map<std::string, Symbol> &scope) {
+    for (const auto &[name, held] : scope) {
+      if (!held.changeable || held.everChanged)
+        continue;
+      warn(held.span, "W0003", "`'" + name + "'` never changes.",
+           {"a chain says what is unusual, and says nothing else"},
+           {"`mut` asks for something that is then not done: nothing sets it, "
+            "nothing writes a place or a field of it, and nothing lends it out "
+            "for writing. Without the word it would be the same name."});
+    }
   }
 
   void statement(const Stmt &s) {
@@ -1416,8 +1454,10 @@ private:
     }
 
     case StmtKind::Set: {
-      if (Symbol *held = lookupToChange(s.name))
+      if (Symbol *held = lookupToChange(s.name)) {
         held->knownStart = false;
+        held->everChanged = true;
+      }
       if (const Symbol *said = lookup(s.name);
           said && !said->wraps && isWhole(said->type))
         result_.intoPlainNames.push_back(s.span);

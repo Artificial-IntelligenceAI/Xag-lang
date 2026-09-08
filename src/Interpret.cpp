@@ -42,7 +42,8 @@ struct Frame {
 class Machine {
 public:
   Machine(const Mir &mir, bool watching, bool keeping = false)
-      : mir_(mir), watching_(watching), keeping_(keeping), patient_(watching || keeping) {}
+      : mir_(mir), watching_(watching), keeping_(keeping),
+        patient_((watching || keeping) && everyLoopFinishes(mir)) {}
 
   // Where it has got to, for whoever catches a stop coming out of the runtime.
   const Span &where() const { return whereNow_; }
@@ -79,12 +80,26 @@ private:
   // Whether to wait however long the program takes.
   //
   // A reader's run gives up eventually, because a runaway program has to be
-  // stoppable. A run the compiler is doing does not: a `loop.range` has its ends
-  // written down, so it finishes, and giving up on it means spending the time
-  // and learning nothing — which is what happened to twenty million rounds with
-  // a branch in them. A loop slow to compile is a loop slow to run, and finding
-  // that out at build time is finding it out on the right machine.
+  // stoppable. A run the compiler is doing waits, so long as every loop in the
+  // program finishes: a `loop.range` has its ends written down, so giving up on
+  // one means spending the time and learning nothing — which is what happened
+  // to twenty million rounds with a branch in them.
+  //
+  // A `loop.while` is the exception, and the reason the answer is not simply
+  // "wait". Its ends are not written down, so it may never finish, and then
+  // waiting is the compiler hanging with nothing to show. One anywhere in the
+  // program puts the budget back over the whole of it — coarse, and the cheap
+  // way to be sure, since a loop the run is *inside* is not a thing the walk
+  // keeps track of.
   const bool patient_ = false;
+
+  static bool everyLoopFinishes(const Mir &mir) {
+    for (const Body &body : mir.bodies)
+      for (const BasicBlock &block : body.blocks)
+        if (block.mayNotFinish)
+          return false;
+    return true;
+  }
   std::vector<Frame> frames_;
   std::string trouble_;
   uint64_t steps_ = 0;

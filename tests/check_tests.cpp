@@ -723,6 +723,21 @@ void askingToSkipNeedsSayingSo() {
                "    loop.itmt.range.int64 'i' = [*1*, *3*] { }\n}\n") == "E0202");
 }
 
+// `mut` asks for something. A name nothing ever changes did not need it, and a
+// chain says what is unusual.
+void aMutThatWasNotNeededIsSaidSo() {
+  CHECK(saidIn("var.mut.int64 'n' = [*3*];") == "W0003");
+  // Changed by any of the three ways a name changes, and nothing is said.
+  CHECK(saidIn("var.mut.int64 'n' = [*3*];\n    set 'n' = [*4*];") == "");
+  CHECK(saidIn("var.mut.many.int64 'xs' = [*1* *2*];\n"
+               "    set 'xs'[*0*] = [*9*];") == "");
+  CHECK(saidIn("var.mut.int64 'n' = [*3*];\n"
+               "    var.loanmut.int64 'p' = [loanmut 'n'];\n"
+               "    set 'p' = [*4*];") == "");
+  // Without the word there is nothing to say.
+  CHECK(saidIn("var.int64 'n' = [*3*];") == "");
+}
+
 int main() {
   aNameMustBeDeclared();
   aNameIsDeclaredOnce();
@@ -758,6 +773,7 @@ int main() {
   fillNeedsAValueThatCopies();
   showingAManyIsRefused();
   askingToSkipNeedsSayingSo();
+  aMutThatWasNotNeededIsSaidSo();
   showingAMaybeIsRefused();
   aManyTravelsWhole();
   nothingNeedsSomewhereToBe();

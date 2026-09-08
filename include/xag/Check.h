@@ -156,6 +156,13 @@ struct CheckResult {
   // no way to say it is the open question rather than the reader's problem.
   std::vector<Span> intoPlainNames;
 
+  // The most times any counted loop in this file goes round, where both its
+  // ends are written down. Free to work out — the number is already computed to
+  // bound what the loop adds up — and it is what lets a run say, before it
+  // starts, roughly what it is about to spend.
+  __int128 mostRounds = 0;
+  Span longestLoop;
+
   // What the checker worked out, so that nothing after it has to work the same
   // thing out again. Keyed by node, which is stable for as long as the tree is.
   std::unordered_map<const Expr *, Ty> expressions;
