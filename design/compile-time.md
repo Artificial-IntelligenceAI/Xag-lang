@@ -144,6 +144,7 @@ agreeing mean something.
 | they agree, and a bound was wrong | the bound is dropped |
 | they agree, and a sum came round nothing suspected | `E0537` |
 | they agree, and the program stopped | `E0538` |
+| they agree, and a bound was right | `E0534`, and only here |
 | only one engine ran | bounds may be dropped, and nothing else is said |
 
 The last row is what happens with no runtime to link against. One engine may let
@@ -295,6 +296,33 @@ gone, and the *count* of it would go on counting — so the next run in the same
 process is told it ended holding what the last one dropped. `xag_forget_allocations`
 puts the count back. A program that is fine was being accused.
 
+### An estimate does not refuse anybody's program
+
+**Decided by Tankun, 2026-09-08.** A bound says *at most*, and at most turns away
+programs that are fine. So `E0534` leaves the checker as a **warning**:
+
+```text
+`'sum'` may reach past what a `int8` holds.
+Tip(s): this is worked out from the loop's ends rather than by running it, so it
+        says how far this could get and not how far it does.
+```
+
+It becomes a refusal in one place and no other: both engines ran the loop and
+both watched the sum come round. Then it says `reaches` rather than `may reach`,
+and the tip says how it knows.
+
+### A way past the compiler contradicting itself
+
+**Decided by Tankun, 2026-09-08.** `--anyway` turns a disagreement into a warning
+and lets the build through, for somebody who cannot wait for it to be fixed. The
+disagreement is still reported and everything the two runs agreed about still
+holds; what stops is the refusing.
+
+It also **switches off writing a loop's answer in**. That is the part that
+matters: a rewrite worked out from an answer the compiler cannot stand behind is
+the one thing that must not reach anybody, and `--anyway` is exactly the case
+where it cannot stand behind it.
+
 ### Which sums are anybody's business
 
 `E0537` is only ever said about a sum whose answer becomes a **name** that did
@@ -323,7 +351,10 @@ it is watched, agreed about, and said nothing about.
 ## A `loop.range` is not limited
 
 **Decided by Tankun, 2026-09-07: not limited.** Not the running, and not the
-loop either — a range is never refused for being large. A `loop.range` has its
+loop either — a range is never refused for being large. An ITMT run has no step
+budget at all, where a reader's run gives up after fifty million: twenty million
+rounds with a branch in them used to be three and a half seconds of running
+followed by nothing, and is now eight seconds and an answer. A `loop.range` has its
 ends written down, so it always finishes, and there is no halting problem to
 defend against — only patience, which is the thing this language already spends.
 
@@ -369,40 +400,14 @@ which is the moment to write it down rather than later.
 
 ## Open
 
-- Whether a bound alone may still refuse a program, or only warn once running is
-  possible. `E0534` refuses on an estimate today, and the example above shows it
-  refusing a correct program.
 - Whether the compiler says what it is doing before a long run, or simply goes
-  quiet until it is finished.
-- What else a run should look for beyond sums that do not fit and places that do
-  not exist.
-
-### A `loop.range` is not limited, except that it is
-
-Decided: a `loop.range` gets no limit, because its ends are written down and the
-writer set the limit when they wrote them. What is built does not do that. The
-test interpreter gives up after fifty million steps (`kBudget`), so:
-
-```
-loop.range.int64 'i' = [*1*, *20000000*] {
-    if ('i' mod *7*) == *0* { ... } else { ... }
-}
-```
-
-is not answered. It is three and a half seconds of running, and then nothing —
-the loop stays in the built program and every bound about it stands. LLVM folds
-the plainer shapes by itself, so the loops that reach this are exactly the ones
-worth answering.
-
-Three ways out, and the decision does not pick between them:
-
-- **Take the budget off an ITMT run.** A `loop.range` finishes, so the run
-  finishes; the compiler takes as long as the loop takes, which is what "not
-  limited" said. A `while` still needs the budget, since it may never finish.
-- **Keep it, and mean something narrower by "not limited"** — that the compiler
-  will not *refuse* a long loop, only that it may not answer one.
-- **Keep it and say so**, which at least stops the three and a half seconds
-  being silent.
+  quiet until it is finished. A run may now take as long as the program does,
+  which makes the silence longer than it was.
+- Whether a loop taken out on its own may *raise* a bound and not only drop one,
+  worded as what it is: if this loop runs, this sum comes round.
+- What else a run should look for. Two are free and neither is built: statements
+  a run never reached, in a program that reads nothing, are certainly dead; and
+  a `mut` on a name that never changed is a word that was not needed.
 
 ### What it costs the oracle
 

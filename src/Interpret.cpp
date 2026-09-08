@@ -42,7 +42,7 @@ struct Frame {
 class Machine {
 public:
   Machine(const Mir &mir, bool watching, bool keeping = false)
-      : mir_(mir), watching_(watching), keeping_(keeping) {}
+      : mir_(mir), watching_(watching), keeping_(keeping), patient_(watching || keeping) {}
 
   // Where it has got to, for whoever catches a stop coming out of the runtime.
   const Span &where() const { return whereNow_; }
@@ -75,6 +75,15 @@ private:
   // Whether to keep what `START` was holding when it finished.
   const bool keeping_ = false;
   std::vector<std::string> ended_;
+  // Whether to wait however long the program takes.
+  //
+  // A reader's run gives up eventually, because a runaway program has to be
+  // stoppable. A run the compiler is doing does not: a `loop.range` has its ends
+  // written down, so it finishes, and giving up on it means spending the time
+  // and learning nothing — which is what happened to twenty million rounds with
+  // a branch in them. A loop slow to compile is a loop slow to run, and finding
+  // that out at build time is finding it out on the right machine.
+  const bool patient_ = false;
   std::vector<Frame> frames_;
   std::string trouble_;
   uint64_t steps_ = 0;
@@ -851,7 +860,7 @@ private:
     while (at < body.blocks.size() && trouble_.empty()) {
       const BasicBlock &block = body.blocks[at];
       for (const Statement &s : block.statements) {
-        if (++steps_ > kBudget) {
+        if (!patient_ && ++steps_ > kBudget) {
           trouble_ = "the program ran longer than this engine will wait";
           break;
         }

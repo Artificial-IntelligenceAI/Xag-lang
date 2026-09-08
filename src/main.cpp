@@ -52,6 +52,11 @@ void usage() {
                "                                 program's, not xagc's\n\n"
                "    --out-of-range=stops|wraps   for this run only, over what\n"
                "    --decimal=software|hardware  Xag-Config.toml decided\n\n"
+               "    --anyway                     build even where the two ways I\n"
+               "                                 have of running a program did\n"
+               "                                 not agree about it. What comes\n"
+               "                                 out may be wrong, and the\n"
+               "                                 disagreement is still reported.\n\n"
                "Nothing else is built yet.\n";
 }
 
@@ -251,6 +256,12 @@ std::string runtimeLibrary() {
 
 bool ready(const std::string &path, std::string &text, xag::MirResult &built,
            int &status, xag::Rewriting rewriting = xag::Rewriting::No);
+
+// Set by `--anyway`: build even where the two ways of running a program did not
+// agree about it. Nothing is folded away then, because a rewrite worked out from
+// an answer the compiler cannot stand behind is the one thing that must not
+// reach anybody.
+bool anyway = false;
 
 int lexFile(const std::string &path) {
   std::string text;
@@ -500,9 +511,21 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // Last, because it runs the program, and a program is only run once it has
   // been read and found sound. A file holding both a mistake and a very long
   // loop has to report the mistake, and it cannot if it is still counting.
-  const xag::AheadResult ran =
+  xag::AheadResult ran =
       xag::ahead(source, built.mir, checked.aboutSums, checked.intoPlainNames,
                  buildAndStart);
+  bool disagreed = false;
+  for (xag::Diagnostic &one : ran.diagnostics)
+    if (one.severity == xag::Severity::Mine) {
+      disagreed = true;
+      if (anyway) {
+        one.severity = xag::Severity::Warning;
+        one.tips = {"you asked for it anyway, so here it is. Everything the two ways "
+                    "of running agreed about still holds, and no loop has been "
+                    "written away — but the two of them disagreeing about this "
+                    "program is a reason to doubt what comes out of it."};
+      }
+    }
   if (report(source, ran.diagnostics) != 0)
     return false;
 
@@ -510,7 +533,7 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // is written back as that answer, and the interpreters never see it — which
   // is what leaves the oracle a rewrite to disagree with, rather than three
   // engines agreeing on the same folded number.
-  if (rewriting == xag::Rewriting::Yes)
+  if (rewriting == xag::Rewriting::Yes && !disagreed)
     xag::writeInWhatTheLoopsAnswer(built.mir);
 
   status = 0;
@@ -645,6 +668,15 @@ int main(int argc, char **argv) {
     if (one.rfind("--decimal=", 0) == 0) {
       overridden.wantsHardwareDecimal = one.substr(10) == "hardware";
       asked = &overridden;
+      args.erase(args.begin() + i);
+      continue;
+    }
+    // A way past the compiler contradicting itself, for somebody who cannot
+    // wait for it to be fixed. It is not a way of being told less: everything
+    // the two ways of running agreed about is still said, and the disagreement
+    // is still reported. What it stops is the refusing.
+    if (one == "--anyway") {
+      anyway = true;
       args.erase(args.begin() + i);
       continue;
     }

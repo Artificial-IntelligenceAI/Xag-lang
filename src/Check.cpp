@@ -593,16 +593,20 @@ private:
         continue;
       }
       const __int128 reach = plus ? held->start + total : held->start - total;
+      // Said rather than refused. This is worked out from the loop's ends and
+      // says *at most*, and at most turns away programs that are fine: a
+      // hundred rounds adding `'i' / *50*` is bounded at 200 and reaches 52.
+      // Running the loop is what makes it certain, and `ahead` says so then.
       if (reach > mostOf(held->type.kind) || reach < leastOf(held->type.kind))
         aboutSums(inner->span, "E0534",
-                  "`'" + inner->name + "'` reaches past what a `" +
+                  "`'" + inner->name + "'` may reach past what a `" +
                       std::string(name(held->type)) + "` holds.",
                   {"a sum that does not fit comes round, and that is rarely what was "
                    "wanted"},
-                  {"the loop's ends are written down, so how far this gets is settled "
-                   "before the program runs; `wrapping` says it is meant to come "
-                   "round."},
-                  Severity::Error);
+                  {"this is worked out from the loop's ends rather than by running it, "
+                   "so it says how far this could get and not how far it does; "
+                   "`wrapping` says coming round is meant."},
+                  Severity::Warning);
     }
   }
 

@@ -154,6 +154,20 @@ Diagnostic stopping(const InterpretResult &reading, const Compiled &running,
        "and both stopped here for this reason."}};
 }
 
+// A bound that was right, said as something certain rather than as an estimate.
+// Only where both engines watched it happen.
+Diagnostic confirmed(Diagnostic bound) {
+  const std::string may = "` may reach past";
+  const size_t at = bound.message.find(may);
+  if (at != std::string::npos)
+    bound.message.replace(at, may.size(), "` reaches past");
+  bound.severity = Severity::Error;
+  bound.tips = {"the loop's ends said it could get this far, and running it says it "
+                "does — both ways I have of running it watched this come round. "
+                "`wrapping` says coming round is meant."};
+  return bound;
+}
+
 // The compiler contradicting itself. No code, because a code names a rule the
 // reader's code broke and no rule was broken; what stands in its place is the
 // two answers, which is the thing worth having in the report.
@@ -356,7 +370,15 @@ AheadResult ahead(const Source &, const Mir &mir,
   std::vector<Diagnostic> standing;
   for (const Diagnostic &bound : aboutSums) {
     const bool answered = !partly || inside(bound.span, result.reached);
-    if (!answered || inside(bound.span, result.cameRound))
+    const bool came = inside(bound.span, result.cameRound);
+    if (answered && !came)
+      continue;
+    // A bound is an estimate and estimates do not refuse anybody's program. It
+    // becomes a refusal here and nowhere else: both engines ran the loop and
+    // both watched the sum come round, which is not *at most* any more.
+    if (came && out.compared && bound.code == "E0534")
+      standing.push_back(confirmed(bound));
+    else
       standing.push_back(bound);
   }
 
