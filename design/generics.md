@@ -51,7 +51,7 @@ and `convert-to-str` does not take one. So the writer can ask:
 ```
 whichever 'part'.value {
     is number { ... }
-    is text   { ... }
+    is str    { ... }
     is struct { show[loan 'part'.value] }
     is many   { ... }
 }
@@ -71,15 +71,34 @@ rather than the asking, which is what is actually happening.
 
 ### The words
 
-`number`, and under it `int`, `uint`, `bin`, `deci` — one level or the other, not
-both. Then `text`, `struct`, `bool`, `many`, `or-nothing`, and one for a borrow.
+```
+is number      is int   is uint   is bin   is deci
+is str         is bool
+is many        is or-nothing       is struct
+is loan        is loanmut
+```
 
-All of them can turn up: a struct's field may be any of these, borrows included,
-which was checked rather than assumed.
+Only five of those are new vocabulary, and they are the number words. The rest
+are words the language already has, which follows a rule worth stating:
 
-`int` is free to mean a family precisely because it is not a type — *there is no
-`int` on its own, because there is no size to assume*. It is not a type and it
-is a family, which is exactly what a word here has to be.
+- A family with **many members** gets a word of its own — `number`, and `int`,
+  `uint`, `bin`, `deci` under it.
+- A family with **one member** is called by the type's own name — `str`, `bool`.
+- Everything else already had a word — `many`, `or-nothing`, `struct`, `loan`,
+  `loanmut`.
+
+`int` is free to name a family precisely because it is not a type: *there is no
+`int` on its own, because there is no size to assume*. Not a type, and a family,
+which is exactly what a word here has to be.
+
+**`loan` and `loanmut` are two words, not one.** They are not interchangeable —
+one may be written through and the other may not — so a generic that collapsed
+them would have to find out some other way. There is no collision in reusing
+the chain's words: `many.int64` says *make one* and `is many` says *it is one*,
+and a borrow behaves the same.
+
+All of them can turn up. A struct's field may be a `many`, a `bool`, an
+`or-nothing` or a borrow, which was checked rather than assumed.
 
 ### A part is an ordinary struct
 
@@ -122,9 +141,6 @@ express.
 
 ## Open
 
-- What a borrow's family word is called. `is loan` would collide with the chain
-  word for taking one, and a field may hold either a `loan` or a `loanmut`, so
-  one word has to cover both or there have to be two.
 - Whether the same words constrain a generic — `loan.many.any.int 'xs'` — so the
   vocabulary for *what a thing is* and for *what a generic asks of it* is one
   list, learned once.
