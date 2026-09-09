@@ -249,6 +249,19 @@ private:
     result_.diagnostics.push_back(std::move(one));
   }
 
+  // A check that could not be made, because what it would have looked at could
+  // not be worked out — something it was built from was already refused. Said
+  // rather than passed over: a reader who is told nothing cannot see how far one
+  // mistake reached, and a check quietly not made is worse than one that fails.
+  //
+  // Placed before the check it stands in for rather than replacing it. A traced
+  // type is an unknown one, so the guard below it — `got != Ty{}`, or the same
+  // written the other way round — is already false and the two never both speak.
+  void couldNotCheck(Ty got, Span where, std::string what, std::string rule) {
+    if (got.tracedBack())
+      because(got.from, where, "E0506", std::move(what), {std::move(rule)});
+  }
+
   // Said rather than refused: what the compiler could not settle either way.
   void warn(Span span, std::string code, std::string message,
             std::vector<std::string> rules, std::vector<std::string> tips = {}) {
@@ -874,7 +887,7 @@ private:
       if (!symbol) {
         complain(e.span, "E0501", "`'" + e.text + "'` is not declared.",
                  {"a name means something only after a declaration says what it means"});
-        return Type::Unknown;
+        return unknownFrom(e.span);
       }
       return symbol->type;
     }
@@ -948,7 +961,7 @@ private:
       if (stated == Type::Unknown) {
         complain(e.span, "E0503", "`" + e.text + "` is not a type.",
                  {"a size is always written, and only sizes the standard defines"});
-        return Type::Unknown;
+        return unknownFrom(e.span);
       }
       if (!e.children.empty())
         expr(*e.children[0], stated);
@@ -972,6 +985,8 @@ private:
 
     case ExprKind::Unary: {
       const Ty inner = e.children.empty() ? Ty{} : expr(*e.children[0], Type::Bool);
+      couldNotCheck(inner, e.span, "`not` was not checked here.",
+                    "`not` asks about a `bool`, and what this is could not be worked out");
       if (inner != Type::Unknown && inner != Type::Bool)
         complain(e.span, "E0506", "`not` asks about a `bool`, and this is a `" +
                                       std::string(name(inner)) + "`.",
@@ -994,7 +1009,7 @@ private:
                  {"a type says whether it may hold nothing"},
                  {"`or-nothing` in the chain is what makes room for this; without it "
                   "there is no absence for the name to be in."});
-        return Type::Unknown;
+        return unknownFrom(e.span);
       }
       return expected;
 
@@ -1013,8 +1028,12 @@ private:
   // `'p'.x` — which of the things a struct holds, and what that one is.
   Ty field(const Expr &e) {
     const Ty of = e.children.empty() ? Ty{} : expr(*e.children[0], Ty{});
-    if (of == Ty{})
-      return Ty{};
+    if (of == Ty{}) {
+      couldNotCheck(of, e.span, "`" + e.text + "` was not looked for here.",
+                    "a field is one of the things a struct holds, and what this is "
+                    "could not be worked out");
+      return of; // Carries the trace on, rather than starting a fresh unknown.
+    }
     if (!of.isStruct() || of.orNothing) {
       complain(e.span, "E0527",
                "a `" + name(of) + "` has no fields.",
@@ -1023,7 +1042,7 @@ private:
                                   "what may hold nothing has to be asked before it "
                                   "can be reached into."}
                             : std::vector<std::string>{});
-      return Ty{};
+      return unknownFrom(e.span);
     }
     const Shape &shape = result_.shapes[of.named];
     for (const Field &one : shape.fields)
@@ -1033,7 +1052,7 @@ private:
              "`" + shape.name + "` has no field called `" + e.text + "`.",
              {"a field is one of the things a struct holds"},
              {"what it does hold is written where it was declared."});
-    return Ty{};
+    return unknownFrom(e.span);
   }
 
   // `'xs'[*2*]` — the place a value sits, and the type of what sits there.
@@ -1044,20 +1063,27 @@ private:
     if (!symbol) {
       complain(e.span, "E0501", "`'" + e.text + "'` is not declared.",
                {"a name means something only after a declaration says what it means"});
-      return Type::Unknown;
+      return unknownFrom(e.span);
     }
     if (!symbol->type.holds()) {
-      if (symbol->type.kind == Type::Unknown)
-        return Type::Unknown;
+      if (symbol->type.kind == Type::Unknown) {
+        couldNotCheck(symbol->type, e.span,
+                      "`'" + e.text + "'` was not read as something holding several.",
+                      "an element is one of the values a `many` holds, and what this "
+                      "name is could not be worked out");
+        return symbol->type;
+      }
       complain(e.span, "E0514",
                "`'" + e.text + "'` is a `" + name(symbol->type) +
                    "`, and holds one value rather than several.",
                {"an element is one of the values a `many` holds"},
                {"a name holding one value is that value, and there is no first of it."});
-      return Type::Unknown;
+      return unknownFrom(e.span);
     }
     if (!e.children.empty()) {
       const Ty where = result_.of(e.children[0].get());
+      couldNotCheck(where, e.children[0]->span, "this index was not checked.",
+                    "an index is an `int64`, and what this is could not be worked out");
       if (where != Ty{} && where != Ty{Type::Int64})
         complain(e.children[0]->span, "E0506",
                  "an index is an `int64`, and this is a `" + name(where) + "`.",
@@ -1075,6 +1101,8 @@ private:
            const char *what) {
     if (holds.empty()) {
       const Ty type = expr(condition, Type::Bool);
+      couldNotCheck(type, condition.span, "this condition was not checked.",
+                    "a condition is a `bool`, and what this is could not be worked out");
       if (type != Ty{} && type != Ty{Type::Bool})
         complain(condition.span, "E0506",
                  std::string(what) + " asks a `bool`, and this is a `" + name(type) + "`.",
@@ -1082,6 +1110,9 @@ private:
       return type;
     }
     const Ty type = expr(condition, Ty{});
+    couldNotCheck(type, where, "this was not checked for whether it may be missing.",
+                  "`holds` lends what may not be there, and what this is could not be "
+                  "worked out");
     if (type != Ty{} && !type.mayBeNothing())
       complain(where, "E0519",
                "`holds` lends what may not be there, and a `" + name(type) +
@@ -1188,6 +1219,9 @@ private:
     // question, and the type already says what is being counted.
     if (path == "count" && e.args.values.size() == 1) {
       const Ty got = value(e.args.values[0], Ty{});
+      couldNotCheck(got, e.args.values[0].span, "this was not checked as something to count.",
+                    "`count` counts a `str` or a `many`, and what this is could not be "
+                    "worked out");
       if (got != Ty{} && got.kind != Type::Str && !got.holds())
         complain(e.args.values[0].span, "E0506",
                  "`count` counts a `str` or a `many`, and this is a `" + name(got) + "`.",
@@ -1210,6 +1244,10 @@ private:
         return Type::Str;
       }
       const Ty got = value(e.args.values[0], Ty{});
+      couldNotCheck(got, e.args.values[0].span,
+                    "this was not checked as something with a way of being written.",
+                    "a value is written out the way it is shown, and what this is could "
+                    "not be worked out");
       if (got != Ty{} && !isNumber(got) && got != Ty{Type::Bool})
         complain(e.args.values[0].span, "E0535",
                  got == Ty{Type::Str}
@@ -1240,7 +1278,7 @@ private:
                   "beside it is what asks."});
         for (const Value &v : e.args.values)
           (void)value(v, Ty{});
-        return Type::Unknown;
+        return unknownFrom(e.span);
       }
       if (e.args.values.size() != 1)
         complain(e.span, "E0505",
@@ -1249,6 +1287,9 @@ private:
                  {"a call gives a function what its parameters ask for"});
       if (!e.args.values.empty()) {
         const Ty got = value(e.args.values[0], Ty{Type::Str});
+        couldNotCheck(got, e.args.values[0].span, "this was not checked as text.",
+                      "`convert-to-number` reads text, and what this is could not be "
+                      "worked out");
         if (got != Ty{} && got != Ty{Type::Str})
           complain(e.args.values[0].span, "E0506",
                    "`convert-to-number` reads text, and this is a `" + name(got) + "`.",
@@ -1268,7 +1309,7 @@ private:
                   "beside it has already answered everywhere it is allowed to stand."});
         for (const Value &v : e.args.values)
           (void)value(v, Ty{});
-        return Type::Unknown;
+        return unknownFrom(e.span);
       }
       const Ty holds = elementOf(expected);
       if (e.args.values.size() != 2)
@@ -1403,6 +1444,10 @@ private:
         // same way a lone `many` is the whole array rather than one place.
         if (selfTyped(only)) {
           const Ty got = expr(only, expected);
+          couldNotCheck(got, only.span,
+                        "this value was not checked against a `" + name(expected) + "`.",
+                        "a name holds what it was given, and what this is could not be "
+                        "worked out");
           if (got == expected || got == Ty{} || got == expected.within())
             return expected;
           complain(only.span, "E0506",
@@ -1413,6 +1458,10 @@ private:
         }
       }
       const Ty got = value(v, expected.within());
+      couldNotCheck(got, v.span,
+                    "this value was not checked against a `" + name(expected) + "`.",
+                    "a name holds what it was given, and what this is could not be "
+                    "worked out");
       if (got == Ty{} || got == expected.within())
         return expected;
       complain(v.span, "E0506",
@@ -1432,6 +1481,8 @@ private:
 
     for (const ExprPtr &item : v.items) {
       const Ty got = expr(*item, Type::Str);
+      couldNotCheck(got, item->span, "this piece was not checked as text.",
+                    "pieces side by side join, and what this is could not be worked out");
       if (got != Type::Unknown && got != Type::Str)
         complain(item->span, "E0506",
                  "this is a `" + std::string(name(got)) + "`, and text is made of text.",
@@ -1452,6 +1503,9 @@ private:
       return want;
     if (v.items.size() == 1 && selfTyped(*v.items[0])) {
       const Ty got = expr(*v.items[0], want);
+      couldNotCheck(got, v.items[0]->span,
+                    "this was not checked against a `" + name(want) + "`.",
+                    "a `many` holds one type, and what this is could not be worked out");
       if (got == want || got == Ty{})
         return want;
       if (got != holds)
@@ -1463,6 +1517,9 @@ private:
     }
     for (const ExprPtr &item : v.items) {
       const Ty got = expr(*item, holds);
+      couldNotCheck(got, item->span,
+                    "this was not checked against a `" + name(holds) + "`.",
+                    "a `many` holds one type, and what this is could not be worked out");
       if (got != Ty{} && got != holds)
         complain(item->span, "E0506",
                  "this is a `" + name(got) + "`, and a `" + name(want) + "` holds `" +
@@ -1501,6 +1558,12 @@ private:
     for (unsigned i = 0; i < items.size(); ++i) {
       const Ty wanted = i < shape.fields.size() ? shape.fields[i].type : Ty{};
       const Ty got = expr(*items[i], wanted);
+      if (wanted != Ty{})
+        couldNotCheck(got, items[i]->span,
+                      "this was not checked against what `'" + shape.fields[i].name +
+                          "'` is.",
+                      "a struct is made with one value for each of the things it holds, "
+                      "and what this is could not be worked out");
       if (wanted != Ty{} && got != Ty{} && got != wanted)
         complain(items[i]->span, "E0506",
                  "`'" + shape.fields[i].name + "'` is a `" + name(wanted) +
@@ -1609,6 +1672,8 @@ private:
       }
       if (s.index) {
         const Ty at = expr(*s.index, Type::Int64);
+        couldNotCheck(at, s.index->span, "this index was not checked.",
+                      "an index is an `int64`, and what this is could not be worked out");
         if (at != Ty{} && at != Ty{Type::Int64})
           complain(s.index->span, "E0506",
                    "an index is an `int64`, and this is a `" + name(at) + "`.",
@@ -1635,6 +1700,11 @@ private:
       // case nobody thought about, and it would be found by the program running
       // rather than by reading it.
       const Ty subject = s.condition ? expr(*s.condition, Ty{}) : Ty{};
+      if (s.condition)
+        couldNotCheck(subject, s.condition->span,
+                      "this was not checked for what it could be.",
+                      "a `when` chooses between the things a value could be, and what "
+                      "this is could not be worked out");
       if (subject != Ty{} && !subject.mayBeNothing()) {
         complain(s.condition->span, "E0520",
                  "a `" + name(subject) + "` is only ever one thing, so there is "
@@ -1734,6 +1804,11 @@ private:
       // the interpreters counted no times and the native code counted three.
       for (const Value &v : s.value.values) {
         const Ty got = value(v, type);
+        if (type != Type::Unknown)
+          couldNotCheck(got, v.span,
+                        "this bound was not checked against a `" + name(type) + "`.",
+                        "where a count starts and stops is counted in, and what this is "
+                        "could not be worked out");
         if (type != Type::Unknown && got != Type::Unknown && got != type)
           complain(v.span, "E0506",
                    "this is a `" + std::string(name(got)) + "` and a `" +

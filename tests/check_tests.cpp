@@ -969,6 +969,39 @@ void oneMistakeIsReportedAsOneMistake() {
   // With its tip intact: it is the tip that is wrong on a follow-on, not here.
   CHECK(!alone.checked.diagnostics.front().tips.empty());
 
+  // Every place a check has to be skipped says so, rather than passing over it.
+  // Ten shapes, all of which used to be silent, all folding under one typo.
+  const Checked wide = run(
+      "struct 'point' [int64 'x', int64 'y']\n"
+      "START {\n"
+      "    var.in64 'n' = [*3*];\n"
+      "    var.int64 'a' = [count['n']];\n"
+      "    var.str 'b' = [convert-to-str['n']];\n"
+      "    var.int64 'c' = ['n'.x];\n"
+      "    var.many.int64 'd' = [*1* 'n' *3*];\n"
+      "    var.point 'e' = ['n' *2*];\n"
+      "    var.str 'f' = [str:*x = * 'n'];\n"
+      "    if 'n' { }\n"
+      "    loop.range.int64 'i' = [*0*, 'n'] { }\n"
+      "    var.bool 'g' = [not 'n'];\n"
+      "}\n");
+  const std::vector<xag::Diagnostic> wideFolded = xag::foldFollowOns(wide.checked.diagnostics);
+  CHECK(wideFolded.size() == 1);
+  CHECK(wideFolded.front().code == "E0503");
+  CHECK(wideFolded.front().notes.size() == 10);
+
+  // A root that is not a type word works the same way: an undeclared name makes
+  // the sum built from it unreadable, and the sum says so under the name.
+  const Checked undeclared = run("START {\n    var.int64 'm' = ['q' + *1*];\n}\n");
+  const std::vector<xag::Diagnostic> under = xag::foldFollowOns(undeclared.checked.diagnostics);
+  CHECK(under.size() == 1);
+  CHECK(under.front().code == "E0501");
+  CHECK(under.front().notes.size() == 1);
+  // Underlined where the sum is, which is wider than the name it starts at —
+  // folding by where a span begins alone used to throw this one away.
+  CHECK(under.front().notes[0].span.begin == under.front().span.begin);
+  CHECK(under.front().notes[0].span.end > under.front().span.end);
+
   // A follow-on whose root nobody printed is kept rather than lost.
   std::vector<xag::Diagnostic> orphan;
   orphan.push_back(xag::Diagnostic{xag::Span{40, 44}, "E0506", "this was not checked."});

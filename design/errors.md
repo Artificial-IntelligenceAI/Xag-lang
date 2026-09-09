@@ -58,3 +58,55 @@ Two rules hold this together:
 A follow-on whose root nobody printed is kept where it is rather than lost —
 that happens when a pass stopped before the root was reached, and the only thing
 said about it should not vanish.
+
+### Every skipped check says so
+
+The checker had one guard, written a dozen ways, standing in front of every
+comparison it makes:
+
+```cpp
+if (got != Ty{} && got != want)
+    complain(...);
+```
+
+Read plainly: *if we know what this is, and it is wrong, say so.* Read honestly:
+*if we do not know what this is, say nothing at all.* Every one of those is now
+preceded by `couldNotCheck`, which speaks when the unknown was traced:
+
+```cpp
+couldNotCheck(got, span, "this was not checked against a `int64`.",
+              "a `many` holds one type, and what this is could not be worked out");
+if (got != Ty{} && got != want)
+    complain(...);
+```
+
+The two never both speak — a traced type is an unknown one, so the guard beneath
+is already false — which is why the sweep added lines rather than restructuring
+anything.
+
+Sixteen places say it now: a written value, a declaration, arithmetic, `not`, a
+call's argument, a field, an index, a condition, `holds`, `when`, `count`,
+`convert-to-str`, `convert-to-number`, a piece joined into text, an item under a
+`many`, and an item under a struct. Ten of those, in one program, fold into one
+error.
+
+Roots come from either end of that: a type word that names nothing, a name
+nobody declared, a struct with no such field, an element of something that holds
+one value, a `nothing` where nothing may be missing. Each of them returns
+`unknownFrom(its own span)` rather than a bare unknown, and everything built on
+it points back there.
+
+### The whole span, not where it starts
+
+Two consequences underlining the same place say one thing twice, so folding
+drops the second. It compares the **whole** span: `'q' + *1*` begins exactly
+where `'q'` does, and
+
+```text
+  4 |     var.int64 'm' = ['q' + *1*];
+    |                      ^^^ here
+    |                      ^^^^^^^^^ and because of that, `+` was not checked here
+```
+
+is two pieces of news, not one. Comparing only where a span began threw the
+second away.

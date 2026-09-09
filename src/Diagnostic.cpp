@@ -83,10 +83,17 @@ std::vector<Diagnostic> foldFollowOns(std::vector<Diagnostic> diagnostics) {
     Diagnostic &root = diagnostics[found->second];
 
     // The same place twice says nothing the first time did not. One typo read
-    // in two passes reaches here as two consequences pointing at one span.
-    bool already = root.span.begin == one.span.begin;
+    // in two passes reaches here as two consequences underlining one span.
+    //
+    // The whole span, not where it starts: `'q' + *1*` begins where `'q'` does,
+    // and the sum being unreadable is not the same news as the name being
+    // undeclared. Comparing only the beginning threw that away.
+    const auto same = [](Span a, Span b) {
+      return a.begin == b.begin && a.end == b.end;
+    };
+    bool already = same(root.span, one.span);
     for (const Note &note : root.notes)
-      already = already || note.span.begin == one.span.begin;
+      already = already || same(note.span, one.span);
     if (!already)
       root.notes.push_back(Note{one.span, asConsequence(one)});
     folded[i] = true;
