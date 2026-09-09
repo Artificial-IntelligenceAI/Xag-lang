@@ -32,6 +32,14 @@ bool copies(Ty type) { return isNumber(type) || type == Type::Bool; }
 bool owns(Ty type) { return type.kind == Type::Str || type.holds(); }
 
 // A loan is not a thing to end: it goes back to whoever lent it.
+// Several of something, however it is spelled. `many-growing` is a second type
+// and stands where `many` does, so everything that asks whether a thing is
+// several has to ask about both — and asking about only one of them left an
+// empty `many-growing` with nothing built for it at all.
+bool holdsSeveral(const std::string &spelled) {
+  return spelled.rfind("many ", 0) == 0 || spelled.rfind("many-growing ", 0) == 0;
+}
+
 bool isLoanType(const std::string &spelled) {
   return spelled.rfind("loan ", 0) == 0 || spelled.rfind("loanmut ", 0) == 0;
 }
@@ -204,8 +212,9 @@ private:
     std::size_t at = n - 1;
     std::string built = chain.type().text;
     while (at > 0 && !chain.segments[at - 1].isName &&
-           chain.segments[at - 1].text == "many") {
-      built = "many " + built;
+           (chain.segments[at - 1].text == "many" ||
+            chain.segments[at - 1].text == "many-growing")) {
+      built = chain.segments[at - 1].text + " " + built;
       --at;
     }
     if (at > 0 && !chain.segments[at - 1].isName &&
@@ -232,6 +241,8 @@ private:
   }
   static std::string elementOf(const std::string &spelled) {
     const std::string bare = withoutLoan(spelled);
+    if (opensWith(bare, "many-growing "))
+      return bare.substr(std::string_view("many-growing ").size());
     return opensWith(bare, "many ") ? bare.substr(std::string_view("many ").size())
                                     : std::string("?");
   }
@@ -260,9 +271,15 @@ private:
       out.orNothing = true;
       spelled.remove_prefix(std::string_view("or-nothing ").size());
     }
-    while (spelled.rfind("many ", 0) == 0) {
+    while (spelled.rfind("many ", 0) == 0 ||
+           spelled.rfind("many-growing ", 0) == 0) {
+      if (spelled.rfind("many-growing ", 0) == 0) {
+        out.grows = true;
+        spelled.remove_prefix(std::string_view("many-growing ").size());
+      } else {
+        spelled.remove_prefix(std::string_view("many ").size());
+      }
       ++out.many;
-      spelled.remove_prefix(std::string_view("many ").size());
     }
     out.held = typeNamed(spelled);
     if (out.held == Type::Unknown)
@@ -630,7 +647,7 @@ private:
       groupInto(place, list, span, held, *shape);
       return;
     }
-    if (held.rfind("many ", 0) == 0) {
+    if (holdsSeveral(held)) {
       collectInto(place, list, span, held);
       return;
     }
@@ -775,6 +792,31 @@ private:
       break;
     }
 
+    case StmtKind::Add: {
+      const unsigned *local = findName(s.name);
+      if (!local)
+        break;
+      const std::string held =
+          elementOf(body_.types[body_.locals[*local].type.index]);
+      // What goes in a new place is read the same way as what goes in an
+      // existing one, which is the same way as what goes into a name.
+      const std::string inside = within(withoutLoan(held));
+      Operand what;
+      if (holdsSeveral(inside) || shapeOf(inside)) {
+        const unsigned into = owningTemporary(typeRef(held));
+        assignInto(into, s.value, s.span);
+        what = Operand{OperandKind::Move, into, {}, typeRef(held)};
+      } else {
+        what = s.value.values.empty()
+                   ? Operand{OperandKind::Written, 0, "", typeRef(held)}
+                   : valueOperand(s.value.values[0]);
+      }
+      emit(Statement{StatementKind::Grow, s.span, *local, {}, {},
+                     RValue{RValueKind::Use, {}, {}, 0, {std::move(what)},
+                            typeRef(held)}});
+      break;
+    }
+
     case StmtKind::Set: {
       const unsigned *local = findName(s.name);
       if (!local)
@@ -850,7 +892,7 @@ private:
         // joined two pieces of text and put the joined one where a `many str`
         // goes.
         const std::string inside = within(withoutLoan(held));
-        if (inside.rfind("many ", 0) == 0 || shapeOf(inside)) {
+        if (holdsSeveral(inside) || shapeOf(inside)) {
           const unsigned into = owningTemporary(typeRef(held));
           assignInto(into, s.value, s.span);
           value = Operand{OperandKind::Move, into, {}, typeRef(held)};

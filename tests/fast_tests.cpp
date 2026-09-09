@@ -295,6 +295,32 @@ void onTurningNumbersIntoText() {
   AGREE("struct 'holder' [loan.int64 'x']\n"
         "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
         "  print.stdout['h'.x \\n]; }\n");
+  // A `many` that grows. A second type, because growing may move every place it
+  // has — so it keeps room it is not using yet, and the room is the last field,
+  // which is why counting one, reaching into one and letting one go all read it
+  // exactly as they read a `many`.
+  AGREE("START { var.mut.many-growing.int64 'xs' = [];\n"
+        "  loop.range.int64 'i' = [*1*, *5*] { add 'xs' = ['i' x 'i']; }\n"
+        "  print.stdout[(count[loan 'xs']) str:*|* 'xs'[*4*] \\n]; }\n");
+  // Text, so that every place owns something and growing has to hand it over.
+  AGREE("START { var.mut.many-growing.str 'w' = [];\n"
+        "  var.str 't' = [*hello*];\n"
+        "  add 'w' = [move 't'];\n  add 'w' = [*there*];\n"
+        "  print.stdout[(count[loan 'w']) str:*|* 'w'[*0*] str:*|* 'w'[*1*] \\n]; }\n");
+  // Made with places already, and grown past them: the room it took to begin
+  // with runs out, and everything moves.
+  AGREE("START { var.mut.many-growing.int64 'xs' = [*1* *2*];\n"
+        "  loop.range.int64 'i' = [*1*, *9*] { add 'xs' = ['i']; }\n"
+        "  print.stdout[(count[loan 'xs']) str:*|* 'xs'[*10*] \\n]; }\n");
+  // And through a borrow, where reading one is reading a `many`.
+  AGREE("fn.int64 'total' [loan.many-growing.int64 'g'] {\n"
+        "  var.mut.int64 'sum' = [*0*];\n"
+        "  loop.range.int64 'i' = [*0*, (count['g'] - *1*)] {\n"
+        "    set 'sum' = ['sum' + 'g'['i']];\n  }\n  give ['sum'];\n}\n"
+        "START { var.mut.many-growing.int64 'xs' = [];\n"
+        "  add 'xs' = [*3*]; add 'xs' = [*4*];\n"
+        "  print.stdout[(total[loan 'xs']) \\n]; }\n");
+
   // A `many` of a `many`, which was `E0210` until there was something to build
   // it as. Brackets where an item goes make one; a name in front of them is
   // still an index, and `'g'[*0*][*1*]` reaches into what was just reached.

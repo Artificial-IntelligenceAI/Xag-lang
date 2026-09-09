@@ -374,7 +374,8 @@ private:
       --upTo;
     std::size_t deep = 0;
     while (upTo > 0 && !c.segments[upTo - 1].isName &&
-           c.segments[upTo - 1].text == "many") {
+           (c.segments[upTo - 1].text == "many" ||
+            c.segments[upTo - 1].text == "many-growing")) {
       --upTo;
       ++deep;
     }
@@ -427,8 +428,9 @@ private:
         continue;
       }
 
-      if (!seg.isName && seg.text == "many") {
-        complain(seg.span, "E0209", "`many` says what the type holds, and stands with it.",
+      if (!seg.isName && (seg.text == "many" || seg.text == "many-growing")) {
+        complain(seg.span, "E0209",
+                 "`" + seg.text + "` says what the type holds, and stands with it.",
                  {"the segment nearest the name is the type"},
                  {"`var.many.int64` is many `int64`; nothing further along the chain "
                   "is a type for it to hold."});
@@ -941,6 +943,28 @@ private:
   StmtPtr statement() {
     auto s = std::make_unique<Stmt>();
     s->span.begin = peek().span.begin;
+
+    // `add 'lines' = […];` — one more place at the end. Written like `set`
+    // because it is the same kind of act: something happens to a name that
+    // already exists, and what happens is spelled where it happens.
+    if (checkWord("add")) {
+      advance();
+      s->kind = StmtKind::Add;
+      if (check(TokenKind::Name)) {
+        const Token name = advance();
+        s->name = name.text;
+        s->nameSpan = name.span;
+      } else {
+        complain(peek().span, "E0101", "a name is wanted here.",
+                 {"what is being added to is a name, and a name wears marks"}, {},
+                 std::string("found ") + describe(peek().kind));
+      }
+      expect(TokenKind::Equals, "`=`");
+      s->value = valueList();
+      expect(TokenKind::Semicolon, "`;`");
+      s->span.end = previous().span.end;
+      return s;
+    }
 
     if (checkWord("set")) {
       advance();

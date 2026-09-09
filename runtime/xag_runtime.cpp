@@ -515,6 +515,44 @@ void xag_many_drop_str(XagMany *m) {
   xag_many_drop(m);
 }
 
+void xag_growing_new(XagGrowing *out) {
+  out->places = nullptr;
+  out->length = 0;
+  out->room = 0;
+}
+
+void xag_growing_add(XagGrowing *g, uint64_t stride, const void *one) {
+  if (g->length == g->room) {
+    // Twice as roomy, or room for four to begin with — so that growing one
+    // place at a time costs one move every so often rather than one each time.
+    const uint64_t wider = g->room == 0 ? 4 : g->room * 2;
+    char *moved = take(wider * stride);
+    if (g->places) {
+      std::memcpy(moved, g->places, g->length * stride);
+      release(static_cast<char *>(g->places));
+    }
+    g->places = moved;
+    g->room = wider;
+  }
+  std::memcpy(static_cast<char *>(g->places) + g->length * stride, one, stride);
+  ++g->length;
+}
+
+void xag_growing_drop(XagGrowing *g) {
+  if (g->places)
+    release(static_cast<char *>(g->places));
+  g->places = nullptr;
+  g->length = 0;
+  g->room = 0;
+}
+
+void xag_growing_drop_str(XagGrowing *g) {
+  XagStr *held = static_cast<XagStr *>(g->places);
+  for (uint64_t i = 0; i < g->length; ++i)
+    xag_str_drop(&held[i]);
+  xag_growing_drop(g);
+}
+
 void xag_many_fill(XagMany *m, uint64_t stride, const void *one) {
   char *at = static_cast<char *>(m->places);
   for (uint64_t i = 0; i < m->length; ++i)

@@ -54,7 +54,7 @@ enum class Op : uint8_t {
   WideAdd, WideSub, WideMul, WideDiv, WideMod, WidePow, WideCompare,
   DeciAdd, DeciSub, DeciMul, DeciDiv, DeciMod, DeciPow, DeciCompare,
   TextCompare, TextJoin, TextCount,
-  MakeMany, FillMany, ElementAt, StoreAt,
+  MakeMany, FillMany, ElementAt, StoreAt, GrowBy,
   LoadNone, HoldsSomething, TakeInside,
   ReadLine, Arguments, NumberOf,
   Not, And, Or,
@@ -373,6 +373,16 @@ private:
         if (s.kind == StatementKind::Drop) {
           emit(s.conditional ? Code{Op::DropIf, s.place, s.flag, 0, 0}
                              : Code{Op::Drop, s.place, 0, 0, 0});
+          continue;
+        }
+        if (s.kind == StatementKind::Grow) {
+          // One more place at the end. Where it goes is not written down, so
+          // there is nothing to read but what goes there.
+          const uint32_t what = s.value.operands.empty()
+                                    ? 0
+                                    : into(s.value.operands[0], scratch);
+          emit(Code{Op::GrowBy, s.place, what, 0, 0});
+          most = most > scratch ? most : scratch;
           continue;
         }
         if (s.kind == StatementKind::Store) {
@@ -968,6 +978,16 @@ private:
     to = seen;
   }
 
+  // One more place at the end of a `many-growing`.
+  [[gnu::noinline]] void growBy(Slot &of, Slot &given) {
+    if (!of.places)
+      return;
+    Slot kept = given;
+    if (given.owns)
+      given = Slot{};
+    of.places->push_back(kept);
+  }
+
   [[gnu::noinline]] void storeAt(Slot &of, XagInt index, Slot &given) {
     const uint64_t length = of.places ? of.places->size() : 0;
     const uint64_t at = xag_many_place(static_cast<int64_t>(index), length,
@@ -1493,6 +1513,7 @@ private:
       [[unlikely]] case Op::FillMany: fillMany(to, read(one.a), read(one.b).whole); break;
       case Op::ElementAt: elementAt(to, read(one.a), read(one.b).whole); break;
       case Op::StoreAt: storeAt(read(one.to), read(one.a).whole, slots[one.b]); break;
+      case Op::GrowBy: growBy(read(one.to), slots[one.a]); break;
       [[unlikely]] case Op::TextJoin:
         joinText(to, slots, code + at + 1, one.b);
         at += one.b;

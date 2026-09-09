@@ -59,6 +59,32 @@ void xag_many_drop_str(XagMany *m); // every `str` in it, and then the buffer
 // a copy of `stride` bytes and nothing more.
 void xag_many_fill(XagMany *m, uint64_t stride, const void *one);
 
+// A `many` that grows. A second type rather than a mode of the one above,
+// because it keeps room it is not using yet — and because growing may move
+// every place it has, which is the whole reason a loan into one has to be
+// refused while it grows.
+//
+// `length` is how many are there; `room` is how many would fit before the
+// places have to move. Reading one asks only the first, so everything that
+// reads a `many` reads one of these unchanged.
+typedef struct {
+  void *places;
+  uint64_t length;
+  uint64_t room;
+} XagGrowing;
+
+// Empty, holding nothing and owning nothing. Growing is what puts the first
+// place there, so nothing is taken until something is added.
+void xag_growing_new(XagGrowing *out);
+
+// One more place at the end, holding a copy of `stride` bytes. Where there is
+// no room left, the places move to somewhere twice as roomy — which is why
+// nothing may be lending one while this happens.
+void xag_growing_add(XagGrowing *g, uint64_t stride, const void *one);
+
+void xag_growing_drop(XagGrowing *g);     // the buffer only, for places that copy
+void xag_growing_drop_str(XagGrowing *g); // every `str` in it, and then the buffer
+
 // An engine that keeps a `many` in its own memory rather than in the runtime's
 // says so here, so that one balance covers all three of them and a leak in any
 // one is a leak the tally reports.

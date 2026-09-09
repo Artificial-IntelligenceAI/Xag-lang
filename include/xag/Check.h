@@ -145,6 +145,11 @@ struct Ty {
   // when this is more than nothing, and every `many` written before this existed
   // is one deep without saying so.
   unsigned deep = 0;
+  // Whether the several it holds may become more of them. A second type rather
+  // than a mode of `many`: growing may move every place, so a loan into one
+  // cannot outlive a growth, and telling the two apart is what makes that
+  // checkable. Compared, because they are not the same type.
+  bool grows = false;
 
   constexpr Ty() = default;
   constexpr Ty(Type k) : kind(k), deep(k == Type::Many ? 1 : 0) {}
@@ -161,6 +166,7 @@ struct Ty {
     Ty inside{kind, element, false, named};
     inside.from = from;
     inside.deep = deep;
+    inside.grows = grows;
     return inside;
   }
   constexpr bool isStruct() const { return kind == Type::Struct; }
@@ -200,7 +206,7 @@ bool inFamily(Ty type, Family family);
 // one signature has one blank, so there are never two to tell apart.
 constexpr bool operator==(Ty a, Ty b) {
   return a.kind == b.kind && a.element == b.element && a.orNothing == b.orNothing &&
-         a.named == b.named && a.deep == b.deep;
+         a.named == b.named && a.deep == b.deep && a.grows == b.grows;
 }
 constexpr bool operator!=(Ty a, Ty b) { return !(a == b); }
 

@@ -13,9 +13,10 @@ std::string spell(const MirType &type) {
     out += "loan ";
   if (type.orNothing)
     out += "or-nothing ";
-  // One per level, so a `many` of a `many` reads as one.
+  // One per level, so a `many` of a `many` reads as one. The growing one is
+  // the outermost, because that is where the word is written.
   for (unsigned at = 0; at < type.many; ++at)
-    out += "many ";
+    out += type.grows && at == 0 ? "many-growing " : "many ";
   out += type.held == Type::Struct ? name(structNamed(type.named)) : name(type.held);
   return out;
 }
@@ -102,6 +103,8 @@ struct Printer {
         if (s.kind == StatementKind::Drop)
           out << "    drop " << local(s.place)
               << (s.conditional ? " if " + local(s.flag) : "") << '\n';
+        else if (s.kind == StatementKind::Grow)
+          out << "    " << local(s.place) << "[more] = " << rvalue(s.value) << '\n';
         else if (s.kind == StatementKind::Store)
           out << "    " << local(s.place) << "[" << operand(s.at) << "] = "
               << rvalue(s.value) << '\n';

@@ -99,6 +99,10 @@ struct Printer {
         block(arm.body, depth + 2);
       }
       break;
+    case StmtKind::Add:
+      out << "add '" << s.name << "'\n";
+      values(s.value, depth + 1);
+      break;
     case StmtKind::Set:
       out << "set '" << s.name << "'";
       for (const std::string &field : s.fields)

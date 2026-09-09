@@ -541,6 +541,56 @@ all of them. That is the whole of the change: an earlier note here guessed a
 second level would want a table of types, and it does not — the combination that
 would is `many.or-nothing.T`, which is refused for its own reasons.
 
+### A `many` that grows
+
+```
+var.mut.many-growing.str 'lines' = [];
+add 'lines' = [move 'line'];
+print.stdout[(count[loan 'lines']) str:*|* 'lines'[*0*] \n];
+```
+
+**A second type, not a mode of `many`.** A `many` holds the places it was made
+with; a `many-growing` may hold more. Adding to a `many` is `E0546`, and it says
+which word grows.
+
+**`add` is written like `set`**, because it is the same kind of act: something
+happens to a name that already exists, and what happens is spelled where it
+happens. Growing is changing, so a name that does not change cannot be grown —
+the same `E0508`, in the same words.
+
+**Reading one is reading a `many`.** `count`, an index, a borrowed parameter, a
+loop over it: all unchanged. The room it keeps is the last field of it, so
+everything that reads the places and the length reads one of these exactly as it
+reads a `many`.
+
+**Growing while it is lent is `E0547`**, and this is the whole reason for the
+second type:
+
+```text
+`'w'` grows while it is lent.
+
+  7 |     add 'w' = [*b*];
+    |     ^^^^^^^^^^^^^^^^ grown here
+  6 |     var.loan.str 'r' = [loan 'w'[*0*]];
+    |                              ^^^^^^^^ and lent here, still in use after this
+
+Rule(s) broken: what is lent stays where it is
+```
+
+Worth its own words rather than folding into `E0409`: what is wrong is not that
+the value changed, but that every place may have **moved**, so a borrow into one
+would point at where they used to be.
+
+An earlier note here guessed this would be a rule Regions had to learn. It half
+was. Regions already refuses changing what is lent and already tracks every
+loan; what it did not know was that growing is a change. One line, and the rest
+was already there.
+
+**It only grows.** Taking a place out from the middle either leaves a gap, which
+Xag refuses everywhere (`E0412`), or shifts what comes after, which moves values
+other names may be borrowing. Taking one off the end does neither, and is a
+separate question — going from cannot to can breaks nothing written before it.
+
 ### An element is reached with the name's own brackets
 
 ```
@@ -1110,11 +1160,6 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   be, and today a value can be two things. A type that could be several — with
   its own names and its own contents — is what would make the construct earn
   itself, and the middle layer is already shaped for it.
-- **A `many` that grows.** `many` is a fixed length, settled when it is made.
-  Growing is a second type rather than a mode of this one, because growing may
-  move what is held and a loan of it would then point at nowhere — a rule
-  Regions would have to learn, and the first place ownership here stops being a
-  demonstration.
 - **Showing something that is not one piece.** A print writes one piece after
   another, and three things are not one piece. A `many` and a struct are several
   (`E0516`): what stands between two of them, and whether a struct's field names

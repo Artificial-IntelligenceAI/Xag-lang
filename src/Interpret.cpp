@@ -682,6 +682,29 @@ private:
 
   // `xs[at] = value` — the place keeps what it is given, and what was there
   // before ends here rather than being left behind.
+  // One more place at the end. Where it goes is not written down: the length
+  // is what says where, and the length is what changes.
+  void grow(const Statement &s) {
+    Value produced = evaluate(s.value);
+    if (!trouble_.empty())
+      return;
+    Value *array = behind(frames_.back().locals[s.place]);
+    if (!array || array->kind != Value::Kind::Many || !array->places) {
+      endValue(produced);
+      return;
+    }
+    // Text that is only a view of someone else's is copied on the way in, the
+    // same as text written into a place that is already there: the array owns
+    // every place it has.
+    if (produced.kind == Value::Kind::Text && !produced.owns) {
+      XagStr copy{nullptr, 0, 0};
+      xag_str_from(&copy, produced.text.bytes, produced.text.length);
+      produced.text = copy;
+      produced.owns = true;
+    }
+    array->places->push_back(std::move(produced));
+  }
+
   void store(const Statement &s) {
     Value where = read(s.at);
     Value produced = evaluate(s.value);
@@ -897,6 +920,12 @@ private:
           if (s.conditional && !truthOf(frames_.back().locals[s.flag]))
             continue;
           endValue(frames_.back().locals[s.place]);
+          continue;
+        }
+        if (s.kind == StatementKind::Grow) {
+          grow(s);
+          if (!trouble_.empty())
+            break;
           continue;
         }
         if (s.kind == StatementKind::Store) {

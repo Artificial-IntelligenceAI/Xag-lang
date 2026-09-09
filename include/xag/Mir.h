@@ -33,6 +33,11 @@ struct MirType {
   // `many many int64`. Read as a yes-or-no everywhere that only asks whether
   // this is several at all, which is most places.
   unsigned many = 0;
+  // Whether the several it holds may become more of them. A `many-growing`
+  // keeps room it is not using yet, so it is laid out differently and let go of
+  // differently — and growing may move every place, which is why a loan into
+  // one cannot outlive a growth.
+  bool grows = false;
   // What is left once the words above are off it. `named` says which struct,
   // when `held` is one.
   Type held = Type::Unknown;
@@ -137,6 +142,10 @@ enum class StatementKind {
   Assign, // place = value
   Drop,   // the local's value ends here
   Store,  // one place of a `many`: place[at] = value
+  // One more place at the end of a `many-growing`. Its own kind rather than a
+  // `Store` past the end, because where it goes is not written down — the
+  // length is what says where, and the length is what changes.
+  Grow,
 };
 
 struct Statement {

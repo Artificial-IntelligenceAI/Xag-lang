@@ -110,6 +110,7 @@ struct Branch {
 enum class StmtKind {
   Declare,   // var.mut.i64 'total' = […];
   Set,       // set 'total' = […];
+  Add,       // add 'lines' = […];   one more place at the end of a many-growing
   If,        // if […] { } else-if […] { } else { }
   LoopRange, // loop.range.i64 'i' = [a, b] { }
   LoopWhile, // loop.while […] { }

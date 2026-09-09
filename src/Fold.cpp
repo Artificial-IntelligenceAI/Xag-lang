@@ -88,6 +88,16 @@ private:
   Rewriting rewriting_ = Rewriting::Yes;
   // How many places a `many` has, where the program said so where it was made.
   std::unordered_map<unsigned, std::int64_t> lengths_;
+
+  // Whether a local is one that grows, and so has no length anybody can write
+  // down. Asked of the type rather than tracked, because the type is what says
+  // it and it never changes.
+  bool growingLocal(unsigned local) const {
+    if (!body_ || local >= body_->locals.size())
+      return false;
+    const TypeRef type = body_->locals[local].type;
+    return type.index < body_->typed.size() && body_->typed[type.index].grows;
+  }
   // What a local is known to hold, when it is written once and that once is a
   // value written down. Anything assigned twice is not known: which of them
   // reached here is what the graph is for, and this pass does not walk it.
@@ -189,7 +199,11 @@ private:
     // out later: the items are right there. A length outlives its block because
     // a `many` is a fixed length once made — but only when nothing else is ever
     // assigned to that name.
-    if (value.kind == RValueKind::Collect && assignments_[s.place] == 1)
+    // A `many-growing` is the one thing this cannot say: it was made with these
+    // places and may have more by the time anything asks. Its length outlives
+    // nothing, so nothing about it is written down here.
+    if (value.kind == RValueKind::Collect && assignments_[s.place] == 1 &&
+        !growingLocal(s.place))
       lengths_[s.place] = static_cast<std::int64_t>(value.operands.size());
 
     // Lending something puts it beyond what is known about it. A `loanmut` is

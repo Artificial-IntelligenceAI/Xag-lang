@@ -54,10 +54,10 @@ private:
 
   void complain(Span span, std::string code, std::string message,
                 std::vector<std::string> rules, std::string label,
-                std::vector<Note> notes) {
+                std::vector<Note> notes, std::vector<std::string> tips = {}) {
     result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
-                                             std::move(label), std::move(rules), {},
-                                             std::move(notes)});
+                                             std::move(label), std::move(rules),
+                                             std::move(tips), std::move(notes)});
   }
 
   std::string nameOf(unsigned local) const {
@@ -152,7 +152,9 @@ private:
   void step(const Statement &s, Holds &holds) const {
     // Writing one place changes what the `many` holds, not what the name does,
     // so nothing about which loans it carries is different afterwards.
-    if (s.kind == StatementKind::Store)
+    // Writing one place, or adding one, changes what it holds rather than which
+    // loans the name carries.
+    if (s.kind == StatementKind::Store || s.kind == StatementKind::Grow)
       return;
     if (s.kind == StatementKind::Drop) {
       std::fill(holds[s.place].begin(), holds[s.place].end(), 0);
@@ -356,6 +358,19 @@ private:
                  {"what is lent is written through the loan, or not at all"},
                  "changed here",
                  {Note{loan.span, "and lent here, still in use after this"}});
+
+      // Growing it. Worth its own words: what is wrong is not that the value
+      // changed but that every place it has may have moved, so a borrow into it
+      // would be pointing at where they used to be. This is the whole reason a
+      // `many-growing` is a second type.
+      if (s.kind == StatementKind::Grow && s.place == loan.referent)
+        complain(s.span, "E0547",
+                 nameOf(loan.referent) + " grows while it is lent.",
+                 {"what is lent stays where it is"}, "grown here",
+                 {Note{loan.span, "and lent here, still in use after this"}},
+                 {"growing may move every place it has, and a borrow into one would "
+                  "then point at where they used to be. That is why a `many-growing` "
+                  "is a second type rather than a `many` that happens to grow."});
 
       // Lending it again, when one of the two is for writing.
       if (s.kind == StatementKind::Assign && s.value.kind == RValueKind::Ref &&

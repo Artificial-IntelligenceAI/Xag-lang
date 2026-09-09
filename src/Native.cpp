@@ -111,6 +111,12 @@ public:
                                     "XagStr");
     many_ = llvm::StructType::create(
         context_, {builder_.getPtrTy(), builder_.getInt64Ty()}, "XagMany");
+    // One field more: the room it is not using yet. A second type rather than a
+    // wider `many`, so that everything holding a fixed one stays the size it is.
+    growing_ = llvm::StructType::create(
+        context_,
+        {builder_.getPtrTy(), builder_.getInt64Ty(), builder_.getInt64Ty()},
+        "XagGrowing");
     declareRuntime();
   }
 
@@ -143,6 +149,7 @@ private:
   llvm::IRBuilder<> builder_;
   llvm::StructType *str_ = nullptr;
   llvm::StructType *many_ = nullptr;
+  llvm::StructType *growing_ = nullptr;
   std::unordered_map<std::string, llvm::StructType *> shapes_;
 
   std::unordered_map<std::string, llvm::Function *> functions_;
@@ -227,13 +234,16 @@ private:
     }
     if (holdsMany(bare)) {
       const MirType element = elementOf(bare);
+      const bool grows = bare.grows;
       if (isText(element)) {
-        builder_.CreateCall(runtime_["xag_many_drop_str"], {at});
+        builder_.CreateCall(runtime_[grows ? "xag_growing_drop_str"
+                                           : "xag_many_drop_str"],
+                            {at});
         return;
       }
       if (ownsAnything(element))
         letGoOfEveryPlace(element, at);
-      builder_.CreateCall(runtime_["xag_many_drop"], {at});
+      builder_.CreateCall(runtime_[grows ? "xag_growing_drop" : "xag_many_drop"], {at});
       return;
     }
     if (bare.held == Type::Struct) {
@@ -294,7 +304,7 @@ private:
       return llvm::StructType::get(context_,
                                    {builder_.getInt1Ty(), typeFor(type.within())});
     if (type.many)
-      return many_;
+      return type.grows ? growing_ : many_;
     if (type.held == Type::Bool)
       return builder_.getInt1Ty();
     if (type.held == Type::Str)
@@ -405,6 +415,10 @@ private:
     add("xag_bin128_reads", i32, {ptr, i64, ptr});
     add("xag_many_out_of_range", voidTy, {i64, i64});
     add("xag_many_new", voidTy, {ptr, i64, i64});
+    add("xag_growing_new", voidTy, {ptr});
+    add("xag_growing_add", voidTy, {ptr, i64, ptr});
+    add("xag_growing_drop", voidTy, {ptr});
+    add("xag_growing_drop_str", voidTy, {ptr});
     add("xag_many_drop", voidTy, {ptr});
     add("xag_many_drop_str", voidTy, {ptr});
     add("xag_many_fill", voidTy, {ptr, i64, ptr});
@@ -638,6 +652,27 @@ private:
     // program does none of this.
     if (watching_ && s.span.begin != 0)
       builder_.CreateStore(builder_.getInt32(s.span.begin), whereWeAre());
+    // One more place at the end. The room it keeps is the last field, so
+    // everything that reads a `many`'s places and length reads one of these
+    // unchanged — which is why `count`, indexing and letting go needed nothing.
+    if (s.kind == StatementKind::Grow) {
+      if (s.value.operands.empty())
+        return;
+      const MirType held = localType(s.place);
+      const MirType element = elementOf(held);
+      auto *where = isLoan(held)
+                        ? builder_.CreateLoad(builder_.getPtrTy(), slots_[s.place])
+                        : slots_[s.place];
+      auto *one = builder_.CreateAlloca(typeFor(element), nullptr, "one");
+      if (isText(element))
+        builder_.CreateStore(builder_.CreateLoad(str_, textPointer(s.value.operands[0])),
+                             one);
+      else
+        builder_.CreateStore(read(s.value.operands[0]), one);
+      builder_.CreateCall(runtime_["xag_growing_add"],
+                          {where, builder_.getInt64(strideOf(element)), one});
+      return;
+    }
     if (s.kind == StatementKind::Store) {
       const MirType held = localType(s.place);
       const MirType element = elementOf(held);
@@ -806,6 +841,22 @@ private:
     switch (value.kind) {
     case RValueKind::Collect: {
       const MirType element = elementOf(typing(value.type));
+      // One that grows starts empty and is grown into, because it keeps room
+      // it is not using yet and only the runtime knows how much to take.
+      if (typing(value.type).grows) {
+        auto *begun = builder_.CreateAlloca(growing_, nullptr, "growing");
+        builder_.CreateCall(runtime_["xag_growing_new"], {begun});
+        auto *one = builder_.CreateAlloca(typeFor(element), nullptr, "one");
+        for (const Operand &operand : value.operands) {
+          if (isText(element))
+            builder_.CreateStore(builder_.CreateLoad(str_, textPointer(operand)), one);
+          else
+            builder_.CreateStore(read(operand), one);
+          builder_.CreateCall(runtime_["xag_growing_add"],
+                              {begun, builder_.getInt64(strideOf(element)), one});
+        }
+        return builder_.CreateLoad(growing_, begun);
+      }
       auto *made = builder_.CreateAlloca(many_, nullptr, "collected");
       const unsigned count = static_cast<unsigned>(value.operands.size());
       builder_.CreateCall(

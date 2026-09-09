@@ -63,7 +63,7 @@ std::string name(Ty type) {
   // One `many` per level, so a `many` of a `many` says so rather than reading
   // as either one of them.
   for (unsigned at = 0; at < type.deep; ++at)
-    inside = "many " + inside;
+    inside = (type.grows && at + 1 == type.deep ? "many-growing " : "many ") + inside;
   return type.orNothing ? "or-nothing " + inside : inside;
 }
 
@@ -495,11 +495,18 @@ private:
     std::size_t at = typeAt;
     unsigned several = 0;
     bool orNothing = false;
+    bool grows = false;
     // However many were written. A second `many` is a `many` of a `many`, and
     // there is no limit written down because there is no place a limit would
     // come from.
+    //
+    // `many-growing` stands where `many` does and counts as one of them, so
+    // everything that reads several reads one of these — what differs is that
+    // it may become more of them, and that is one word further out.
     while (at > 0 && !chain.segments[at - 1].isName &&
-           chain.segments[at - 1].text == "many") {
+           (chain.segments[at - 1].text == "many" ||
+            chain.segments[at - 1].text == "many-growing")) {
+      grows = grows || chain.segments[at - 1].text == "many-growing";
       ++several;
       --at;
     }
@@ -521,6 +528,7 @@ private:
                                     : structNamed(which))
                          : (several ? many(type) : Ty{type});
     settled.deep = several;
+    settled.grows = grows;
     if (orNothing)
       settled = orNothingOf(settled);
     // What the blank will take rides along with it, and is asked at the call
@@ -1975,6 +1983,41 @@ private:
         }
       }
       declare(s.name, made);
+      break;
+    }
+
+    case StmtKind::Add: {
+      Symbol *held = lookupToChange(s.name);
+      const Symbol *said = lookup(s.name);
+      if (!said) {
+        complain(s.nameSpan, "E0501", "`'" + s.name + "'` is not declared.",
+                 {"a name means something only after a declaration says what it means"});
+        onlyValue(s.value, Ty{});
+        break;
+      }
+      if (!said->type.grows) {
+        complain(s.nameSpan, "E0546",
+                 "`'" + s.name + "'` is a `" + name(said->type) +
+                     "`, and how many places it has was settled when it was made.",
+                 {"a `many` holds the places it was made with, and a `many-growing` "
+                  "may hold more"},
+                 {"`many-growing` is the one that grows. They are two types because "
+                  "growing may move every place, and a borrow into one cannot outlive "
+                  "that."});
+        onlyValue(s.value, Ty{});
+        break;
+      }
+      // Adding is changing, so a name that does not change cannot be added to —
+      // the same rule, and the same word, as writing one of its places.
+      if (held)
+        held->everChanged = true;
+      if (!said->changeable) {
+        complain(s.nameSpan, "E0508", "`'" + s.name + "'` does not change.",
+                 {"a chain says `mut` when a name may be written through"},
+                 {"growing is changing: there is one more place afterwards than "
+                  "there was."});
+      }
+      onlyValueChecked(s.value, elementOf(said->type), s.span);
       break;
     }
 
