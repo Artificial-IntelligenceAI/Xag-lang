@@ -34,8 +34,12 @@ bool isUnsettled(std::string_view word) {
 // across the wall: this reader needs to know the shape `any.number` makes, and
 // nothing else about what the words mean.
 bool namesAFamily(std::string_view word) {
+  // `loan` and `loanmut` are chain words too, and there is no collision: this
+  // only ever looks at the word directly after `any`, and `loan.any` puts it
+  // directly before.
   for (const char *known : {"number", "int", "uint", "bin", "deci", "str", "bool",
-                            "many", "or-nothing", "struct"})
+                            "many", "or-nothing", "struct", "owned", "loan",
+                            "loanmut"})
     if (word == known)
       return true;
   return false;

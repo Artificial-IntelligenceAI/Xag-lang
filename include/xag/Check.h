@@ -56,6 +56,24 @@ unsigned widthOf(Type type); // bits; 0 for the types that have no size
 // Bare `any` stays the floor: it takes anything, and what can be done with it is
 // what can be done with every type. Every word added buys one thing more, and
 // costs the types it turns away.
+// How a value is held. Not part of what a value *is* — the two are separate
+// questions, and a borrowed number is a number and a borrow at once.
+//
+// The checker had no idea of this at all: a `loan.int64` field was an `int64`
+// and how it was held was `Own.cpp`'s business alone. It is here so that a
+// program can ask.
+enum class Held { Owned, Loan, LoanMut };
+
+// Which question a kind word answers. A `whichever` asks one question, so an arm
+// from each list in one statement is refused: every type word overlaps both
+// borrow words, for every borrowed value, and "pick a level" — which is what the
+// overlap rule means between `number` and `int` — says nothing about a pair that
+// is not on one level at all.
+enum class Axis {
+  What, // what kind of value it is
+  How,  // how it is held
+};
+
 enum class Family {
   Anything, // `any`, with nothing after it
   Number,
@@ -68,7 +86,16 @@ enum class Family {
   Many,
   OrNothing,
   Struct,
+  // The other question. `owned` is not a chain word — owned is what a name is
+  // when nothing says otherwise — and that is exactly why it is free to name a
+  // kind, the same reason `int` is: there is no `owned` on its own.
+  Owned,
+  Loan,
+  LoanMut,
 };
+
+// Which of the two questions a kind answers.
+Axis axisOf(Family family);
 
 // The family a word names. `Anything` when the word names no family at all, so
 // a caller has to ask `namesFamily` first if it cares about the difference.
@@ -110,6 +137,9 @@ struct Ty {
   Span from{};
   // What this blank will take, when it is one. Bare `any` asks for anything.
   Family asks = Family::Anything;
+  // How this is held. Never compared: a `loan.int64` is an `int64` everywhere it
+  // was one before this existed, and only a program that asks can tell.
+  Held held = Held::Owned;
 
   constexpr Ty() = default;
   constexpr Ty(Type k) : kind(k) {}

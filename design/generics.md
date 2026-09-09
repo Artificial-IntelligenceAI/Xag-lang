@@ -392,3 +392,65 @@ fn.str 'show' [any 'v'] {
 `show['n'] show['d'] show['s'] show['b']` builds `show$int64`, `show$deci64`,
 `show$str` and `show$bool` — four functions, each holding one arm and no trace
 of the other two.
+
+## Two questions, not one list
+
+**Built 2026-09-09.** The design said one list of kind words, read both ways.
+Building it found that the list is really **two**, and that they cannot be mixed
+in one `whichever`:
+
+```
+struct 'holder' [loan.int64 'x']
+```
+
+`'h'.x` is a number. It is also a borrow. Both, at once — and the overlap rule
+refuses two arms that could both answer. That rule was written for `number`
+against `int`, where one sits inside the other and *pick a level* is a real
+instruction. `number` against `loan` is not that: every type word overlaps both
+borrow words, for every borrowed value, and there is no level to pick.
+
+So a `whichever` asks **one question**:
+
+```
+whichever 'h'.x {          # what it is
+    is number { … }        is str { … }        is many { … }
+}
+
+whichever 'h'.x {          # how it is held
+    is owned { … }         is loan { … }       is loanmut { … }
+}
+```
+
+An arm from each list in one statement is `E0543`. Both at once is written by
+nesting, which costs a block and reaches everything.
+
+**`owned` is the eleventh word**, and it has to exist: without it the second
+question has no arm for a plain value, so every such `whichever` would end at
+"nothing here covers it". It is not a chain word — owned is what a name is when
+nothing says otherwise — and that is exactly why it is free to name a kind, the
+same reason `int` is: *there is no `owned` on its own*.
+
+Refusing the mix is the safe direction, by this document's own argument: going
+from refused to allowed later breaks nothing written before it.
+
+### How a thing is held is part of what a copy takes
+
+`Ty` gained it. A `loan.int64` was an `int64` to the checker, and how it was held
+was `Own.cpp`'s alone — so nothing could answer `is loan`.
+
+It is never compared: a `loan.int64` is still an `int64` everywhere it was one
+before, and only a program that asks can tell. But it **is** part of what a blank
+was filled in with, so `howHeld['n']`, `howHeld[loan 'n']` and
+`howHeld[loanmut 'n']` build three functions rather than one:
+
+```
+fn howHeld$int64          fn howHeld$loan.int64          fn howHeld$loanmut.int64
+```
+
+They have to be three. One copy would have to choose one arm and give the same
+answer to all three callers.
+
+`move` is the third word beside `loan` and `loanmut` and is not a borrow: it
+hands the value over for good, so what comes out is held outright and asks for no
+copy of its own. Marking it as one built `show$loan.str` and then refused the
+`move` that had asked for it.

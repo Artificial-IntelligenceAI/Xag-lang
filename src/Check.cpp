@@ -71,6 +71,7 @@ struct FamilyWord {
   const char *word;
   Family family;
   const char *asks; // how a sentence says it
+  Axis axis;
 };
 
 // The words a blank may be narrowed with — the same list `is` asks with, read in
@@ -82,16 +83,19 @@ struct FamilyWord {
 // say. `is loan` will want the same answer, so it is one piece of work rather
 // than two, and it waits for `whichever`.
 constexpr FamilyWord kFamilies[] = {
-    {"number", Family::Number, "a number"},
-    {"int", Family::Int, "an `int`"},
-    {"uint", Family::Uint, "a `uint`"},
-    {"bin", Family::Bin, "a `bin`"},
-    {"deci", Family::Deci, "a `deci`"},
-    {"str", Family::Str, "a `str`"},
-    {"bool", Family::Bool, "a `bool`"},
-    {"many", Family::Many, "a `many`"},
-    {"or-nothing", Family::OrNothing, "something that may hold nothing"},
-    {"struct", Family::Struct, "a struct"},
+    {"number", Family::Number, "a number", Axis::What},
+    {"int", Family::Int, "an `int`", Axis::What},
+    {"uint", Family::Uint, "a `uint`", Axis::What},
+    {"bin", Family::Bin, "a `bin`", Axis::What},
+    {"deci", Family::Deci, "a `deci`", Axis::What},
+    {"str", Family::Str, "a `str`", Axis::What},
+    {"bool", Family::Bool, "a `bool`", Axis::What},
+    {"many", Family::Many, "a `many`", Axis::What},
+    {"or-nothing", Family::OrNothing, "something that may hold nothing", Axis::What},
+    {"struct", Family::Struct, "a struct", Axis::What},
+    {"owned", Family::Owned, "something held outright", Axis::How},
+    {"loan", Family::Loan, "a borrow", Axis::How},
+    {"loanmut", Family::LoanMut, "a borrow that may be written through", Axis::How},
 };
 
 } // namespace
@@ -110,6 +114,13 @@ bool namesFamily(std::string_view word) {
   return false;
 }
 
+Axis axisOf(Family family) {
+  for (const FamilyWord &known : kFamilies)
+    if (known.family == family)
+      return known.axis;
+  return Axis::What;
+}
+
 const char *asksFor(Family family) {
   for (const FamilyWord &known : kFamilies)
     if (known.family == family)
@@ -124,6 +135,11 @@ bool overlaps(Family a, Family b) {
     return f == Family::Int || f == Family::Uint || f == Family::Bin ||
            f == Family::Deci;
   };
+  // Across the two questions nothing is said about overlap here: an arm from
+  // each is refused where it is written, because a type word and a borrow word
+  // overlap for every borrowed value and there is no level to pick between them.
+  if (axisOf(a) != axisOf(b))
+    return false;
   return (a == Family::Number && underNumber(b)) ||
          (b == Family::Number && underNumber(a));
 }
@@ -152,6 +168,12 @@ bool inFamily(Ty type, Family family) {
     return type.orNothing;
   case Family::Struct:
     return type.isStruct() && !type.orNothing;
+  case Family::Owned:
+    return type.held == Held::Owned;
+  case Family::Loan:
+    return type.held == Held::Loan;
+  case Family::LoanMut:
+    return type.held == Held::LoanMut;
   }
   return false;
 }
@@ -456,6 +478,16 @@ private:
     // that fills it in. `any.number` on its own and `many.any.number` both come
     // through here, and there is one blank either way.
     settled.asks = asks;
+    // How it is held is written in the chain, and until now only `Own.cpp` read
+    // it. The type carries it so that a program can ask.
+    for (const ChainSegment &seg : chain.segments) {
+      if (seg.isName)
+        continue;
+      if (seg.text == "loan")
+        settled.held = Held::Loan;
+      else if (seg.text == "loanmut")
+        settled.held = Held::LoanMut;
+    }
     return settled;
   }
 
@@ -990,6 +1022,15 @@ private:
   // is what a blank is *for*, and it worked on scalars and structs only.
   std::string spelledAs(Ty type) const {
     std::string out;
+    // How it is held is part of what the copy takes. A blank filled in with a
+    // borrowed `int64` is a parameter spelled `loan.int64`, and a separate copy
+    // from the one filled in with an owned one — they are different functions,
+    // and a program that asks how its argument is held gets a different answer
+    // in each.
+    if (type.held == Held::Loan)
+      out += "loan.";
+    else if (type.held == Held::LoanMut)
+      out += "loanmut.";
     if (type.orNothing)
       out += "or-nothing.";
     if (type.holds())
@@ -1107,7 +1148,21 @@ private:
           e.children[0]->kind == ExprKind::Name)
         if (Symbol *held = lookupToChange(e.children[0]->text))
           held->everChanged = true;
-      return e.children.empty() ? Type::Unknown : expr(*e.children[0], expected);
+      if (e.children.empty())
+        return Type::Unknown;
+      {
+        // The type of what is lent, held the way this lends it. What a transfer
+        // means is still the ownership pass's business; this is only so that a
+        // program asking how something is held gets an answer.
+        Ty lent = expr(*e.children[0], expected);
+        // `move` is the third word here and is not a borrow: it hands the value
+        // over for good, and what comes out the other side is held outright.
+        if (e.text == "loan")
+          lent.held = Held::Loan;
+        else if (e.text == "loanmut")
+          lent.held = Held::LoanMut;
+        return lent;
+      }
 
     case ExprKind::Group:
       return e.children.empty() ? Type::Unknown : expr(*e.children[0], expected);
@@ -1880,11 +1935,38 @@ private:
       if (!everyWordKnown)
         break;
 
+      bool overlapping = false;
+      // One `whichever` asks one question. What a value is and how it is held
+      // are two, and a borrowed number answers a word from each — so an arm from
+      // each list would leave two arms both answering with no level to pick
+      // between them, which is not the mistake the overlap rule was written for.
+      // Two statements say it, and nesting one inside the other says both.
+      for (unsigned i = 1; i < s.branches.size(); ++i)
+        if (axisOf(asked[i]) != axisOf(asked[0])) {
+          const bool howFirst = axisOf(asked[0]) == Axis::How;
+          complain(s.branches[i].familySpan, "E0543",
+                   "`" + s.branches[i].family + "` and `" + s.branches[0].family +
+                       "` are answers to different questions.",
+                   {"a `whichever` asks one question"},
+                   {std::string("what a value is and how it is held are two "
+                                "questions, and a borrowed number answers one word "
+                                "from each. Ask them in two `whichever`s — one "
+                                "inside the other, if both matter. `owned`, `loan` "
+                                "and `loanmut` say how; every other word says what."),
+                    howFirst ? "this one says what it is, and the first says how it "
+                               "is held."
+                             : "this one says how it is held, and the first says "
+                               "what it is."},
+                   "here", {Note{s.branches[0].familySpan, "the question being asked"}});
+          overlapping = true;
+        }
+      if (overlapping)
+        break;
+
       // Two arms that could both answer leave the compiler picking, and there
       // is no rule here saying one word is nearer than another — the language
       // has no such idea anywhere else, and adding one for this would be adding
       // it everywhere.
-      bool overlapping = false;
       for (unsigned i = 0; i < s.branches.size(); ++i)
         for (unsigned j = i + 1; j < s.branches.size(); ++j)
           if (overlaps(asked[i], asked[j])) {

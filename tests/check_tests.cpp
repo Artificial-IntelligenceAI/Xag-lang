@@ -1207,7 +1207,93 @@ void whicheverKeepsOneArm() {
   CHECK(run(program).checked.ok());
 }
 
+// How a thing is held is a second question, asked with its own words, and a
+// value that is borrowed answers one word from each list.
+void howAThingIsHeldIsItsOwnQuestion() {
+  const std::string program =
+      "fn.str 'howHeld' [any 'v'] {\n"
+      "    whichever 'v' {\n"
+      "        is owned   { give [str:*owned*]; }\n"
+      "        is loan    { give [str:*a loan*]; }\n"
+      "        is loanmut { give [str:*a loanmut*]; }\n"
+      "    }\n"
+      "}\n"
+      "START {\n"
+      "    var.mut.int64 'n' = [*7*];\n"
+      "    print.stdout[howHeld['n'] howHeld[loan 'n'] howHeld[loanmut 'n'] \\n];\n"
+      "}\n";
+  const xag::Source source("test.xag", program);
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(parsed.ok());
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+  // Three copies for one type, because how it is held is part of what the copy
+  // takes — and a program that asks gets a different answer in each.
+  CHECK(checked.instantiations.size() == 3);
+  std::set<std::string> spelled;
+  for (const auto &[what, with] : checked.instantiations)
+    spelled.insert(with);
+  CHECK(spelled == std::set<std::string>({"int64", "loan.int64", "loanmut.int64"}));
+
+  // `move` is the third word beside `loan` and `loanmut` and is not a borrow:
+  // what comes out of it is held outright, so it asks for no copy of its own.
+  const Checked moved = run(
+      "fn.int64 'echo' [any 'v'] { give [*0*]; }\n"
+      "START {\n"
+      "    var.str 's' = [*x*];\n"
+      "    print.stdout[echo[move 's'] \\n];\n"
+      "}\n");
+  CHECK(moved.checked.ok());
+  CHECK(moved.checked.instantiations.size() == 1);
+  CHECK(moved.checked.instantiations[0].second == "str");
+
+  // A borrowed number answers a word from each list, so one `whichever` may not
+  // ask both — there is no level to pick between them.
+  CHECK(insideTheCopies(
+            "fn.str 'f' [any 'v'] {\n"
+            "    whichever 'v' { is number { give [str:*n*]; } is loan { give [str:*l*]; } }\n"
+            "}\n"
+            "START { var.int64 'n' = [*1*]; print.stdout[f['n'] \\n]; }\n") == "E0543");
+  // Within one list nothing overlaps: a value is held exactly one way.
+  CHECK(insideTheCopies(
+            "fn.str 'f' [any 'v'] {\n"
+            "    whichever 'v' {\n"
+            "        is owned { give [str:*o*]; } is loan { give [str:*l*]; }\n"
+            "        is loanmut { give [str:*m*]; }\n"
+            "    }\n"
+            "}\n"
+            "START { var.int64 'n' = [*1*]; print.stdout[f['n'] \\n]; }\n") == "(none)");
+
+  // And the other direction: a blank may ask for a borrow, and the refusal
+  // lands on the call.
+  const Checked wanted = run("fn.int64 'f' [any.loan 'v'] { give [*1*]; }\n"
+                             "START {\n"
+                             "    var.int64 'n' = [*7*];\n"
+                             "    print.stdout[f['n'] \\n];\n"
+                             "}\n");
+  CHECK(wanted.code(0) == "E0539");
+  CHECK(wanted.checked.diagnostics.front().message ==
+        "`int64` is not a borrow, and `f` asks for one.");
+  CHECK(run("fn.int64 'f' [any.loan 'v'] { give [*1*]; }\n"
+            "START {\n"
+            "    var.int64 'n' = [*7*];\n"
+            "    print.stdout[f[loan 'n'] \\n];\n"
+            "}\n")
+            .checked.ok());
+
+  CHECK(xag::axisOf(xag::Family::Loan) == xag::Axis::How);
+  CHECK(xag::axisOf(xag::Family::Owned) == xag::Axis::How);
+  CHECK(xag::axisOf(xag::Family::Number) == xag::Axis::What);
+  // Nothing overlaps across the two questions — that pair is refused where it
+  // is written instead, which is where the reader can see both words.
+  CHECK(!xag::overlaps(xag::Family::Number, xag::Family::Loan));
+  CHECK(!xag::overlaps(xag::Family::Owned, xag::Family::Loan));
+  CHECK(xag::overlaps(xag::Family::Loan, xag::Family::Loan));
+}
+
 int main() {
+  howAThingIsHeldIsItsOwnQuestion();
   whicheverKeepsOneArm();
   aBlankMaySayWhatItTakes();
   oneMistakeIsReportedAsOneMistake();
