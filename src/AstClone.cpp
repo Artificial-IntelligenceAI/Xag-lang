@@ -93,4 +93,44 @@ Item clone(const Item &item) {
   return out;
 }
 
+namespace {
+
+unsigned fillChain(Chain &chain, std::string_view spelled) {
+  unsigned filled = 0;
+  for (ChainSegment &seg : chain.segments)
+    if (!seg.isName && seg.text == "any") {
+      seg.text = std::string(spelled);
+      ++filled;
+    }
+  return filled;
+}
+
+unsigned fillBlock(Block &block, std::string_view spelled);
+
+unsigned fillStmt(Stmt &s, std::string_view spelled) {
+  unsigned filled = fillChain(s.chain, spelled);
+  for (Branch &branch : s.branches)
+    filled += fillBlock(branch.body, spelled);
+  filled += fillBlock(s.body, spelled);
+  return filled;
+}
+
+unsigned fillBlock(Block &block, std::string_view spelled) {
+  unsigned filled = 0;
+  for (StmtPtr &s : block.stmts)
+    if (s)
+      filled += fillStmt(*s, spelled);
+  return filled;
+}
+
+} // namespace
+
+unsigned fillTheBlank(Item &item, std::string_view spelled) {
+  unsigned filled = fillChain(item.chain, spelled);
+  for (Param &param : item.params)
+    filled += fillChain(param.chain, spelled);
+  filled += fillBlock(item.body, spelled);
+  return filled;
+}
+
 } // namespace xag

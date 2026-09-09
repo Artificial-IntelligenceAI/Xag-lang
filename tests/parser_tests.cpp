@@ -469,10 +469,59 @@ void aCloneIsIndistinguishable() {
   }
 }
 
+// Filling the blank in is a separate step from copying, and reaches a chain
+// wherever one is written — not only the signature.
+void theBlankIsFilledEverywhereAChainIs() {
+  const std::string generic =
+      "fn.any 'largest' [loan.many.any 'xs', any 'first'] {\n"
+      "    var.mut.any 'best' = ['first'];\n"
+      "    loop.range.int64 'i' = [*0*, *1*] {\n"
+      "        var.any 'here' = ['xs'['i']];\n"
+      "    }\n"
+      "    give ['best'];\n"
+      "}\n";
+  const xag::Source source("test.xag", generic);
+  const xag::LexResult lexed = xag::lex(source);
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(parsed.ok());
+
+  xag::Item filled = xag::clone(parsed.program.items.front());
+  // The answer, two parameters, and two declarations inside the body.
+  CHECK(xag::fillTheBlank(filled, "int64") == 5);
+
+  xag::Program after;
+  after.items.push_back(std::move(filled));
+  std::ostringstream out;
+  xag::print(after, out);
+  // Looked for with the dot, because `many` has an `any` inside it and looking
+  // for the bare word said the blank was still there when it was not.
+  CHECK(out.str().find(".any") == std::string::npos);
+  CHECK(out.str().find("param any ") == std::string::npos);
+  CHECK(out.str().find("int64") != std::string::npos);
+
+  // The one it was copied from is untouched.
+  std::ostringstream before;
+  xag::print(parsed.program, before);
+  CHECK(before.str().find(".any") != std::string::npos);
+
+  // A name is not a chain word, so a loan called `'any'` is left alone.
+  const std::string named =
+      "fn.loan.'any'.str 'pick' [loan.'any'.str 'a', loan.'any'.str 'b'] {\n"
+      "    give ['a'];\n"
+      "}\n";
+  const xag::Source second("test.xag", named);
+  const xag::LexResult lexed2 = xag::lex(second);
+  const xag::ParseResult parsed2 = xag::parse(second, lexed2.tokens);
+  CHECK(parsed2.ok());
+  xag::Item untouched = xag::clone(parsed2.program.items.front());
+  CHECK(xag::fillTheBlank(untouched, "int64") == 0);
+}
+
 } // namespace
 
 int main() {
   aCloneIsIndistinguishable();
+  theBlankIsFilledEverywhereAChainIs();
   aValueOnItsOwnIsSaidSoOnce();
   wholeProgramParses();
   aDeclarationAndACallTellApart();
