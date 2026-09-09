@@ -192,6 +192,31 @@ back a borrow on a named loan — and that is allowed rather than refused. It is
 corner, the compiler reads it by slot without trouble, and refusing a shape
 because it is hard to read is a cost paid by everyone to spare a few.
 
+### The first appearance declares it
+
+Reading the whole signature left to right, the first `'held'` introduces the
+blank and every one after has to be it:
+
+```
+fn.'held' 'largest' [loan.many.'held' 'xs']
+   ^^^^^^ declares            ^^^^^^ must be that one
+```
+
+Which makes a typo an error rather than a second blank nobody asked for:
+
+```
+fn.'held' 'largest' [loan.many.'hedl' 'xs']
+                              ^^^^^^ names no type this function has
+```
+
+Without that check the two ends are unrelated, the function still compiles, and
+it does not mean what was written — a generic that does not tie its ends
+together is a comment rather than a generic.
+
+**First in reading order, not first in the chain.** The answer's type is not
+always written first: `fn.int64 'count-of' [loan.many.'held' 'xs']` gives back a
+plain `int64`, and `'held'` appears first among the parameters.
+
 ### Type parameters stay in the chain
 
 Declaring them elsewhere was considered — `[type 'held', loan.many.'held' 'xs']`,
@@ -202,7 +227,8 @@ when the chain is already where everything about one lives.
 
 ## Open
 
-- Where a type parameter is *declared*. A loan name declares itself by first
-  appearance and nothing checks it is used twice; a type name cannot be that
-  loose, because a generic that does not tie its two ends together is a comment
-  rather than a generic.
+- Whether a loan name should be tightened the same way. It declares itself by
+  first appearance too, and nothing checks the rest: `'typo-here'` written once
+  on a single parameter compiles and means nothing. Harmless there, because with
+  one borrow there is nothing to tell apart — but it is the same rule, enforced
+  in one place and not the other.
