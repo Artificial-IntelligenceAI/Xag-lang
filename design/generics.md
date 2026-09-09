@@ -173,8 +173,36 @@ Bare `any` stays the floor: it takes anything, and what can be done with it is
 what can be done with every type — hold it, move it, lend it, hand it back.
 Every word added buys one thing more.
 
+### A blank is named only when there are two of them
+
+`any` covers the single blank, the way nothing at all covers a single loan.
+A name appears where there is a choice about *which*, and with one blank there
+is none:
+
+```
+fn.loan.'the list'.any 'first' [loan.'the list'.many.any 'xs']
+        ^^^^^^^^^^ ^^^
+        quoted: yours    bare: Xag's
+```
+
+One quoted word and one bare word, told apart by looking rather than counting.
+
+Two quoted words side by side needs a generic over *two* types that also hands
+back a borrow on a named loan — and that is allowed rather than refused. It is a
+corner, the compiler reads it by slot without trouble, and refusing a shape
+because it is hard to read is a cost paid by everyone to spare a few.
+
+### Type parameters stay in the chain
+
+Declaring them elsewhere was considered — `[type 'held', loan.many.'held' 'xs']`,
+a type parameter as an ordinary parameter — and dropped. It does not remove the
+two-quoted-words case, because that is about *uses* and not about where a thing
+was declared. What it would add is a second place for a declaration to live,
+when the chain is already where everything about one lives.
+
 ## Open
 
-- How a type parameter is spelled where it needs a name, and the collision that
-  comes with it — `fn.loan.'life'.'held'` puts a loan name and a type name side
-  by side, told apart by counting, which is a syntax nobody could read.
+- Where a type parameter is *declared*. A loan name declares itself by first
+  appearance and nothing checks it is used twice; a type name cannot be that
+  loose, because a generic that does not tie its two ends together is a comment
+  rather than a generic.
