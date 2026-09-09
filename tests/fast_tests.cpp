@@ -293,6 +293,14 @@ void onTurningNumbersIntoText() {
   AGREE("struct 'holder' [loan.int64 'x']\n"
         "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
         "  print.stdout['h'.x \\n]; }\n");
+  // A sum going into a field that may hold nothing. What goes into one of these
+  // is asked for as the thing itself — an `or-nothing bin64` is not a number,
+  // so a sum asked for with the wrapper still on had nothing saying what its
+  // pieces were. The same sum into a *name* of the same type was taken.
+  AGREE("struct 'w' [or-nothing.bin64 'm', int64 'n']\n"
+        "START { var.w 'g' = [*1.5* x *2* *2*];\n"
+        "  if 'g'.m holds 'x' { print.stdout['x' \\n]; } }\n");
+
   // A written value going into a field that may hold nothing, at every kind of
   // number there is. A name carries its own type; one of the things a struct
   // holds is given the *field's*, so the `or-nothing` was still on it when each

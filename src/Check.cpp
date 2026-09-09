@@ -1825,7 +1825,19 @@ private:
     }
     for (unsigned i = 0; i < items.size(); ++i) {
       const Ty wanted = i < shape.fields.size() ? shape.fields[i].type : Ty{};
-      const Ty got = expr(*items[i], wanted);
+      // What goes into something that may hold nothing is asked for as the
+      // thing itself, the way a value list already asks for it — so a sum can
+      // be written there, and a written number in one knows what it is. Asked
+      // with the `or-nothing` still on, `*1.5* x *2*` had nothing saying what
+      // its pieces were, and the same expression into a *name* of the same type
+      // was taken without a word.
+      //
+      // An absence is the exception: it is the whole of the type rather than
+      // what the type holds, and it is what says so.
+      const Ty asked = wanted.mayBeNothing() && items[i]->kind != ExprKind::Nothing
+                           ? wanted.within()
+                           : wanted;
+      const Ty got = expr(*items[i], asked);
       if (wanted != Ty{})
         couldNotCheck(got, items[i]->span,
                       "this was not checked against what `'" + shape.fields[i].name +
