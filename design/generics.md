@@ -266,3 +266,32 @@ That needs the binding, which is the checker's to work out, and then a **deep
 copy of an item's tree** with the blank replaced — and the tree is held in
 `unique_ptr`s with no clone. Writing that clone is the first real piece of work,
 and nothing else can start without it.
+
+## A generic calling a generic
+
+Expansion happens in rounds, not once.
+
+The checker deliberately does not read a generic's body — whether a thing copies
+is the very question the blank has not answered yet. So a call *inside* a
+generic body is not read either, and nothing knows what it was asked for until
+that body has been written out at a type and read for the first time.
+
+One round is therefore not enough. `twice` calls `same`; reading the file finds
+`twice` at `int64`, and writing `twice$int64` out is what lets the next reading
+find `same` at `int64`. Each round writes what the last one learned.
+
+Two things make that settle:
+
+- **A generic still called by name stays.** It is written out again, blank and
+  all, at the end of the round, because the call naming it sits in a copy that
+  has only just been written and has never been read. On the round after nothing
+  names it, and it goes. A generic nothing ever calls is dropped on the first
+  round, since nothing names it then either.
+- **A copy already standing is not written twice.** A generic that calls itself
+  asks for its own type again on the round that reads its body — and the copy
+  doing the asking is the one it is asking for. Recursion works, and produces one
+  copy per type rather than a new one every round.
+
+Sixty-four rounds is the ceiling. A file that has not settled by then is not a
+file anybody wrote; it is expansion failing to settle, so it is reported in the
+voice that says the fault is ours.

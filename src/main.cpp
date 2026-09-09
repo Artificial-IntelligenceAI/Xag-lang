@@ -17,6 +17,7 @@
 
 #include <climits>
 #include <cstdlib>
+#include <deque>
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -518,11 +519,33 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // deliberately left every generic body alone, since whether a thing copies is
   // the very question the blank had not answered. This is the pass that answers
   // it, once per type, and it is where a generic's own mistakes are found.
-  static xag::Program expanded;
+  //
+  // Round by round, because one generic can call another: the inner call is not
+  // read until the outer body has been written out at a type, and it is that
+  // reading which says what the inner one was asked for. Each round writes what
+  // the last one learned, and the rounds stop when no generic is left standing.
+  static std::deque<xag::Program> rounds;
+  rounds.clear();
   const xag::Program *program = &parsed.program;
-  if (xag::expand(const_cast<xag::Program &>(parsed.program), checked, expanded)) {
-    program = &expanded;
-    checked = xag::check(source, expanded);
+  while (true) {
+    // A file whose generics fill each other in for sixty-four rounds is not a
+    // file anybody wrote; it is expansion failing to settle, which is ours.
+    if (rounds.size() >= 64) {
+      report(source, {xag::Diagnostic{
+                         xag::Span{}, "",
+                         "I could not finish writing the generics in this file out.",
+                         "here",
+                         {"Each one I wrote out asked for another, and it did not stop."},
+                         {}, {}, xag::Severity::Mine}});
+      return false;
+    }
+    xag::Program &next = rounds.emplace_back();
+    if (!xag::expand(const_cast<xag::Program &>(*program), checked, next)) {
+      rounds.pop_back();
+      break;
+    }
+    program = &next;
+    checked = xag::check(source, next);
     if (report(source, checked.diagnostics) != 0)
       return false;
   }

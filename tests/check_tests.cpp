@@ -1,5 +1,8 @@
 #include "xag/Check.h"
 #include "xag/Expand.h"
+
+#include <deque>
+#include <set>
 #include "xag/Fold.h"
 #include "xag/Mir.h"
 #include "xag/Lexer.h"
@@ -825,9 +828,95 @@ void aGenericIsWrittenOutPerType() {
   CHECK(none.items.front().kind == xag::ItemKind::Start);
 }
 
+// One generic calling another, and one calling itself. Neither call is read
+// until the body holding it has been written out at a type, so this takes more
+// than one round.
+void aGenericCallingAGenericIsWrittenOutToo() {
+  const std::string nested =
+      "fn.any 'same' [any 'x'] { give ['x']; }\n"
+      "fn.any 'twice' [any 'y'] { give [same['y']]; }\n"
+      "START {\n"
+      "    var.int64 'n' = [*7*];\n"
+      "    var.bool 'b' = [*true*];\n"
+      "    print.stdout[twice['n'] twice['b'] \\n];\n"
+      "}\n";
+  const xag::Source source("test.xag", nested);
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(parsed.ok());
+
+  // Round by round, the way the driver does it, until no generic is left.
+  std::deque<xag::Program> rounds;
+  xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+  const xag::Program *program = &parsed.program;
+  while (rounds.size() < 64) {
+    xag::Program &next = rounds.emplace_back();
+    if (!xag::expand(const_cast<xag::Program &>(*program), checked, next)) {
+      rounds.pop_back();
+      break;
+    }
+    program = &next;
+    checked = xag::check(source, next);
+    CHECK(checked.ok());
+  }
+  // It settles rather than going round for ever.
+  CHECK(rounds.size() < 64);
+
+  // Four copies, one generic left, and nothing read a blank on the way.
+  std::set<std::string> names;
+  for (const xag::Item &item : program->items)
+    names.insert(item.name);
+  CHECK(names.count("same$int64") == 1);
+  CHECK(names.count("same$bool") == 1);
+  CHECK(names.count("twice$int64") == 1);
+  CHECK(names.count("twice$bool") == 1);
+  CHECK(names.count("same") == 0);
+  CHECK(names.count("twice") == 0);
+
+  // A generic that calls itself asks for its own type again on the round that
+  // reads its body. That copy is the one asking, and it is not written twice.
+  const std::string itself =
+      "fn.any 'down' [any 'n'] {\n"
+      "    if 'n' <== *0* { give [*0*]; }\n"
+      "    give [down['n' - *1*]];\n"
+      "}\n"
+      "START {\n"
+      "    var.int64 'a' = [*5*];\n"
+      "    print.stdout[down['a'] \\n];\n"
+      "}\n";
+  const xag::Source other("test.xag", itself);
+  const xag::LexResult lexed2 = xag::lex(other);
+  xag::ParseResult parsed2 = xag::parse(other, lexed2.tokens);
+  CHECK(parsed2.ok());
+
+  std::deque<xag::Program> again;
+  xag::CheckResult read = xag::check(other, parsed2.program);
+  CHECK(read.ok());
+  const xag::Program *settled = &parsed2.program;
+  while (again.size() < 64) {
+    xag::Program &next = again.emplace_back();
+    if (!xag::expand(const_cast<xag::Program &>(*settled), read, next)) {
+      again.pop_back();
+      break;
+    }
+    settled = &next;
+    read = xag::check(other, next);
+    CHECK(read.ok());
+  }
+  CHECK(again.size() < 64);
+
+  unsigned copies = 0;
+  for (const xag::Item &item : settled->items)
+    if (item.name == "down$int64")
+      ++copies;
+  CHECK(copies == 1);
+}
+
 int main() {
   aGenericBodyIsNotReadWithTheBlankInIt();
   aGenericIsWrittenOutPerType();
+  aGenericCallingAGenericIsWrittenOutToo();
   aNameMustBeDeclared();
   aNameIsDeclaredOnce();
   aTypeMustExist();
