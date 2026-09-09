@@ -336,10 +336,34 @@ private:
       }
 
       if (slot == Slot::Unknown) {
-        complain(seg.span, "E0202", "`" + seg.text + "` answers no question a chain asks.",
-                 {"every segment of a chain answers a question the language asks"},
-                 {"a chain is read by what each word means, not by counting to the "
-                  "last one, so a word that means nothing cannot be passed over."});
+        // Which word is being read as the type is this reader's own rule, and
+        // saying it out loud is the difference between somebody seeing their
+        // mistake and somebody staring at the one word in the chain that was
+        // fine. `fn.int64.number` used to say that `int64` answers no question,
+        // which reads as a claim about `int64` rather than about where it is
+        // standing — and `number`, the word actually at fault, went unmentioned.
+        //
+        // Whether the word nearest the name is a type is still the checker's
+        // question. Nothing here answers it, and nothing here needs to: the
+        // reader is being told where the type is, not what it is.
+        const bool sayWhichIsTheType =
+            role.endsInType && last > 0 && !c.segments[last - 1].isName;
+        if (sayWhichIsTheType)
+          complain(seg.span, "E0202",
+                   "`" + seg.text + "` is not one of the words a chain says, and the "
+                   "type here is `" + c.segments[last - 1].text + "`.",
+                   {"the type is the word nearest the name, and every word before it "
+                    "answers a question the language asks"},
+                   {"if `" + seg.text + "` was meant to be the type, it has to be the "
+                    "word nearest the name.",
+                    "a chain is read by what each word means, not by counting to the "
+                    "last one, so a word that means nothing cannot be passed over."});
+        else
+          complain(seg.span, "E0202",
+                   "`" + seg.text + "` answers no question a chain asks.",
+                   {"every segment of a chain answers a question the language asks"},
+                   {"a chain is read by what each word means, not by counting to the "
+                    "last one, so a word that means nothing cannot be passed over."});
         continue;
       }
 

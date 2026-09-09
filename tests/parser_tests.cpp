@@ -212,6 +212,32 @@ void aSegmentHasToMeanSomething() {
   CHECK(!run("fn.mut.wat.int64 'f' [] { give [*7*]; }\n").parsed.ok());
 }
 
+void aChainSaysWhichWordItReadAsTheType() {
+  // The hole this closes: `fn.int64.number` said that `int64` answers no
+  // question a chain asks, which is a claim about the one word in the line that
+  // was fine. `number` is nearest the name, so `number` is what was read as the
+  // type — and that is what the reader has to be told to see the mistake.
+  const Parsed p = run("fn.int64.number 'f' [int64 'x'] { give ['x']; }\nSTART { }\n");
+  CHECK(!p.parsed.ok());
+  CHECK(p.code(0) == "E0202");
+  const std::string said = p.parsed.diagnostics.front().message;
+  CHECK(said.find("`int64` is not one of the words a chain says") != std::string::npos);
+  CHECK(said.find("the type here is `number`") != std::string::npos);
+
+  // The same for `any`, which is the shape somebody reaches for when they want
+  // to say what a generic will take.
+  const Parsed a = run("fn.any.number 'f' [any 'x'] { give ['x']; }\nSTART { }\n");
+  CHECK(a.code(0) == "E0202");
+  CHECK(a.parsed.diagnostics.front().message.find("the type here is `number`") !=
+        std::string::npos);
+
+  // And it names the type even when the word at fault is nowhere near it.
+  const Parsed far = inStart("var.banana.int64 'n' = [*1*];");
+  CHECK(far.code(0) == "E0202");
+  CHECK(far.parsed.diagnostics.front().message.find("the type here is `int64`") !=
+        std::string::npos);
+}
+
 void eachChainAsksItsOwnQuestions() {
   // `mut` is a real word in the wrong chain: a function's answer is a value,
   // and a value does not change.
@@ -537,6 +563,7 @@ int main() {
   aVarCannotStandAtTheTopLevel();
   readingContinuesAfterAMistake();
   aSegmentHasToMeanSomething();
+  aChainSaysWhichWordItReadAsTheType();
   eachChainAsksItsOwnQuestions();
   oneQuestionIsAnsweredOnce();
   aChainHasOneOrder();
