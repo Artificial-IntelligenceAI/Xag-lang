@@ -241,6 +241,9 @@ struct Shape {
   Span span;
 };
 
+// What a program's structs are made of, in the order they were declared.
+using Shapes = std::vector<Shape>;
+
 struct CheckResult {
   std::vector<Diagnostic> diagnostics;
 
@@ -285,6 +288,13 @@ struct CheckResult {
   // same erasure a generic gets, and for the same reason: the arms that were
   // not chosen are written against types this copy does not have.
   std::unordered_map<const Stmt *, unsigned> chosenArm;
+
+  // Which struct each `loop.parts` walks. The statement is replaced by one copy
+  // of its body per field before anything else runs — it is not a loop, it is a
+  // body written out as many times as the struct has fields, because what a
+  // field holds is a different type on every turn and one body cannot be built
+  // for all of them.
+  std::unordered_map<const Stmt *, unsigned> walksParts;
 
   // The most times any counted loop in this file goes round, where both its
   // ends are written down. Free to work out — the number is already computed to

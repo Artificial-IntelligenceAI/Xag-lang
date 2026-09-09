@@ -593,6 +593,17 @@ private:
 
   void statement(const Stmt &s) {
     switch (s.kind) {
+    case StmtKind::LoopParts:
+      // Never here, for the same reason a `whichever` is not: it is written out
+      // as one copy of its body per field long before this, and walking past one
+      // would drop every turn of it from a program that then builds.
+      result_.diagnostics.push_back(Diagnostic{
+          s.span, "", "I did not finish walking a struct before building this.",
+          "here",
+          {"A `loop.parts` should have been written out as one copy of its body "
+           "per field, and the whole statement arrived instead."},
+          {}, {}, Severity::Mine});
+      break;
     case StmtKind::Whichever:
       // Never here. A `whichever` is decided while checking and the statement is
       // replaced by the arm that was chosen, so reaching this pass means the

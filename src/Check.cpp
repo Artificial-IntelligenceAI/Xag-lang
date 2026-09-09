@@ -370,6 +370,60 @@ private:
   // Placed before the check it stands in for rather than replacing it. A traced
   // type is an unknown one, so the guard below it — `got != Ty{}`, or the same
   // written the other way round — is already false and the two never both speak.
+  // A turn hands over the field, and a field is two things: what it is called
+  // and what it holds. Reaching for the turn itself asks for a value that is a
+  // different type every time and has to be built somewhere, and there is
+  // nowhere yet — so it is refused where it is written rather than reported as
+  // an undeclared name after the copies have been made.
+  void partOnlyNamed(const Block &block, const std::string &part, Span where) {
+    struct Walk {
+      const std::string &part;
+      std::vector<Span> bare;
+
+      void expr(const Expr *e, bool named) {
+        if (!e)
+          return;
+        if (e->kind == ExprKind::Name && e->text == part && !named)
+          bare.push_back(e->span);
+        for (const ExprPtr &child : e->children)
+          expr(child.get(), e->kind == ExprKind::Field &&
+                                (e->text == "name" || e->text == "value"));
+        values(e->args);
+      }
+      void values(const ValueList &list) {
+        for (const Value &v : list.values)
+          for (const ExprPtr &item : v.items)
+            expr(item.get(), false);
+      }
+      void stmt(const Stmt &s) {
+        expr(s.index.get(), false);
+        values(s.value);
+        expr(s.condition.get(), false);
+        expr(s.call.get(), false);
+        for (const Branch &branch : s.branches) {
+          expr(branch.condition.get(), false);
+          block(branch.body);
+        }
+        block(s.body);
+      }
+      void block(const Block &b) {
+        for (const StmtPtr &s : b.stmts)
+          if (s)
+            stmt(*s);
+      }
+    };
+    Walk walk{part, {}};
+    walk.block(block);
+    for (const Span &at : walk.bare)
+      complain(at, "E0545",
+               "`'" + part + "'` is the field, and this asks for the whole of it.",
+               {"a turn hands over the field, and a field has a name and a value"},
+               {"`'" + part + "'.name` is what it is called, as text, and `'" + part +
+                "'.value` is what it holds. The turn itself is a value whose type "
+                "differs on every turn, and there is nowhere yet to build one."},
+               "here", {Note{where, "the walk that hands it over"}});
+  }
+
   void couldNotCheck(Ty got, Span where, std::string what, std::string rule) {
     if (got.tracedBack())
       because(got.from, where, "E0506", std::move(what), {std::move(rule)});
@@ -1897,6 +1951,34 @@ private:
         }
       }
       onlyValueChecked(s.value, want, s.span);
+      break;
+    }
+
+    case StmtKind::LoopParts: {
+      // What it walks has to be a struct, and has to be one *here* — by the time
+      // this is read a generic has been written out at a real type, so there is
+      // no waiting to find out.
+      const Ty subject = onlyValue(s.value, Ty{});
+      couldNotCheck(subject, s.value.span, "this was not checked as something to walk.",
+                    "`loop.parts` walks a struct, and what this is could not be "
+                    "worked out");
+      if (subject == Ty{})
+        break;
+      if (!subject.isStruct() || subject.orNothing) {
+        complain(s.value.span, "E0544",
+                 "a `" + name(subject) + "` has no parts to walk.",
+                 {"`loop.parts` walks a struct, and nothing else"},
+                 {"a `many` holds one type in every place, so a counted loop already "
+                  "reaches them — and a place has a position rather than a name, so "
+                  "there would be nothing for `.name` to hold."});
+        break;
+      }
+      // Only `.name` and `.value`. The body is not read here at all: what a
+      // field holds is a different type on every turn, so there is no one
+      // reading of it — each turn is its own copy, and those are read once they
+      // have been written.
+      partOnlyNamed(s.body, s.name, s.nameSpan);
+      result_.walksParts[&s] = subject.named;
       break;
     }
 

@@ -106,6 +106,7 @@ enum class StmtKind {
   If,        // if […] { } else-if […] { } else { }
   LoopRange, // loop.range.i64 'i' = [a, b] { }
   LoopWhile, // loop.while […] { }
+  LoopParts, // loop.parts 'part' = ['x'] { }
   When,      // when 'x' { is 'value' { } is nothing { } }
   Whichever, // whichever 'x' { is number { } is str { } }
   Break,     // break;

@@ -87,7 +87,7 @@ Slot slotOf(std::string_view word) {
     return Slot::Ownership;
   if (word == "perm" || word == "temp")
     return Slot::Counter;
-  if (word == "range" || word == "while")
+  if (word == "range" || word == "while" || word == "parts")
     return Slot::Form;
   if (word == "wrapping" || word == "checked")
     return Slot::Overflow;
@@ -124,6 +124,12 @@ const Role kConst{"a `const`", "const", true,
 const Role kLoopRange{"a counted `loop`", "loop", true,
                       {Slot::Trying, Slot::Counter, Slot::Form, Slot::Unknown}};
 const Role kLoopWhile{"a `loop.while`", "loop", false,
+                      {Slot::Trying, Slot::Form, Slot::Unknown, Slot::Unknown}};
+// No type and no counter: what it walks is written in the struct, and how many
+// turns there are is written there too. It is not really a loop — the body is
+// one copy per field, written out while compiling — but it reads like one, and
+// reading like one is what it is for.
+const Role kLoopParts{"a `loop.parts`", "loop", false,
                       {Slot::Trying, Slot::Form, Slot::Unknown, Slot::Unknown}};
 
 // Where a slot sits in this role's order, or -1 when the role never asks it.
@@ -450,7 +456,7 @@ private:
 
     // `range` and `while` have no default between them: a loop that says neither
     // has not said what it is.
-    if ((&role == &kLoopRange || &role == &kLoopWhile) &&
+    if ((&role == &kLoopRange || &role == &kLoopWhile || &role == &kLoopParts) &&
         !filled[placeIn(role, Slot::Form)])
       complain(c.span, "E0207", "a `loop` says whether it counts or asks.",
                {"a word is written where there is a choice"},
@@ -1013,17 +1019,25 @@ private:
 
     if (checkWord("loop")) {
       s->chain = chain();
-      bool isWhile = false;
-      for (const ChainSegment &seg : s->chain.segments)
-        if (!seg.isName && seg.text == "while")
+      bool isWhile = false, isParts = false;
+      for (const ChainSegment &seg : s->chain.segments) {
+        if (seg.isName)
+          continue;
+        if (seg.text == "while")
           isWhile = true;
-      validate(s->chain, isWhile ? kLoopWhile : kLoopRange);
+        else if (seg.text == "parts")
+          isParts = true;
+      }
+      validate(s->chain, isWhile ? kLoopWhile : isParts ? kLoopParts : kLoopRange);
       if (isWhile) {
         s->kind = StmtKind::LoopWhile;
         s->condition = item();
         holdsName(s->holds, s->holdsSpan);
       } else {
-        s->kind = StmtKind::LoopRange;
+        // `loop.parts` reads exactly like a counted loop — a name, `=`, and what
+        // it walks — so it is read by the same lines. What differs is what the
+        // name is bound to on each turn, and that is the checker's business.
+        s->kind = isParts ? StmtKind::LoopParts : StmtKind::LoopRange;
         if (check(TokenKind::Name)) {
           const Token name = advance();
           s->name = name.text;

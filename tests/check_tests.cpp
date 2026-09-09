@@ -1292,7 +1292,63 @@ void howAThingIsHeldIsItsOwnQuestion() {
   CHECK(xag::overlaps(xag::Family::Loan, xag::Family::Loan));
 }
 
+// Walking a struct: one copy of the body per field, written out while
+// compiling, because what a field holds is a different type on every turn.
+void loopPartsWritesOneCopyPerField() {
+  const std::string program =
+      "struct 'point' [int64 'x', int64 'y']\n"
+      "fn.str 'show' [loan.point 'p'] {\n"
+      "    var.mut.str 'out' = [str:*<*];\n"
+      "    loop.parts 'part' = ['p'] {\n"
+      "        set 'out' = ['out' 'part'.name str:*: * (convert-to-str['part'.value])];\n"
+      "    }\n"
+      "    give ['out' str:*>*];\n"
+      "}\n"
+      "START {\n"
+      "    var.point 'p' = [*20* *22*];\n"
+      "    print.stdout[(show[loan 'p']) \\n];\n"
+      "}\n";
+  const xag::Source source("test.xag", program);
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(parsed.ok());
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+  CHECK(checked.walksParts.size() == 1);
+
+  // Two fields, so the one statement inside becomes two, standing where it
+  // stood — a `loop.parts` is not a scope, it is a body written out twice.
+  CHECK(xag::unroll(parsed.program, checked) == 1);
+  for (const xag::Item &item : parsed.program.items)
+    if (item.name == "show") {
+      CHECK(item.body.stmts.size() == 4); // var, set, set, give
+      for (const xag::StmtPtr &st : item.body.stmts)
+        CHECK(st->kind != xag::StmtKind::LoopParts);
+    }
+  // And what stands there now reads clean, with `'part'` nowhere in it.
+  CHECK(xag::check(source, parsed.program).ok());
+
+  // A `many` holds one type in every place, so a counted loop already reaches
+  // them — and a place has a position rather than a name.
+  CHECK(run("START {\n"
+            "    var.many.int64 'm' = [*1* *2*];\n"
+            "    loop.parts 'part' = ['m'] { print.stdout['part'.name \\n]; }\n"
+            "}\n")
+            .code(0) == "E0544");
+
+  // A turn hands over the field, and the turn itself is a value whose type
+  // differs every time — there is nowhere yet to build one.
+  CHECK(run("struct 'p' [int64 'x']\n"
+            "fn.int64 'takes' [any 'v'] { give [*0*]; }\n"
+            "START {\n"
+            "    var.p 'v' = [*1*];\n"
+            "    loop.parts 'part' = ['v'] { print.stdout[takes['part'] \\n]; }\n"
+            "}\n")
+            .code(0) == "E0545");
+}
+
 int main() {
+  loopPartsWritesOneCopyPerField();
   howAThingIsHeldIsItsOwnQuestion();
   whicheverKeepsOneArm();
   aBlankMaySayWhatItTakes();

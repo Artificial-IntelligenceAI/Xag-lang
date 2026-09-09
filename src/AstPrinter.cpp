@@ -74,6 +74,11 @@ struct Printer {
       out << " '" << s.name << "'\n";
       values(s.value, depth + 1);
       break;
+    case StmtKind::LoopParts:
+      out << "loop.parts '" << s.name << "'\n";
+      values(s.value, depth + 1);
+      block(s.body, depth + 1);
+      break;
     case StmtKind::Whichever:
       out << "whichever\n";
       if (s.condition)

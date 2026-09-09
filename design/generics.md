@@ -454,3 +454,58 @@ answer to all three callers.
 hands the value over for good, so what comes out is held outright and asks for no
 copy of its own. Marking it as one built `show$loan.str` and then refused the
 `move` that had asked for it.
+
+## `loop.parts`, built
+
+**Built 2026-09-09.** The whole design, working at once:
+
+```
+fn.str 'show' [loan.any 'v'] {
+    whichever 'v' {
+        is number { give [convert-to-str['v']]; }
+        is struct {
+            var.mut.str 'out' = [str:*<*];
+            loop.parts 'part' = ['v'] {
+                set 'out' = ['out' 'part'.name str:*: * (show[loan 'part'.value]) str:* *];
+            }
+            give ['out' str:*>*];
+        }
+    }
+}
+```
+
+`show[loan 'l']` on a `line` made of `point`s made of `int64`s:
+
+```text
+<from: <x: 1 y: 2 > to: <x: 3 y: 4 > >
+```
+
+`show` has never seen either struct. It walks what it is given, asks what each
+field is, and calls itself when the answer is `struct`.
+
+**It is not a loop, and it is not a scope.** The body is written out once per
+field, and the copies stand where the statement stood — the same as a
+`whichever`'s arm, and for the same reason: what a field holds is a different
+type on every turn, so there is no one body to build and run several times.
+
+**A turn is written in, not built.** `'part'.name` becomes the field's name as
+text and `'part'.value` becomes that field of the thing being walked, reached
+where it stands — so it copies, moves and borrows exactly as it would had the
+reader written `'p'.x` themselves. Anything else naming the turn is `E0545`: a
+value whose type differs every turn would have to be built somewhere, and there
+is nowhere yet. That is the one part of this document not built.
+
+`E0544` for walking anything but a struct.
+
+### The rounds settle three things, not one
+
+Expansion, arm-choosing and struct-walking all happen in the same rounds, and
+all three had to. A `whichever` inside a generic is not reached until that
+generic has been written out at a real type; a `loop.parts` inside the arm that
+was chosen is not reached until that arm has been chosen.
+
+Choosing had been left to the end, and that was wrong in a way only recursion
+showed: **an arm nobody chose still holds calls.** `show`'s `is struct` arm calls
+`show`, and a call nothing repoints keeps the generic it names standing — so
+`show` kept itself alive round after round and stopped at the sixty-fourth, in
+the voice that says the fault is ours. Which it was.

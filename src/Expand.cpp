@@ -161,6 +161,143 @@ void pruneBlock(Block &block, const CheckResult &checked, unsigned &done) {
 
 } // namespace
 
+namespace {
+
+// `'part'.name` becomes the field's name written out as text, and
+// `'part'.value` becomes that field of the thing being walked. Anything else
+// naming the turn was refused where it was written, so nothing else can be here.
+//
+// Every expression is reached through the slot holding it, because the thing
+// being replaced is often the whole of one — `convert-to-str['part'.value]` has
+// it standing alone as an argument. Walking children alone missed exactly those.
+void writeInTheField(ExprPtr &slot, const std::string &part, const std::string &field,
+                     const ExprPtr &walking);
+
+void writeInTheField(ValueList &list, const std::string &part,
+                     const std::string &field, const ExprPtr &walking) {
+  for (Value &value : list.values)
+    for (ExprPtr &item : value.items)
+      writeInTheField(item, part, field, walking);
+}
+
+bool namesTheTurn(const ExprPtr &e, const std::string &part) {
+  return e && e->kind == ExprKind::Field && !e->children.empty() &&
+         e->children[0] && e->children[0]->kind == ExprKind::Name &&
+         e->children[0]->text == part;
+}
+
+void writeInTheField(ExprPtr &slot, const std::string &part, const std::string &field,
+                     const ExprPtr &walking) {
+  if (!slot)
+    return;
+  if (namesTheTurn(slot, part)) {
+    const Span at = slot->span;
+    if (slot->text == "name") {
+      // `str:*x*` — the field's name, as text, which is what it is.
+      auto written = std::make_unique<Expr>();
+      written->kind = ExprKind::Written;
+      written->span = at;
+      written->text = field;
+      auto typed = std::make_unique<Expr>();
+      typed->kind = ExprKind::Typed;
+      typed->span = at;
+      typed->text = "str";
+      typed->children.push_back(std::move(written));
+      slot = std::move(typed);
+      return;
+    }
+    if (slot->text == "value") {
+      // `'p'.thatField`, reached where it stands — so it copies, moves and
+      // borrows exactly as it would had the reader written it out themselves.
+      auto reach = std::make_unique<Expr>();
+      reach->kind = ExprKind::Field;
+      reach->span = at;
+      reach->text = field;
+      reach->children.push_back(clone(walking));
+      slot = std::move(reach);
+      return;
+    }
+  }
+  for (ExprPtr &child : slot->children)
+    writeInTheField(child, part, field, walking);
+  writeInTheField(slot->args, part, field, walking);
+}
+
+void writeInTheField(Block &block, const std::string &part, const std::string &field,
+                     const ExprPtr &walking);
+
+void writeInTheField(Stmt &s, const std::string &part, const std::string &field,
+                     const ExprPtr &walking) {
+  writeInTheField(s.index, part, field, walking);
+  writeInTheField(s.value, part, field, walking);
+  writeInTheField(s.condition, part, field, walking);
+  writeInTheField(s.call, part, field, walking);
+  for (Branch &branch : s.branches) {
+    writeInTheField(branch.condition, part, field, walking);
+    writeInTheField(branch.body, part, field, walking);
+  }
+  writeInTheField(s.body, part, field, walking);
+}
+
+void writeInTheField(Block &block, const std::string &part, const std::string &field,
+                     const ExprPtr &walking) {
+  for (StmtPtr &s : block.stmts)
+    if (s)
+      writeInTheField(*s, part, field, walking);
+}
+
+void unrollBlock(Block &block, const CheckResult &checked, unsigned &done);
+
+void unrollStmt(Stmt &s, const CheckResult &checked, unsigned &done) {
+  for (Branch &branch : s.branches)
+    unrollBlock(branch.body, checked, done);
+  unrollBlock(s.body, checked, done);
+}
+
+void unrollBlock(Block &block, const CheckResult &checked, unsigned &done) {
+  std::vector<StmtPtr> kept;
+  kept.reserve(block.stmts.size());
+  for (StmtPtr &s : block.stmts) {
+    if (!s)
+      continue;
+    if (s->kind != StmtKind::LoopParts) {
+      unrollStmt(*s, checked, done);
+      kept.push_back(std::move(s));
+      continue;
+    }
+    const auto walks = checked.walksParts.find(s.get());
+    if (walks == checked.walksParts.end() || walks->second >= checked.shapes.size() ||
+        s->value.values.empty() || s->value.values[0].items.empty()) {
+      kept.push_back(std::move(s)); // Never reached, so never worked out.
+      continue;
+    }
+    const Shape &shape = checked.shapes[walks->second];
+    const ExprPtr &walking = s->value.values[0].items[0];
+    // One copy of the body per field, in the order the struct was written in.
+    // Not a scope of its own: the turns stand where the statement stood, the
+    // same way a `whichever`'s arm does, because this is not a loop and there
+    // is nothing to be inside.
+    for (const Field &field : shape.fields) {
+      Block turn = clone(s->body);
+      writeInTheField(turn, s->name, field.name, walking);
+      for (StmtPtr &inner : turn.stmts)
+        if (inner)
+          kept.push_back(std::move(inner));
+    }
+    ++done;
+  }
+  block.stmts = std::move(kept);
+}
+
+} // namespace
+
+unsigned unroll(Program &program, const CheckResult &checked) {
+  unsigned done = 0;
+  for (Item &item : program.items)
+    unrollBlock(item.body, checked, done);
+  return done;
+}
+
 unsigned prune(Program &program, const CheckResult &checked) {
   unsigned done = 0;
   for (Item &item : program.items)

@@ -547,10 +547,32 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
                          {}, {}, xag::Severity::Mine}});
       return false;
     }
+    // Both written on the tree the checker walked, because what it worked out is
+    // keyed by those statements. Neither can happen a round earlier: a
+    // `whichever` and a `loop.parts` inside a generic are not reached until that
+    // generic has been written out at a real type, and only then is there a
+    // type to choose by and a struct to walk.
+    //
+    // The arms nobody chose go first, and they have to go here rather than at
+    // the end. An arm that is not part of the program still holds calls, and a
+    // call nothing ever repoints keeps the generic it names standing — so a
+    // `show` whose `is struct` arm calls `show` kept itself alive round after
+    // round, and stopped only at the sixty-fourth.
+    xag::Program &working = const_cast<xag::Program &>(*program);
+    const unsigned settled = xag::prune(working, checked);
+    const unsigned walked = xag::unroll(working, checked);
+
     xag::Program &next = rounds.emplace_back();
     if (!xag::expand(const_cast<xag::Program &>(*program), checked, next)) {
       rounds.pop_back();
-      break;
+      if (settled == 0 && walked == 0)
+        break;
+      // Nothing generic left, but an arm was chosen or a struct was walked — so
+      // what stands there now has never been read.
+      checked = xag::check(source, working);
+      if (report(source, checked.diagnostics) != 0)
+        return false;
+      continue;
     }
     program = &next;
     checked = xag::check(source, next);

@@ -40,4 +40,16 @@ bool expand(Program &program, const CheckResult &checked, Program &out);
 // carried out with the arm it sits in.
 unsigned prune(Program &program, const CheckResult &checked);
 
+// Writes each `loop.parts` out as one copy of its body per field the struct
+// holds, with `'part'.name` written in as the field's name and `'part'.value` as
+// that field of the thing being walked.
+//
+// It cannot be a loop: what a field holds is a different type on every turn, so
+// there is no one body to build and run several times. It is several bodies.
+//
+// Done in the same rounds as expansion, because a `loop.parts` inside a generic
+// is not read until that generic has been written out at a real type — and only
+// then is there a struct to walk. Answers how many were written out.
+unsigned unroll(Program &program, const CheckResult &checked);
+
 } // namespace xag
