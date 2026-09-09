@@ -1009,7 +1009,71 @@ void oneMistakeIsReportedAsOneMistake() {
   CHECK(xag::foldFollowOns(orphan).size() == 1);
 }
 
+// A blank may say what it will take, and the refusal then lands on the call
+// rather than inside a body the caller never wrote.
+void aBlankMaySayWhatItTakes() {
+  const std::string program =
+      "struct 'point' [int64 'x', int64 'y']\n"
+      "fn.any.number 'twice' [any.number 'x'] { give ['x' + 'x']; }\n"
+      "START {\n"
+      "    var.int64 'n' = [*7*];\n"
+      "    var.point 'p' = [*1* *2*];\n"
+      "    print.stdout[twice['p'] \\n];\n"
+      "}\n";
+  const Checked c = run(program);
+  CHECK(!c.checked.ok());
+  CHECK(c.code(0) == "E0539");
+  CHECK(c.checked.diagnostics.front().message ==
+        "`point` is not a number, and `twice` asks for one.");
+  // On the caller's own line — line 6, the print — and not inside `twice`.
+  CHECK(c.source.positionOf(c.checked.diagnostics.front().span.begin).line == 6);
+
+  // The same generic at a type it does take is an ordinary call, and the word
+  // saying what it takes does not survive into the copy: filling `any.number`
+  // in at `int64` is `int64`, not `int64.number`.
+  const std::string fine =
+      "fn.any.number 'twice' [any.number 'x'] { give ['x' + 'x']; }\n"
+      "START {\n"
+      "    var.int64 'n' = [*7*];\n"
+      "    print.stdout[twice['n'] \\n];\n"
+      "}\n";
+  const xag::Source source("test.xag", fine);
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+  xag::Program expanded;
+  CHECK(xag::expand(parsed.program, checked, expanded));
+  CHECK(xag::check(source, expanded).ok());
+  for (const xag::Item &item : expanded.items)
+    if (item.name == "twice$int64")
+      for (const xag::ChainSegment &seg : item.chain.segments)
+        CHECK(seg.isName || seg.text != "number");
+
+  // Every family word, against a type inside it and a type outside it.
+  CHECK(xag::inFamily(xag::Ty{xag::Type::Int64}, xag::Family::Number));
+  CHECK(!xag::inFamily(xag::Ty{xag::Type::Str}, xag::Family::Number));
+  CHECK(xag::inFamily(xag::Ty{xag::Type::Uint8}, xag::Family::Uint));
+  CHECK(!xag::inFamily(xag::Ty{xag::Type::Int8}, xag::Family::Uint));
+  CHECK(xag::inFamily(xag::Ty{xag::Type::Int8}, xag::Family::Int));
+  CHECK(xag::inFamily(xag::Ty{xag::Type::Deci64}, xag::Family::Deci));
+  CHECK(xag::inFamily(xag::Ty{xag::Type::Bin64}, xag::Family::Bin));
+  CHECK(xag::inFamily(xag::many(xag::Type::Int64), xag::Family::Many));
+  CHECK(!xag::inFamily(xag::many(xag::Type::Int64), xag::Family::Number));
+  CHECK(xag::inFamily(xag::orNothingOf(xag::Ty{xag::Type::Int64}),
+                      xag::Family::OrNothing));
+  // A number that may be missing is not a number: arithmetic on one has no
+  // answer when it holds none, which is the whole reason the type exists.
+  CHECK(!xag::inFamily(xag::orNothingOf(xag::Ty{xag::Type::Int64}),
+                       xag::Family::Number));
+  CHECK(xag::inFamily(xag::structNamed(0), xag::Family::Struct));
+  // Bare `any` still takes everything.
+  CHECK(xag::inFamily(xag::structNamed(0), xag::Family::Anything));
+  CHECK(xag::inFamily(xag::Ty{xag::Type::Str}, xag::Family::Anything));
+}
+
 int main() {
+  aBlankMaySayWhatItTakes();
   oneMistakeIsReportedAsOneMistake();
   aGenericBodyIsNotReadWithTheBlankInIt();
   aGenericIsWrittenOutPerType();

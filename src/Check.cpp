@@ -65,6 +65,81 @@ std::string name(Ty type) {
   return type.orNothing ? "or-nothing " + inside : inside;
 }
 
+namespace {
+
+struct FamilyWord {
+  const char *word;
+  Family family;
+  const char *asks; // how a sentence says it
+};
+
+// The words a blank may be narrowed with. `loan` and `loanmut` are not here:
+// how a thing is held is a question the chain already asks — `loan.any` says it
+// — and a second way of saying one thing is a second thing to keep true.
+constexpr FamilyWord kFamilies[] = {
+    {"number", Family::Number, "a number"},
+    {"int", Family::Int, "an `int`"},
+    {"uint", Family::Uint, "a `uint`"},
+    {"bin", Family::Bin, "a `bin`"},
+    {"deci", Family::Deci, "a `deci`"},
+    {"str", Family::Str, "a `str`"},
+    {"bool", Family::Bool, "a `bool`"},
+    {"many", Family::Many, "a `many`"},
+    {"or-nothing", Family::OrNothing, "something that may hold nothing"},
+    {"struct", Family::Struct, "a struct"},
+};
+
+} // namespace
+
+Family familyNamed(std::string_view word) {
+  for (const FamilyWord &known : kFamilies)
+    if (word == known.word)
+      return known.family;
+  return Family::Anything;
+}
+
+bool namesFamily(std::string_view word) {
+  for (const FamilyWord &known : kFamilies)
+    if (word == known.word)
+      return true;
+  return false;
+}
+
+const char *asksFor(Family family) {
+  for (const FamilyWord &known : kFamilies)
+    if (known.family == family)
+      return known.asks;
+  return "anything";
+}
+
+bool inFamily(Ty type, Family family) {
+  switch (family) {
+  case Family::Anything:
+    return true;
+  case Family::Number:
+    return isNumber(type);
+  case Family::Int:
+    return isSigned(type);
+  case Family::Uint:
+    return isWhole(type) && !isSigned(type);
+  case Family::Bin:
+    return isBinary(type);
+  case Family::Deci:
+    return isDecimal(type);
+  case Family::Str:
+    return !type.holds() && !type.orNothing && type.kind == Type::Str;
+  case Family::Bool:
+    return !type.holds() && !type.orNothing && type.kind == Type::Bool;
+  case Family::Many:
+    return type.holds() && !type.orNothing;
+  case Family::OrNothing:
+    return type.orNothing;
+  case Family::Struct:
+    return type.isStruct() && !type.orNothing;
+  }
+  return false;
+}
+
 Type typeNamed(std::string_view word) {
   for (const Named &known : kTypes)
     if (known.word == word)
@@ -298,7 +373,19 @@ private:
   Ty typeOfChain(const Chain &chain) {
     if (chain.segments.empty())
       return Type::Unknown;
-    const ChainSegment &last = chain.type();
+    // `any.number` is one type region: the blank, and the word saying what it
+    // will take. The word stands nearest the name the way `many` stands nearest
+    // the type, so the type itself is one further back.
+    std::size_t typeAt = chain.segments.size() - 1;
+    Family asks = Family::Anything;
+    if (typeAt > 0 && !chain.segments[typeAt].isName &&
+        !chain.segments[typeAt - 1].isName &&
+        chain.segments[typeAt - 1].text == "any" &&
+        namesFamily(chain.segments[typeAt].text)) {
+      asks = familyNamed(chain.segments[typeAt].text);
+      --typeAt;
+    }
+    const ChainSegment &last = chain.segments[typeAt];
     if (last.isName) {
       complain(last.span, "E0503", "a chain ends in a type, and a loan is not one.",
                {"the segment nearest the name is the type"});
@@ -323,8 +410,7 @@ private:
     // `many` stands with the type and says the name holds several of it, and
     // `or-nothing` stands outside that and says the whole of it may be missing.
     // The parser has already refused a second level of either.
-    const std::size_t n = chain.segments.size();
-    std::size_t at = n - 1;
+    std::size_t at = typeAt;
     bool several = false, orNothing = false;
     if (at > 0 && !chain.segments[at - 1].isName &&
         chain.segments[at - 1].text == "many") {
@@ -350,6 +436,10 @@ private:
                          : (several ? many(type) : Ty{type});
     if (orNothing)
       settled = orNothingOf(settled);
+    // What the blank will take rides along with it, and is asked at the call
+    // that fills it in. `any.number` on its own and `many.any.number` both come
+    // through here, and there is one blank either way.
+    settled.asks = asks;
     return settled;
   }
 
@@ -855,8 +945,16 @@ private:
 
   // The same type with the blank filled in.
   static Ty filledIn(Ty type, Ty blank) {
-    if (blank == Ty{})
+    if (blank == Ty{}) {
+      // A blank nothing filled in because the call was refused. What the call
+      // answers is unknown, and it knows why — handing back the blank itself
+      // would leave everything after this reading a hole as though it were a
+      // type. Nothing else changes: a blank that was simply never reached is
+      // still handed back as it was.
+      if (blank.tracedBack() && (type.kind == Type::Blank || type.element == Type::Blank))
+        return blank;
       return type;
+    }
     if (type.kind == Type::Blank)
       return Ty{blank.kind, blank.element, type.orNothing, blank.named};
     if (type.element == Type::Blank)
@@ -1366,6 +1464,25 @@ private:
       const Ty asked = i < signature.params.size() ? signature.params[i] : Ty{};
       if (blank == Ty{} && hasBlank(asked)) {
         blank = blankFrom(asked, value(e.args.values[i], Ty{}));
+        // What the blank said it would take, asked here — the one place where
+        // the caller and the type they brought are both in view.
+        //
+        // This is the whole of what a family word buys. Without it the call goes
+        // through, and `largest` is refused somewhere inside itself for using
+        // `>` on a `point` — at a line the caller never wrote and cannot read as
+        // being about them. With it, the refusal lands on the call.
+        if (blank != Ty{} && !inFamily(blank, asked.asks)) {
+          complain(e.args.values[i].span, "E0539",
+                   "`" + name(blank) + "` is not " + asksFor(asked.asks) + ", and `" +
+                       path + "` asks for one.",
+                   {"a blank takes what it says it takes"},
+                   {"bare `any` takes anything, and what can be done with it is what "
+                    "can be done with every type. Every word after it buys one thing "
+                    "more, and turns away the types that cannot do it."});
+          // Refused, so what this call answers is not known — and everything
+          // built on it is this refusal showing up again rather than news.
+          blank = unknownFrom(e.args.values[i].span);
+        }
         continue;
       }
       const Ty want = filledIn(asked, blank);
@@ -1400,6 +1517,9 @@ private:
   // silence in all three engines, which is why the oracle never saw it: they
   // agreed, and agreeing about nothing is agreeing.
   void showable(const Expr &item, Ty got) {
+    couldNotCheck(got, item.span, "this was not checked as something showable.",
+                  "showing writes one piece after another, and what this is could not "
+                  "be worked out");
     // Asked first, because an `or-nothing.many.int64` is both and this is the
     // sharper reason: the absence, not the several.
     if (got.mayBeNothing()) {

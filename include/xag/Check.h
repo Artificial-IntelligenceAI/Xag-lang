@@ -49,6 +49,36 @@ bool isDecimal(Type type); // deci
 bool isNumber(Type type);
 unsigned widthOf(Type type); // bits; 0 for the types that have no size
 
+// What a blank will take. `any` on its own takes everything; a word after it
+// narrows that, and the words are ones the language already has — the same list
+// `is` asks with, read in the other direction.
+//
+// Bare `any` stays the floor: it takes anything, and what can be done with it is
+// what can be done with every type. Every word added buys one thing more, and
+// costs the types it turns away.
+enum class Family {
+  Anything, // `any`, with nothing after it
+  Number,
+  Int,
+  Uint,
+  Bin,
+  Deci,
+  Str,
+  Bool,
+  Many,
+  OrNothing,
+  Struct,
+};
+
+// The family a word names. `Anything` when the word names no family at all, so
+// a caller has to ask `namesFamily` first if it cares about the difference.
+Family familyNamed(std::string_view word);
+bool namesFamily(std::string_view word);
+
+// What a family asks for, said the way a sentence would say it: "a number",
+// "something that may hold nothing".
+const char *asksFor(Family family);
+
 // A type as the checker knows it. Everything except `many` is a kind on its
 // own; a `many` also says what it holds.
 //
@@ -78,6 +108,8 @@ struct Ty {
   // diagnostic finally names is the mistake that started the chain rather than
   // the last link in it.
   Span from{};
+  // What this blank will take, when it is one. Bare `any` asks for anything.
+  Family asks = Family::Anything;
 
   constexpr Ty() = default;
   constexpr Ty(Type k) : kind(k) {}
@@ -115,8 +147,15 @@ constexpr Ty unknownFrom(Span where) {
 // no link.
 constexpr Ty eitherTrace(Ty a, Ty b) { return a.tracedBack() ? a : b; }
 
-// `from` is deliberately not compared. It says where a type came from, not what
-// it is, and two unknowns are the same unknown however they were arrived at.
+// Whether a type is one of the things a family holds. A blank asking for a
+// family is answered by this at the call that fills it in.
+bool inFamily(Ty type, Family family);
+
+// `from` and `asks` are deliberately not compared. One says where a type came
+// from and the other what a blank would accept — neither says what a type *is*.
+// Two unknowns are the same unknown however they were arrived at, and a blank is
+// compared to see whether it is a blank rather than to tell two of them apart:
+// one signature has one blank, so there are never two to tell apart.
 constexpr bool operator==(Ty a, Ty b) {
   return a.kind == b.kind && a.element == b.element && a.orNothing == b.orNothing &&
          a.named == b.named;

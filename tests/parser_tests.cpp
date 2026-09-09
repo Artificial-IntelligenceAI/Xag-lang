@@ -224,12 +224,17 @@ void aChainSaysWhichWordItReadAsTheType() {
   CHECK(said.find("`int64` is not one of the words a chain says") != std::string::npos);
   CHECK(said.find("the type here is `number`") != std::string::npos);
 
-  // The same for `any`, which is the shape somebody reaches for when they want
-  // to say what a generic will take.
-  const Parsed a = run("fn.any.number 'f' [any 'x'] { give ['x']; }\nSTART { }\n");
-  CHECK(a.code(0) == "E0202");
-  CHECK(a.parsed.diagnostics.front().message.find("the type here is `number`") !=
-        std::string::npos);
+  // But `any.number` is not that shape at all: the blank and the word saying
+  // what it will take are one type region, the way `many.int64` is, so nothing
+  // here is standing where only a chain word may stand.
+  const Parsed a = run("fn.any.number 'f' [any.number 'x'] { give ['x']; }\nSTART { }\n");
+  CHECK(a.parsed.ok());
+  const Parsed deep =
+      run("fn.any.number 'f' [loan.many.any.number 'xs'] { give [*0*]; }\nSTART { }\n");
+  CHECK(deep.parsed.ok());
+  // A word that names no family is still a word too far from the name.
+  CHECK(run("fn.any.banana 'f' [any 'x'] { give ['x']; }\nSTART { }\n").code(0) ==
+        "E0202");
 
   // And it names the type even when the word at fault is nowhere near it.
   const Parsed far = inStart("var.banana.int64 'n' = [*1*];");

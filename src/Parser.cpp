@@ -30,6 +30,17 @@ bool isUnsettled(std::string_view word) {
 // question at all — `var.banana.int64`, `var.arr.int64` — is refused where it
 // stands, rather than being read past on the way to the type.
 
+// The words a blank may be narrowed with, kept here rather than reached for
+// across the wall: this reader needs to know the shape `any.number` makes, and
+// nothing else about what the words mean.
+bool namesAFamily(std::string_view word) {
+  for (const char *known : {"number", "int", "uint", "bin", "deci", "str", "bool",
+                            "many", "or-nothing", "struct"})
+    if (word == known)
+      return true;
+  return false;
+}
+
 enum class Slot {
   Unknown,
   Kind,       // var, fn, const, loop
@@ -266,6 +277,15 @@ private:
     // chain — it says the name holds several of what comes after it — so the
     // run of `many`s in front of the type is part of the type region too.
     std::size_t upTo = role.endsInType ? (last > 0 ? last - 1 : 0) : last;
+    // `any.number` is one type region rather than a type with a stray word in
+    // front of it: the blank says what it will take, and the word saying so
+    // stands nearest the name. Knowing this shape is the same kind of knowledge
+    // as knowing `many` and `or-nothing`, which this reader already has —
+    // whether `number` means anything is still the checker's question.
+    if (role.endsInType && upTo > 0 && !c.segments[upTo].isName &&
+        !c.segments[upTo - 1].isName && c.segments[upTo - 1].text == "any" &&
+        namesAFamily(c.segments[upTo].text))
+      --upTo;
     std::size_t deep = 0;
     while (upTo > 0 && !c.segments[upTo - 1].isName &&
            c.segments[upTo - 1].text == "many") {

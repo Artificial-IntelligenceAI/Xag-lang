@@ -167,7 +167,33 @@ write. With it:
 
 ```text
 `point` is not a number, and `largest` asks for one.
+
+  15 |     print.stdout[str:*pts = * (largest[loan 'pts']) \n];
+     |                                        ^^^^^^^^^^ here
 ```
+
+**Built 2026-09-09.** Three things had to know about it, and nothing else did:
+
+- The chain reader takes `any.number` as **one type region**, the way it already
+  takes `many.int64` — the blank, and the word saying what it will take standing
+  nearest the name. It is told the shape and nothing more; whether `number` means
+  anything is still the checker's question.
+- The checker carries the family on the blank (`Ty::asks`) and asks it **at the
+  call that fills the blank in** — the one place where the caller and the type
+  they brought are both in view. That is the whole of what the word buys.
+- Filling a blank in **takes the word with it**. `any.number` at `int64` is
+  `int64`, not `int64.number`: the question has been answered, and the word
+  asking it has nothing left to say.
+
+A refused call answers an unknown rather than the blank it could not fill, so
+everything built on it folds underneath the refusal instead of being reported as
+news of its own.
+
+**`loan` and `loanmut` are not constraint words**, though they are `is` words.
+How a thing is held is a question the chain already asks — `loan.any 'x'` says
+it — and a second way of saying one thing is a second thing to keep true. The
+two lists are near-identical rather than identical, and the ten that are shared
+are the ones that name a **type**.
 
 Bare `any` stays the floor: it takes anything, and what can be done with it is
 what can be done with every type — hold it, move it, lend it, hand it back.

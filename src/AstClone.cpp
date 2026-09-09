@@ -1,5 +1,7 @@
 #include "xag/AstClone.h"
 
+#include "xag/Check.h"
+
 namespace xag {
 
 ExprPtr clone(const ExprPtr &expr) {
@@ -97,11 +99,23 @@ namespace {
 
 unsigned fillChain(Chain &chain, std::string_view spelled) {
   unsigned filled = 0;
-  for (ChainSegment &seg : chain.segments)
-    if (!seg.isName && seg.text == "any") {
-      seg.text = std::string(spelled);
-      ++filled;
+  for (std::size_t i = 0; i < chain.segments.size(); ++i) {
+    ChainSegment &seg = chain.segments[i];
+    if (seg.isName || seg.text != "any")
+      continue;
+    seg.text = std::string(spelled);
+    ++filled;
+    // What the blank asked for goes with it. `any.number` filled in at `int64`
+    // is `int64`, not `int64.number` — the question has been answered, and the
+    // word asking it has nothing left to say. Leaving it behind wrote out a
+    // chain the checker then refused, naming a word the reader never typed
+    // beside that type.
+    if (i + 1 < chain.segments.size() && !chain.segments[i + 1].isName &&
+        namesFamily(chain.segments[i + 1].text)) {
+      seg.span.end = chain.segments[i + 1].span.end;
+      chain.segments.erase(chain.segments.begin() + static_cast<long>(i) + 1);
     }
+  }
   return filled;
 }
 
