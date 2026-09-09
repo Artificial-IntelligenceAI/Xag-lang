@@ -208,7 +208,32 @@ void lendingAFieldLendsTheStruct() {
 
 } // namespace
 
+// A struct may hold a borrow, and then it is holding the loan too — for as long
+// as the struct lives, rather than until the statement that built it ends.
+void aStructHoldingALoanIsHoldingTheLoan() {
+  SHAPED_REFUSES("struct 'keeps' [loan.str 's']\n",
+                 "var.str 's' = [*hi*];\n"
+                 "    var.keeps 'k' = [loan 's'];\n"
+                 "    keep[move 's'];\n"
+                 "    print.stdout['k'.s \\n];",
+                 "E0408");
+  // Deeper, through a struct that holds the one that holds it.
+  SHAPED_REFUSES("struct 'inner' [loan.str 's']\nstruct 'outer' [inner 'i']\n",
+                 "var.str 's' = [*hi*];\n"
+                 "    var.outer 'o' = [inner[loan 's']];\n"
+                 "    keep[move 's'];\n"
+                 "    print.stdout['o'.i.s \\n];",
+                 "E0408");
+  // And a struct holding nothing borrowed is holding no loan, so what it was
+  // built from may go where it likes.
+  SHAPED_HOLDS("struct 'plain' [str 's', int64 'n']\n",
+               "var.str 's' = [*hi*];\n"
+               "    var.plain 'p' = [move 's' *1*];\n"
+               "    print.stdout['p'.n \\n];");
+}
+
 int main() {
+  aStructHoldingALoanIsHoldingTheLoan();
   aLoanEndsWhenNobodyIsHoldingIt();
   aNumberIsNotHoldingALoan();
   aLoanHeldInANameLastsWhileItIsLookedAt();

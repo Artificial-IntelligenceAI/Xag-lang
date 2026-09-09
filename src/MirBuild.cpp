@@ -743,7 +743,9 @@ private:
       // where the fields are known, so nothing further down reads a name.
       if (!s.fields.empty()) {
         std::vector<unsigned> parts;
+        std::vector<std::string> along; // what each step is, in the order taken
         std::string held = withoutLoan(body_.types[body_.locals[*local].type.index]);
+        std::string lent; // how the last step is held, which the type word omits
         for (const std::string &field : s.fields) {
           const Shape *shape = shapeOf(held);
           if (!shape)
@@ -752,9 +754,42 @@ private:
             if (shape->fields[i].name == field) {
               parts.push_back(i);
               held = spell(shape->fields[i].type);
+              lent = lentAs(shape->fields[i].type);
+              // Every step is reached by lending it where it stands; the last
+              // one is lent the way the struct says it holds it.
+              along.push_back(lent.empty() ? "loan " + held : lent + held);
               break;
             }
         }
+
+        // A field that is a borrow holds the pointer, so writing to it means
+        // writing through it — putting the value into the field's own slot
+        // would put a number where an address goes, which is what happened:
+        // the compiler took it, the struct was quietly wrecked, and every
+        // engine agreed that the thing being written to had not changed.
+        //
+        // Read out and written through, which is the shape a borrowed name
+        // already takes and both backends already know.
+        if (!parts.empty() && parts.size() == along.size() && !lent.empty()) {
+          unsigned at = *local;
+          for (unsigned step = 0; step < parts.size(); ++step) {
+            const unsigned into = temporary(typeRef(along[step]), false);
+            emit(Statement{StatementKind::Assign, s.span, into, {}, {},
+                           RValue{RValueKind::Part, s.fields[step], {}, parts[step],
+                                  {Operand{OperandKind::Copy, at, {},
+                                           body_.locals[at].type}},
+                                  typeRef(along[step])}});
+            at = into;
+          }
+          Operand through = s.value.values.empty()
+                                ? Operand{OperandKind::Written, 0, "", typeRef(held)}
+                                : valueOperand(s.value.values[0]);
+          const TypeRef what = through.type;
+          emit(Statement{StatementKind::Assign, s.span, at, {}, {},
+                         RValue{RValueKind::Use, {}, {}, 0, {std::move(through)}, what}});
+          break;
+        }
+
         Operand what = s.value.values.empty()
                            ? Operand{OperandKind::Written, 0, "", typeRef(held)}
                            : valueOperand(s.value.values[0]);

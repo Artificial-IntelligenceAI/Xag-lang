@@ -132,11 +132,19 @@ public:
     for (const Item &item : program_.items)
       if (item.kind == ItemKind::Struct) {
         std::vector<std::pair<std::string, std::string>> fields;
-        for (const Param &field : item.params)
+        std::vector<std::pair<std::string, const Chain *>> written;
+        for (const Param &field : item.params) {
           fields.emplace_back(field.name, holdsMany(field.chain)
                                               ? std::string("many")
                                               : field.chain.type().text);
+          // The chain itself, because the type word alone does not say how the
+          // thing is held — and a field that is a borrow was being read here as
+          // one held outright, so nothing refused writing through it or taking
+          // it out.
+          written.emplace_back(field.name, &field.chain);
+        }
         shapes_[item.name] = std::move(fields);
+        partChains_[item.name] = std::move(written);
       }
     for (const Item &item : program_.items)
       if (item.kind == ItemKind::Const)
@@ -160,6 +168,10 @@ private:
   // that one's question rather than the struct's.
   std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>>
       shapes_;
+  // The same fields, as they were written. The map above keeps only the type
+  // word, which does not say how a thing is held.
+  std::unordered_map<std::string, std::vector<std::pair<std::string, const Chain *>>>
+      partChains_;
   Mode giving_ = Mode::Owned;
   bool givingCopies_ = true;
 
@@ -380,6 +392,21 @@ private:
                              : nullptr;
 
       if (e.text == "move" && inner.kind == ExprKind::Field) {
+        std::vector<std::string> reached;
+        const Expr *root = rootOf(inner, reached);
+        const Binding *of = root ? lookup(root->text) : nullptr;
+        // A struct may hold a borrow, and what is borrowed is not the struct's
+        // to give away — no more than a borrowed name is. This was let through,
+        // and the value went to whoever asked for it while still belonging to
+        // whoever lent it.
+        if (of && heldAs(of->fills, reached) != Mode::Owned) {
+          complain(e.span, "E0404",
+                   "this is borrowed, and a borrow is not yours to give away.",
+                   {"what is lent goes back to whoever lent it"},
+                   {"the struct holding it borrowed it too, and only an owner can hand "
+                    "a value over for good."});
+          return;
+        }
         use(inner, Use::Consume, Mode::Owned, false);
         return;
       }
@@ -502,6 +529,31 @@ private:
     for (const StmtPtr &s : b.stmts)
       statement(*s);
     scopes_.pop_back();
+  }
+
+  // How one of the things a struct holds is held, reached by the path written.
+  // `Mode::Owned` when nothing along the way says otherwise, which is also the
+  // answer when the path names something that is not there — the checker has
+  // already said so, and saying it twice helps nobody.
+  Mode heldAs(const std::string &fills, const std::vector<std::string> &path) const {
+    std::string here = fills;
+    Mode held = Mode::Owned;
+    for (const std::string &step : path) {
+      auto found = partChains_.find(here);
+      if (found == partChains_.end())
+        return Mode::Owned;
+      const Chain *chain = nullptr;
+      for (const auto &field : found->second)
+        if (field.first == step) {
+          chain = field.second;
+          break;
+        }
+      if (!chain)
+        return Mode::Owned;
+      held = modeOfChain(*chain);
+      here = holdsMany(*chain) ? std::string("many") : chain->type().text;
+    }
+    return held;
   }
 
   const std::vector<std::pair<std::string, std::string>> *
@@ -652,6 +704,17 @@ private:
       // them is meant is known where it is written, so what may go in is asked
       // of the field rather than of the struct around it.
       if (binding && !s.fields.empty()) {
+        // A loan gives away no more than the lender had, and a field lent for
+        // reading was being written through: the compiler took it, and then
+        // every engine agreed that nothing happened. Silence three ways is the
+        // one thing running a program twice cannot find.
+        if (const Mode held = heldAs(binding->fills, s.fields); held == Mode::Ref)
+          complain(s.nameSpan, "E0407",
+                   "`'" + s.name + "'." + s.fields.front() +
+                       "` was lent for reading, and cannot be written through.",
+                   {"a loan gives away no more than the lender had"},
+                   {"`loanmut` is the word for a borrow that may be written through, "
+                    "and this field says `loan`."});
         consumeInto(s.value, Mode::Owned, partCopies(binding->fills, s.fields));
         break;
       }

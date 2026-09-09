@@ -22,7 +22,8 @@ using Holds = std::vector<std::vector<char>>;
 
 class Reader {
 public:
-  Reader(const Body &body, RegionResult &result) : body_(body), result_(result) {}
+  Reader(const Body &body, const std::vector<Shape> &shapes, RegionResult &result)
+      : body_(body), shapes_(shapes), result_(result) {}
 
   void run() {
     if (body_.blocks.empty())
@@ -38,6 +39,7 @@ public:
 
 private:
   const Body &body_;
+  const std::vector<Shape> &shapes_;
   RegionResult &result_;
   std::vector<Loan> loans_;
   std::vector<std::vector<unsigned>> after_;  // successors
@@ -106,13 +108,44 @@ private:
           after_[block.id].push_back(target);
   }
 
+  // Whether one of the things a struct holds is a borrow, or one of the things
+  // one of those holds is, however deep. A `many` of them is the same question:
+  // what is inside is what the places hold.
+  bool carriesALoan(Ty type, unsigned depth) const {
+    if (type.held != Held::Owned)
+      return true;
+    if (depth > 4)
+      return false;
+    if (type.kind != Type::Struct && type.element != Type::Struct)
+      return false;
+    if (type.named >= shapes_.size())
+      return false;
+    for (const Field &field : shapes_[type.named].fields)
+      if (carriesALoan(field.type, depth + 1))
+        return true;
+    return false;
+  }
+
   bool canHold(unsigned local) const {
     if (local >= body_.locals.size())
       return false;
     const TypeRef type = body_.locals[local].type;
     if (type.index >= body_.types.size())
       return false;
-    return body_.typed[type.index].isLoan();
+    const MirType &held = body_.typed[type.index];
+    if (held.isLoan())
+      return true;
+    // A struct holding a borrow holds the loan for as long as it lives. Reading
+    // it as holding nothing let the loan die where the struct was built, so
+    // what it borrowed from could be handed away underneath it and read back
+    // out afterwards — accepted, and every engine agreed on the answer, which
+    // is the one thing running a program twice cannot find.
+    if (held.held != Type::Struct || held.named >= shapes_.size())
+      return false;
+    for (const Field &field : shapes_[held.named].fields)
+      if (carriesALoan(field.type, 1))
+        return true;
+    return false;
   }
 
   // What a statement leaves each local holding.
@@ -343,7 +376,7 @@ RegionResult regions(const Source &source, const Mir &mir) {
   (void)source;
   RegionResult result;
   for (const Body &body : mir.bodies)
-    Reader(body, result).run();
+    Reader(body, mir.shapes, result).run();
   return result;
 }
 
