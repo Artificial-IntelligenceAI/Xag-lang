@@ -47,9 +47,15 @@ unsigned prune(Program &program, const CheckResult &checked);
 // It cannot be a loop: what a field holds is a different type on every turn, so
 // there is no one body to build and run several times. It is several bodies.
 //
+// A turn is a real value with a real type — a struct of a `str` called `name`
+// and a borrow of what the field holds, called `value` — declared at the top of
+// its own copy of the body. So `'part'.name` and `'part'.value` are ordinary
+// field reads, and the turn can be handed about like anything else. The struct
+// for each field is written into the program beside the walk.
+//
 // Done in the same rounds as expansion, because a `loop.parts` inside a generic
 // is not read until that generic has been written out at a real type — and only
-// then is there a struct to walk. Answers how many were written out.
+// then is there a struct to walk. Answers how many turns were written out.
 unsigned unroll(Program &program, const CheckResult &checked);
 
 } // namespace xag

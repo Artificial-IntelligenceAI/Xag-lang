@@ -1370,15 +1370,28 @@ void loopPartsWritesOneCopyPerField() {
   CHECK(checked.ok());
   CHECK(checked.walksParts.size() == 1);
 
-  // Two fields, so the one statement inside becomes two, standing where it
-  // stood — a `loop.parts` is not a scope, it is a body written out twice.
-  CHECK(xag::unroll(parsed.program, checked) == 1);
+  // Two fields, two turns, each standing where the statement stood — a
+  // `loop.parts` is not a scope, it is a body written out once per field.
+  CHECK(xag::unroll(parsed.program, checked) == 2);
   for (const xag::Item &item : parsed.program.items)
     if (item.name == "show") {
-      CHECK(item.body.stmts.size() == 4); // var, set, set, give
+      // var, then (declare the turn, set) twice, then give.
+      CHECK(item.body.stmts.size() == 6);
       for (const xag::StmtPtr &st : item.body.stmts)
         CHECK(st->kind != xag::StmtKind::LoopParts);
     }
+  // And a struct for each field, written in beside the walk.
+  std::set<std::string> made;
+  for (const xag::Item &item : parsed.program.items)
+    if (item.kind == xag::ItemKind::Struct)
+      made.insert(item.name);
+  CHECK(made.count("part$point$x") == 1);
+  CHECK(made.count("part$point$y") == 1);
+  // `$` between the two, never a dot: a type is spelled with dots, and a blank
+  // filled in with one of these is written back into a chain by splitting on
+  // them — `part$point.x` came back as a `part$point` holding an `x`.
+  for (const std::string &one : made)
+    CHECK(one.find('.') == std::string::npos);
   // And what stands there now reads clean, with `'part'` nowhere in it.
   CHECK(xag::check(source, parsed.program).ok());
 
@@ -1390,15 +1403,26 @@ void loopPartsWritesOneCopyPerField() {
             "}\n")
             .code(0) == "E0544");
 
-  // A turn hands over the field, and the turn itself is a value whose type
-  // differs every time — there is nowhere yet to build one.
-  CHECK(run("struct 'p' [int64 'x']\n"
-            "fn.int64 'takes' [any 'v'] { give [*0*]; }\n"
-            "START {\n"
-            "    var.p 'v' = [*1*];\n"
-            "    loop.parts 'part' = ['v'] { print.stdout[takes['part'] \\n]; }\n"
-            "}\n")
-            .code(0) == "E0545");
+  // The turn is a value of its own, so it can be handed about like anything
+  // else — including to a generic that has never seen the struct it came from.
+  const Checked handed = run(
+      "struct 'point' [int64 'x', int64 'y']\n"
+      "fn.str 'label' [loan.any 'part'] {\n"
+      "    give ['part'.name str:*=* (convert-to-str['part'.value])];\n"
+      "}\n"
+      "START {\n"
+      "    var.point 'p' = [*20* *22*];\n"
+      "    var.mut.str 'out' = [str:**];\n"
+      "    loop.parts 'part' = ['p'] {\n"
+      "        set 'out' = ['out' (label[loan 'part']) str:* *];\n"
+      "    }\n"
+      "    print.stdout['out' \\n];\n"
+      "}\n");
+  CHECK(handed.checked.ok());
+  // What a body carried into the program without being read still changes is
+  // noted: `W0003` said `'out'` never changes, two lines above `set 'out'`.
+  for (const xag::Diagnostic &one : handed.checked.diagnostics)
+    CHECK(one.code != "W0003");
 }
 
 int main() {

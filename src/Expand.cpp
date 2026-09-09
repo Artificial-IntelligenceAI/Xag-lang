@@ -163,105 +163,188 @@ void pruneBlock(Block &block, const CheckResult &checked, unsigned &done) {
 
 namespace {
 
-// `'part'.name` becomes the field's name written out as text, and
-// `'part'.value` becomes that field of the thing being walked. Anything else
-// naming the turn was refused where it was written, so nothing else can be here.
+// A turn is a real value with a real type: a struct of a `str` called `name` and
+// whatever the field holds, called `value`. So each turn declares one, and
+// `'part'.name` and `'part'.value` are then ordinary field reads — nothing
+// special anywhere, and the turn can be handed about like anything else.
 //
-// Every expression is reached through the slot holding it, because the thing
-// being replaced is often the whole of one — `convert-to-str['part'.value]` has
-// it standing alone as an argument. Walking children alone missed exactly those.
-void writeInTheField(ExprPtr &slot, const std::string &part, const std::string &field,
-                     const ExprPtr &walking);
+// Writing the two reads in directly was tried first and does less: it cannot
+// hand the turn over, because there is nothing to hand.
 
-void writeInTheField(ValueList &list, const std::string &part,
-                     const std::string &field, const ExprPtr &walking) {
+// Every turn declares its own, because the turns stand side by side in one
+// scope rather than each in a block of its own — two turns declaring `'part'`
+// would be one name declared twice. `$` is not a word character, so nothing a
+// reader writes can collide.
+std::string turnCalled(unsigned which) {
+  return "part$" + std::to_string(which);
+}
+
+void renameTheTurn(Expr *e, const std::string &from, const std::string &to);
+
+void renameTheTurn(ValueList &list, const std::string &from, const std::string &to) {
   for (Value &value : list.values)
     for (ExprPtr &item : value.items)
-      writeInTheField(item, part, field, walking);
+      renameTheTurn(item.get(), from, to);
 }
 
-bool namesTheTurn(const ExprPtr &e, const std::string &part) {
-  return e && e->kind == ExprKind::Field && !e->children.empty() &&
-         e->children[0] && e->children[0]->kind == ExprKind::Name &&
-         e->children[0]->text == part;
-}
-
-void writeInTheField(ExprPtr &slot, const std::string &part, const std::string &field,
-                     const ExprPtr &walking) {
-  if (!slot)
+void renameTheTurn(Expr *e, const std::string &from, const std::string &to) {
+  if (!e)
     return;
-  if (namesTheTurn(slot, part)) {
-    const Span at = slot->span;
-    if (slot->text == "name") {
-      // `str:*x*` — the field's name, as text, which is what it is.
-      auto written = std::make_unique<Expr>();
-      written->kind = ExprKind::Written;
-      written->span = at;
-      written->text = field;
-      auto typed = std::make_unique<Expr>();
-      typed->kind = ExprKind::Typed;
-      typed->span = at;
-      typed->text = "str";
-      typed->children.push_back(std::move(written));
-      slot = std::move(typed);
-      return;
-    }
-    if (slot->text == "value") {
-      // `'p'.thatField`, reached where it stands — so it copies, moves and
-      // borrows exactly as it would had the reader written it out themselves.
-      auto reach = std::make_unique<Expr>();
-      reach->kind = ExprKind::Field;
-      reach->span = at;
-      reach->text = field;
-      reach->children.push_back(clone(walking));
-      slot = std::move(reach);
-      return;
-    }
-  }
-  for (ExprPtr &child : slot->children)
-    writeInTheField(child, part, field, walking);
-  writeInTheField(slot->args, part, field, walking);
+  if (e->kind == ExprKind::Name && e->text == from)
+    e->text = to;
+  for (ExprPtr &child : e->children)
+    renameTheTurn(child.get(), from, to);
+  renameTheTurn(e->args, from, to);
 }
 
-void writeInTheField(Block &block, const std::string &part, const std::string &field,
-                     const ExprPtr &walking);
+void renameTheTurn(Block &block, const std::string &from, const std::string &to);
 
-void writeInTheField(Stmt &s, const std::string &part, const std::string &field,
-                     const ExprPtr &walking) {
-  writeInTheField(s.index, part, field, walking);
-  writeInTheField(s.value, part, field, walking);
-  writeInTheField(s.condition, part, field, walking);
-  writeInTheField(s.call, part, field, walking);
+void renameTheTurn(Stmt &s, const std::string &from, const std::string &to) {
+  if (s.name == from)
+    s.name = to;
+  renameTheTurn(s.index.get(), from, to);
+  renameTheTurn(s.value, from, to);
+  renameTheTurn(s.condition.get(), from, to);
+  renameTheTurn(s.call.get(), from, to);
   for (Branch &branch : s.branches) {
-    writeInTheField(branch.condition, part, field, walking);
-    writeInTheField(branch.body, part, field, walking);
+    renameTheTurn(branch.condition.get(), from, to);
+    renameTheTurn(branch.body, from, to);
   }
-  writeInTheField(s.body, part, field, walking);
+  renameTheTurn(s.body, from, to);
 }
 
-void writeInTheField(Block &block, const std::string &part, const std::string &field,
-                     const ExprPtr &walking) {
-  for (StmtPtr &s : block.stmts)
-    if (s)
-      writeInTheField(*s, part, field, walking);
+void renameTheTurn(Block &block, const std::string &from, const std::string &to) {
+  for (StmtPtr &st : block.stmts)
+    if (st)
+      renameTheTurn(*st, from, to);
 }
 
-void unrollBlock(Block &block, const CheckResult &checked, unsigned &done);
+ChainSegment word(Span at, std::string text) {
+  return ChainSegment{at, std::move(text), false};
+}
 
-void unrollStmt(Stmt &s, const CheckResult &checked, unsigned &done) {
+// What a turn of this field looks like: `[str 'name', loan.T 'value']`.
+//
+// `value` is lent rather than held, because the thing being walked keeps its
+// places — taking one out would leave a hole, and there is no taking anything
+// out of something only borrowed in the first place.
+std::string partStructFor(const Program &program, std::vector<Item> &making,
+                          const std::string &shapeName, const Param &field, Span at) {
+  // `$` between, not a dot: a type is spelled with dots, and a blank filled in
+  // with one of these is written back into a chain by splitting on them. A turn
+  // called `part$point.x` came back as `part$point` holding an `x`.
+  const std::string name = "part$" + shapeName + "$" + field.name;
+  for (const Item &item : program.items)
+    if (item.name == name)
+      return name; // One per field, however many walks reach it.
+  for (const Item &item : making)
+    if (item.name == name)
+      return name;
+
+  Item made;
+  made.kind = ItemKind::Struct;
+  made.span = at;
+  made.nameSpan = at;
+  made.name = name;
+
+  Param called;
+  called.span = at;
+  called.nameSpan = at;
+  called.name = "name";
+  called.chain.span = at;
+  called.chain.segments.push_back(word(at, "str"));
+  made.params.push_back(std::move(called));
+
+  Param holds;
+  holds.span = at;
+  holds.nameSpan = at;
+  holds.name = "value";
+  holds.chain.span = at;
+  bool alreadyLent = false;
+  for (const ChainSegment &seg : field.chain.segments)
+    alreadyLent = alreadyLent || (!seg.isName && (seg.text == "loan" ||
+                                                  seg.text == "loanmut"));
+  if (!alreadyLent)
+    holds.chain.segments.push_back(word(at, "loan"));
+  for (const ChainSegment &seg : field.chain.segments)
+    holds.chain.segments.push_back(ChainSegment{at, seg.text, seg.isName});
+  made.params.push_back(std::move(holds));
+
+  making.push_back(std::move(made));
+  return name;
+}
+
+// `var.<that struct> 'part$N' = [str:*field* loan <what is walked>.<field>];`
+StmtPtr declareTheTurn(const std::string &partStruct, const std::string &called,
+                       const std::string &field, const ExprPtr &walking, Span at) {
+  auto s = std::make_unique<Stmt>();
+  s->kind = StmtKind::Declare;
+  s->span = at;
+  s->nameSpan = at;
+  s->name = called;
+  s->chain.span = at;
+  s->chain.segments.push_back(word(at, "var"));
+  s->chain.segments.push_back(word(at, partStruct));
+
+  auto written = std::make_unique<Expr>();
+  written->kind = ExprKind::Written;
+  written->span = at;
+  written->text = field;
+  auto asText = std::make_unique<Expr>();
+  asText->kind = ExprKind::Typed;
+  asText->span = at;
+  asText->text = "str";
+  asText->children.push_back(std::move(written));
+
+  auto reach = std::make_unique<Expr>();
+  reach->kind = ExprKind::Field;
+  reach->span = at;
+  reach->text = field;
+  reach->children.push_back(clone(walking));
+  auto lend = std::make_unique<Expr>();
+  lend->kind = ExprKind::Borrow;
+  lend->span = at;
+  lend->text = "loan";
+  lend->children.push_back(std::move(reach));
+
+  Value one;
+  one.span = at;
+  one.items.push_back(std::move(asText));
+  one.items.push_back(std::move(lend));
+  s->value.span = at;
+  s->value.values.push_back(std::move(one));
+  return s;
+}
+
+void unrollBlock(const Program &program, std::vector<Item> &making, Block &block,
+                 const CheckResult &checked, unsigned &done);
+
+void unrollStmt(const Program &program, std::vector<Item> &making, Stmt &s,
+                const CheckResult &checked, unsigned &done) {
   for (Branch &branch : s.branches)
-    unrollBlock(branch.body, checked, done);
-  unrollBlock(s.body, checked, done);
+    unrollBlock(program, making, branch.body, checked, done);
+  unrollBlock(program, making, s.body, checked, done);
 }
 
-void unrollBlock(Block &block, const CheckResult &checked, unsigned &done) {
+// The fields of a struct as they were written, which is where the type of each
+// one is spelled. The checker's own record holds types rather than chains, and a
+// chain is what has to be written into a turn's declaration.
+const Item *structWritten(const Program &program, const std::string &name) {
+  for (const Item &item : program.items)
+    if (item.kind == ItemKind::Struct && item.name == name)
+      return &item;
+  return nullptr;
+}
+
+void unrollBlock(const Program &program, std::vector<Item> &making, Block &block,
+                 const CheckResult &checked, unsigned &done) {
   std::vector<StmtPtr> kept;
   kept.reserve(block.stmts.size());
   for (StmtPtr &s : block.stmts) {
     if (!s)
       continue;
     if (s->kind != StmtKind::LoopParts) {
-      unrollStmt(*s, checked, done);
+      unrollStmt(program, making, *s, checked, done);
       kept.push_back(std::move(s));
       continue;
     }
@@ -271,20 +354,42 @@ void unrollBlock(Block &block, const CheckResult &checked, unsigned &done) {
       kept.push_back(std::move(s)); // Never reached, so never worked out.
       continue;
     }
-    const Shape &shape = checked.shapes[walks->second];
+    const Item *written = structWritten(program, checked.shapes[walks->second].name);
+    if (!written) {
+      kept.push_back(std::move(s));
+      continue;
+    }
+    // Taken out whole before anything else is written. Each turn writes its own
+    // struct into this same list, and a reference into a list that grows is a
+    // reference to wherever it used to be.
+    const std::string shapeName = written->name;
+    std::vector<Param> fields;
+    for (const Param &field : written->params) {
+      Param one;
+      one.span = field.span;
+      one.nameSpan = field.nameSpan;
+      one.name = field.name;
+      one.chain = field.chain;
+      fields.push_back(std::move(one));
+    }
     const ExprPtr &walking = s->value.values[0].items[0];
     // One copy of the body per field, in the order the struct was written in.
     // Not a scope of its own: the turns stand where the statement stood, the
     // same way a `whichever`'s arm does, because this is not a loop and there
-    // is nothing to be inside.
-    for (const Field &field : shape.fields) {
+    // is nothing to be inside. Which is exactly why each turn's own name for the
+    // field has to differ from the last one's — they stand side by side in one
+    // scope, and one name declared twice is one name declared twice.
+    for (const Param &field : fields) {
+      const std::string partStruct = partStructFor(program, making, shapeName, field, s->span);
+      const std::string called = turnCalled(done);
       Block turn = clone(s->body);
-      writeInTheField(turn, s->name, field.name, walking);
+      renameTheTurn(turn, s->name, called);
+      kept.push_back(declareTheTurn(partStruct, called, field.name, walking, s->span));
       for (StmtPtr &inner : turn.stmts)
         if (inner)
           kept.push_back(std::move(inner));
+      ++done;
     }
-    ++done;
   }
   block.stmts = std::move(kept);
 }
@@ -293,8 +398,15 @@ void unrollBlock(Block &block, const CheckResult &checked, unsigned &done) {
 
 unsigned unroll(Program &program, const CheckResult &checked) {
   unsigned done = 0;
+  // The turns' own structs are gathered aside and written in at the end. Adding
+  // them as they were found grew the very list being walked, and the block being
+  // walked was a reference into it — so a struct with two fields wrote the first
+  // turn out and then read freed memory looking for the second.
+  std::vector<Item> making;
   for (Item &item : program.items)
-    unrollBlock(item.body, checked, done);
+    unrollBlock(program, making, item.body, checked, done);
+  for (Item &made : making)
+    program.items.push_back(std::move(made));
   return done;
 }
 

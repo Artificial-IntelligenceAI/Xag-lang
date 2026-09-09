@@ -488,12 +488,36 @@ field, and the copies stand where the statement stood — the same as a
 `whichever`'s arm, and for the same reason: what a field holds is a different
 type on every turn, so there is no one body to build and run several times.
 
-**A turn is written in, not built.** `'part'.name` becomes the field's name as
-text and `'part'.value` becomes that field of the thing being walked, reached
-where it stands — so it copies, moves and borrows exactly as it would had the
-reader written `'p'.x` themselves. Anything else naming the turn is `E0545`: a
-value whose type differs every turn would have to be built somewhere, and there
-is nowhere yet. That is the one part of this document not built.
+**A turn is a real value with a real type**, as this document said it should be:
+a struct of a `str` called `name` and what the field holds, called `value`,
+declared at the top of its own copy of the body. So `'part'.name` and
+`'part'.value` are ordinary field reads, and the turn can be handed about like
+anything else:
+
+```
+fn.str 'label' [loan.any 'part'] {
+    give ['part'.name str:*=* (convert-to-str['part'.value])];
+}
+```
+
+`label` is a generic that has never seen `point`, handed a turn of one.
+
+Three things it needed:
+
+- **`value` is lent, not held.** The thing being walked keeps its places —
+  taking one out would leave a hole, and there is no taking anything out of
+  something borrowed in the first place.
+- **Each turn names its own.** The turns stand side by side in one scope, so two
+  of them both called `'part'` would be one name declared twice. Each is
+  `part$0`, `part$1`, and every mention inside that turn is renamed with it.
+- **The struct is written into the program**, one per field of each struct
+  walked, called `part$point$x`. With a **`$`** between and never a dot: a type
+  is spelled with dots, and a blank filled in with one of these is written back
+  into a chain by splitting on them — `part$point.x` came back as a `part$point`
+  holding an `x`.
+
+Writing the two reads in directly was built first and does less: it cannot hand
+the turn over, because there is nothing to hand.
 
 `E0544` for walking anything but a struct.
 
