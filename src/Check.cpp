@@ -20,6 +20,7 @@ struct Named {
 // type, spelling one, and asking how wide one is cannot drift apart.
 constexpr Named kTypes[] = {
     {"nothing", Type::Nothing, 0}, {"bool", Type::Bool, 0}, {"str", Type::Str, 0},
+    {"any", Type::Blank, 0},
     {"int8", Type::Int8, 8},       {"int16", Type::Int16, 16},
     {"int32", Type::Int32, 32},    {"int64", Type::Int64, 64},
     {"int128", Type::Int128, 128}, {"uint8", Type::Uint8, 8},
@@ -808,6 +809,12 @@ private:
     const Ty got = exprKind(e, expected);
     result_.expressions[&e] = got;
     return got;
+  }
+
+  // Whether a blank is anywhere in this type: `any`, or `many.any`, or one that
+  // may hold nothing.
+  static bool hasBlank(Ty type) {
+    return type.kind == Type::Blank || type.element == Type::Blank;
   }
 
   Ty exprKind(const Expr &e, Ty expected) {
@@ -1765,9 +1772,22 @@ private:
       for (const Param &param : item.params)
         declare(param.name, Symbol{typeOfChain(param.chain), changeable(param.chain),
                                    param.nameSpan});
+      // A generic's body is not read with the blank still in it. Almost nothing
+      // in it would hold: reaching into a `many.any` looks like taking a value
+      // that does not copy out of a place that must hold one, because whether
+      // it copies is exactly what the blank has not said yet. The body is read
+      // once per type it is called with, after the blank is filled, and that is
+      // where its mistakes are found.
+      const bool generic = hasBlank(giving_) || [&] {
+        for (const Param &param : item.params)
+          if (hasBlank(typeOfChain(param.chain)))
+            return true;
+        return false;
+      }();
       for (const StmtPtr &s : item.body.stmts)
-        statement(*s);
-      if (giving_ != Type::Nothing && giving_ != Type::Unknown &&
+        if (!generic)
+          statement(*s);
+      if (!generic && giving_ != Type::Nothing && giving_ != Type::Unknown &&
           !alwaysGives(item.body))
         complain(item.nameSpan, "E0513",
                  "`" + item.name + "` answers a `" + std::string(name(giving_)) +

@@ -794,9 +794,32 @@ private:
 
   // ---- items
 
+  // Whether a chain still has a blank in it — `any`, written where a type goes.
+  static bool hasBlank(const Chain &chain) {
+    for (const ChainSegment &seg : chain.segments)
+      if (!seg.isName && seg.text == "any")
+        return true;
+    return false;
+  }
+
   void body(const Item &item) {
     if (item.kind == ItemKind::Const)
       return;
+
+    // A generic's body is not read with the blank still in it, for the same
+    // reason the checker will not: whether a thing copies or is handed over is
+    // exactly what the blank has not said yet, and this pass asks that of
+    // everything. Reaching into a `many.any` looked like taking a value out and
+    // leaving a hole, when for a `many.int64` it is a copy and nothing moves.
+    // The body is read once per type it is called with, after the blank is
+    // filled.
+    if (item.kind == ItemKind::Function) {
+      if (hasBlank(item.chain))
+        return;
+      for (const Param &param : item.params)
+        if (hasBlank(param.chain))
+          return;
+    }
 
     scopes_.emplace_back();
     if (item.kind == ItemKind::Function) {

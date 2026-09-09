@@ -30,6 +30,11 @@ enum class Type {
   Deci32, Deci64, Deci128,
   Many,   // several of one type, however many were there when it was made
   Struct, // a group of named things, each with a type of its own
+  // A blank, written `any`: the type is the caller's to pick, and every `any` in
+  // one signature is the same one. It never reaches the middle layer — a
+  // generic is written once and built once per type it is called with, so what
+  // gets compiled has no blanks left in it.
+  Blank,
 };
 
 const char *name(Type type);
@@ -155,6 +160,11 @@ struct CheckResult {
   // say it is meant to. So a run says nothing about it, and the language having
   // no way to say it is the open question rather than the reader's problem.
   std::vector<Span> intoPlainNames;
+
+  // Which generic was called with what, in the order they were first met. The
+  // spelling rather than the type, because filling a blank in writes a word into
+  // a chain. One entry per pair however often it is called.
+  std::vector<std::pair<std::string, std::string>> instantiations;
 
   // The most times any counted loop in this file goes round, where both its
   // ends are written down. Free to work out — the number is already computed to

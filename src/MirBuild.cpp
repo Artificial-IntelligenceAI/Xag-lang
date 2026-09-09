@@ -72,6 +72,18 @@ public:
       // at the end though nobody had ever handed them over.
       if (item.kind == ItemKind::Struct)
         continue;
+
+      // A generic is not lowered with the blank still in it. There is no code to
+      // write for `any`: how wide it is, whether it copies, and what an
+      // instruction on it means are all the thing the blank has not said. What
+      // came out was a module LLVM would not have — a `sext` of a `str`, and a
+      // branch on something that was not a truth — and ITMT caught it rather
+      // than letting it through, which is what ITMT is for.
+      //
+      // A generic reaches here once per type it is called with, blank filled.
+      if (item.kind == ItemKind::Function && hasBlank(item))
+        continue;
+
       body_ = Body{};
       body_.name = item.kind == ItemKind::Start ? "START" : item.name;
       scopes_.clear();
@@ -673,6 +685,22 @@ private:
 
   // A loop whose chain said `no-itmt`, remembered on the block everything jumps
   // back to — which is where a run has to stop.
+  // Whether a blank is still written anywhere in what this declares.
+  static bool hasBlank(const Item &item) {
+    const auto blankIn = [](const Chain &chain) {
+      for (const ChainSegment &seg : chain.segments)
+        if (!seg.isName && seg.text == "any")
+          return true;
+      return false;
+    };
+    if (blankIn(item.chain))
+      return true;
+    for (const Param &param : item.params)
+      if (blankIn(param.chain))
+        return true;
+    return false;
+  }
+
   void markIfToldNotToRun(const Chain &chain, unsigned header) {
     for (const ChainSegment &seg : chain.segments)
       if (!seg.isName && seg.text == "no-itmt")

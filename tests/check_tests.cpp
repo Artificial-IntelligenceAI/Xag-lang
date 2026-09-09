@@ -738,7 +738,32 @@ void aMutThatWasNotNeededIsSaidSo() {
   CHECK(saidIn("var.int64 'n' = [*3*];") == "");
 }
 
+// A generic is written once and built once per type it is called with, so no
+// pass reads its body while the blank is still in it. Almost nothing in one
+// would hold: whether a thing copies, how wide it is, and what an instruction
+// on it means are all exactly what the blank has not said yet.
+void aGenericBodyIsNotReadWithTheBlankInIt() {
+  const std::string generic =
+      "fn.any 'largest' [loan.many.any 'xs'] {\n"
+      "    var.mut.any 'best' = ['xs'[*0*]];\n"
+      "    loop.range.int64 'i' = [*1*, *2*] {\n"
+      "        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }\n"
+      "    }\n"
+      "    give ['best'];\n"
+      "}\n"
+      "START { }\n";
+  // Read with the blank in it, reaching into a `many.any` looks like taking a
+  // value that does not copy out of a place that has to hold one — `E0412` —
+  // when for a `many.int64` it is a copy and nothing moves.
+  CHECK(run(generic).ok());
+
+  // A `fn` with no blank is read as it always was.
+  CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' x *2*]; }\nSTART { }\n").ok());
+  CHECK(run("fn.int64 'twice' [int64 'n'] { }\nSTART { }\n").code(0) == "E0513");
+}
+
 int main() {
+  aGenericBodyIsNotReadWithTheBlankInIt();
   aNameMustBeDeclared();
   aNameIsDeclaredOnce();
   aTypeMustExist();
