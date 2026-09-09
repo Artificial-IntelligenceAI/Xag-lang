@@ -885,10 +885,34 @@ private:
     }
 
     case RValueKind::Group: {
-      auto *shell = typeFor(typing(value.type));
+      const MirType &whole = typing(value.type);
+      auto *shell = typeFor(whole);
       llvm::Value *built = llvm::UndefValue::get(shell);
-      for (unsigned i = 0; i < value.operands.size(); ++i)
-        built = builder_.CreateInsertValue(built, read(value.operands[i]), i);
+      const Shape *shape = whole.held == Type::Struct && whole.named < mir_.shapes.size()
+                               ? &mir_.shapes[whole.named]
+                               : nullptr;
+      for (unsigned i = 0; i < value.operands.size(); ++i) {
+        llvm::Value *item = read(value.operands[i]);
+        // A value going into one of the things a struct holds that may hold
+        // nothing is that value, *held* — the same wrapping a name gets, and
+        // which this was not doing. A `str` was written straight into a field
+        // shaped `{ is it there, what it is }`, and the module came out
+        // ill-formed before anything ran.
+        //
+        // Asked of the type that came back rather than of the type the operand
+        // claims: an absence has already written itself as the pair, and a
+        // value has not.
+        if (shape && item && i < shape->fields.size()) {
+          const MirType field = asMirType(shape->fields[i].type);
+          if (mayBeNothing(field) && !isLoan(field) &&
+              item->getType() != typeFor(field)) {
+            auto *inner = llvm::UndefValue::get(typeFor(field));
+            auto *held = builder_.CreateInsertValue(inner, builder_.getInt1(true), 0);
+            item = builder_.CreateInsertValue(held, item, 1);
+          }
+        }
+        built = builder_.CreateInsertValue(built, item, i);
+      }
       return built;
     }
 
@@ -937,16 +961,28 @@ private:
     }
 
     case RValueKind::Holds: {
-      auto *whole = read(value.operands[0]);
+      // Asking a *borrowed* one whether it holds something reads through the
+      // borrow first. A loan is a pointer, and there is no first field to take
+      // out of a pointer — which is where this fell over rather than refusing.
+      const MirType of = operandType(value.operands[0]);
+      llvm::Value *whole = read(value.operands[0]);
+      if (!whole)
+        return nullptr;
+      if (isLoan(of))
+        whole = builder_.CreateLoad(typeFor(withoutLoan(of)), whole);
       return builder_.CreateExtractValue(whole, 0);
     }
 
     case RValueKind::Inside: {
       // Lent where what is inside has an owner, read out where it has not.
-      const MirType held = within(operandType(value.operands[0]));
-      auto *where = slots_[value.operands[0].local];
-      auto *at = builder_.CreateStructGEP(typeFor(operandType(value.operands[0])),
-                                          where, 1);
+      const MirType of = operandType(value.operands[0]);
+      const MirType held = within(of);
+      // The same again: what is inside a borrowed one is reached through the
+      // borrow, not through the slot holding the borrow.
+      auto *where = isLoan(of) ? builder_.CreateLoad(builder_.getPtrTy(),
+                                                    slots_[value.operands[0].local])
+                               : slots_[value.operands[0].local];
+      auto *at = builder_.CreateStructGEP(typeFor(withoutLoan(of)), where, 1);
       return copiesNamed(held) ? builder_.CreateLoad(typeFor(held), at)
                                : static_cast<llvm::Value *>(at);
     }

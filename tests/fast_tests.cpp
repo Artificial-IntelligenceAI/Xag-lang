@@ -293,6 +293,25 @@ void onTurningNumbersIntoText() {
   AGREE("struct 'holder' [loan.int64 'x']\n"
         "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
         "  print.stdout['h'.x \\n]; }\n");
+  // A struct holding something that may hold nothing. The interpreters ran it
+  // and answered; the module the backend built was ill-formed, because a value
+  // was written straight into a field shaped `{ is it there, what it is }`.
+  AGREE("struct 'holds' [or-nothing.str 'm', int64 'n']\n"
+        "START { var.holds 'g' = [*hi* *2*];\n"
+        "  if 'g'.m holds 'got' { print.stdout['got' str:*|* 'g'.n \\n]; } }\n");
+  // And the absence itself, which writes its own pair and must not be wrapped
+  // a second time.
+  AGREE("struct 'holds' [or-nothing.str 'm', int64 'n']\n"
+        "START { var.holds 'g' = [nothing *2*];\n"
+        "  if 'g'.m holds 'got' { print.stdout['got' \\n]; }\n"
+        "  print.stdout['g'.n \\n]; }\n");
+  // Asking a borrowed one whether it holds something reads through the borrow
+  // first: a loan is a pointer, and a pointer has no first field to take out.
+  AGREE("struct 'holds' [loan.or-nothing.str 'm']\n"
+        "START { var.or-nothing.str 'o' = [*hello*];\n"
+        "  var.holds 'g' = [loan 'o'];\n"
+        "  if 'g'.m holds 'got' { print.stdout['got' \\n]; } }\n");
+
   // A borrowed `str` field, which asks the question the others do not: who
   // ends it. Nobody — a borrow owns nothing, whatever it borrows, and what it
   // points at is still the lender's afterwards. Read as an owned one it was
