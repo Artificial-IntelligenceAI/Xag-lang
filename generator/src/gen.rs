@@ -76,6 +76,12 @@ struct Var {
     /// them. A `many` never stands where its element type would, so everything
     /// that picks a name by type has to look past these.
     many: Option<u32>,
+    /// How many places each of *those* has, when this is a `many` of a `many`.
+    /// Every row the same length, so that reaching into one is safe wherever it
+    /// is reached from — the language allows rows of different lengths, and a
+    /// generated program that indexed the short one would be this file's
+    /// mistake rather than a finding.
+    inner: Option<u32>,
     moved: bool,
     /// Lent out right now. Nothing may be handed over, changed or lent again
     /// while this is set, which is the whole of what the region pass checks.
@@ -328,7 +334,7 @@ impl<'a> Writer<'a> {
             self.out.push_str("' = [");
             self.literal(ty);
             self.out.push_str("];\n");
-            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
+            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None });
         }
         if constants > 0 {
             self.out.push('\n');
@@ -604,6 +610,7 @@ impl<'a> Writer<'a> {
             lent: false,
             group: Some(which),
             parts_moved: Vec::new(),
+            inner: None,
         });
         // `mut` asks for something that then happens, most of the time. This
         // was the largest source of `W0003` by a long way: thirty warnings to
@@ -761,7 +768,7 @@ impl<'a> Writer<'a> {
             self.out.push_str(&param);
             self.out.push('\'');
             params.push(ty);
-            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
+            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None });
         }
         self.out.push_str("] {\n");
         self.indent = 1;
@@ -957,6 +964,7 @@ impl<'a> Writer<'a> {
                     lent: false,
                     group: None,
                     parts_moved: Vec::new(),
+                    inner: None,
                 });
                 return;
             }
@@ -987,6 +995,7 @@ impl<'a> Writer<'a> {
             lent: false,
             group: None,
             parts_moved: Vec::new(),
+            inner: None,
         });
     }
 
@@ -1193,14 +1202,14 @@ impl<'a> Writer<'a> {
     }
 
     /// A `many` that is still whole: nothing moved out of it, nothing lent.
-    fn arrays(&mut self, want_mutable: bool) -> Vec<(String, Ty, u32)> {
+    fn arrays(&mut self, want_mutable: bool) -> Vec<(String, Ty, u32, Option<u32>)> {
         let mut seen = Vec::new();
         for scope in &self.scopes {
             for var in scope {
                 if let Some(length) = var.many {
                     if length > 0 && !var.moved && !var.lent
                         && (!want_mutable || var.mutable) {
-                        seen.push((var.name.clone(), var.ty, length));
+                        seen.push((var.name.clone(), var.ty, length, var.inner));
                     }
                 }
             }
@@ -1208,7 +1217,7 @@ impl<'a> Writer<'a> {
         seen
     }
 
-    fn pick_array(&mut self, want_mutable: bool) -> Option<(String, Ty, u32)> {
+    fn pick_array(&mut self, want_mutable: bool) -> Option<(String, Ty, u32, Option<u32>)> {
         let seen = self.arrays(want_mutable);
         if seen.is_empty() {
             return None;
@@ -1227,6 +1236,9 @@ impl<'a> Writer<'a> {
         };
         let mutable = self.rng.chance(60);
         let length = self.rng.below(4) + 1;
+        // A `many` of a `many`, sometimes. Every row the same length, so that
+        // reaching into one is safe wherever it is reached from.
+        let inner = if self.rng.chance(25) { Some(self.rng.below(3) + 1) } else { None };
         let name = self.fresh();
         self.pad();
         self.out.push_str("var.");
@@ -1234,11 +1246,30 @@ impl<'a> Writer<'a> {
             self.out.push_str("mut.");
         }
         self.out.push_str("many.");
+        if inner.is_some() {
+            self.out.push_str("many.");
+        }
         self.out.push_str(ty.written());
         self.out.push_str(" '");
         self.out.push_str(&name);
         self.out.push_str("' = [");
-        if ty != Ty::Str && self.rng.chance(30) {
+        if let Some(across) = inner {
+            // Brackets where an item goes make a `many`, so a `many` of them is
+            // brackets inside brackets.
+            for i in 0..length {
+                if i > 0 {
+                    self.out.push(' ');
+                }
+                self.out.push('[');
+                for j in 0..across {
+                    if j > 0 {
+                        self.out.push(' ');
+                    }
+                    self.expr(ty, if ty == Ty::Str { 0 } else { 1 });
+                }
+                self.out.push(']');
+            }
+        } else if ty != Ty::Str && self.rng.chance(30) {
             self.out.push_str("fill[");
             self.expr(ty, 1);
             self.out.push_str(", *");
@@ -1258,21 +1289,21 @@ impl<'a> Writer<'a> {
             }
         }
         self.out.push_str("];\n");
-        self.declare(Var { name: name.clone(), ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new() });
+        self.declare(Var { name: name.clone(), ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new(), inner });
         // The same again: a `many` asked to be writable, and then written.
         if mutable && length > 0 && self.rng.chance(80) {
-            self.set_a_place(&name, ty, length);
+            self.set_a_place(&name, ty, length, inner);
         }
     }
 
     /// `set 'v'[*i*] = […];` — one place, and the index is written in range so
     /// that the program runs rather than stopping.
     fn array_set(&mut self) {
-        let Some((name, ty, length)) = self.pick_array(true) else {
+        let Some((name, ty, length, inner)) = self.pick_array(true) else {
             self.print();
             return;
         };
-        self.set_a_place(&name, ty, length);
+        self.set_a_place(&name, ty, length, inner);
     }
 
     /// `if 'v3'.v4 holds 'v9' { … }` — the only way to reach what a field that
@@ -1322,7 +1353,7 @@ impl<'a> Writer<'a> {
     }
 
     /// `set 'v3'[*2*] = […]` — one place of a `many`, written.
-    fn set_a_place(&mut self, name: &str, ty: Ty, length: u32) {
+    fn set_a_place(&mut self, name: &str, ty: Ty, length: u32, inner: Option<u32>) {
         let name = name.to_string();
         let at = self.rng.below(length);
         self.pad();
@@ -1331,13 +1362,26 @@ impl<'a> Writer<'a> {
         self.out.push_str("'[*");
         self.out.push_str(&at.to_string());
         self.out.push_str("*] = [");
-        self.expr(ty, 2);
+        // One place of a `many` of a `many` holds a whole `many`, so what goes
+        // in is several values rather than one — and as many of them as every
+        // other row has, so that reaching into this one stays safe.
+        match inner {
+            Some(across) => {
+                for j in 0..across {
+                    if j > 0 {
+                        self.out.push(' ');
+                    }
+                    self.expr(ty, if ty == Ty::Str { 0 } else { 1 });
+                }
+            }
+            None => self.expr(ty, 2),
+        }
         self.out.push_str("];\n");
     }
 
     /// Reading one place, and asking how many there are.
     fn array_read(&mut self) {
-        let Some((name, _ty, length)) = self.pick_array(false) else {
+        let Some((name, _ty, length, inner)) = self.pick_array(false) else {
             self.print();
             return;
         };
@@ -1347,7 +1391,15 @@ impl<'a> Writer<'a> {
         self.out.push_str(&name);
         self.out.push_str("'[*");
         self.out.push_str(&at.to_string());
-        self.out.push_str("*] str:* of * (count[loan '");
+        self.out.push_str("*]");
+        // A place of a `many` of a `many` is itself several, and showing one is
+        // refused — so this reaches the rest of the way in.
+        if let Some(across) = inner {
+            self.out.push_str("[*");
+            self.out.push_str(&self.rng.below(across).to_string());
+            self.out.push_str("*]");
+        }
+        self.out.push_str(" str:* of * (count[loan '");
         self.out.push_str(&name);
         self.out.push_str("']) \\n];\n");
     }
@@ -1379,7 +1431,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.expr(ty, 2);
         self.out.push_str("];\n");
-        self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
+        self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None });
 
         // `mut` asks for something, and asking without doing it is the whole of
         // what `W0003` is for. Most of the time it is done here, where the name
@@ -1511,6 +1563,7 @@ impl<'a> Writer<'a> {
             lent: false,
             group: None,
             parts_moved: Vec::new(),
+            inner: None,
         });
 
         self.stepped.push(counter.clone());
@@ -1562,7 +1615,7 @@ impl<'a> Writer<'a> {
         // Stepped by the loop, the same as a `while`'s own counter: a borrow of
         // one held across a turn points at what the next turn changes.
         self.stepped.push(counter.clone());
-        let held = Var { name: counter.clone(), ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() };
+        let held = Var { name: counter.clone(), ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None };
         if keeps {
             self.declare(held.clone());
             self.scopes.push(Vec::new());

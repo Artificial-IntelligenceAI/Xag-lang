@@ -1058,6 +1058,24 @@ void aBlankMaySayWhatItTakes() {
       for (const xag::ChainSegment &seg : item.chain.segments)
         CHECK(seg.isName || seg.text != "number");
 
+  // A `many` of a `many`. What a blank was filled in with is written out as the
+  // copy's own type, and that was written with a single `many` however many
+  // there were — so a generic handed a `many many str` was written out as
+  // taking a `many str`, and then refused the very call that had asked for it.
+  const std::string nestedMany =
+      "fn.int64 'echo' [loan.any 'v'] { give [*0*]; }\n"
+      "START {\n"
+      "    var.many.many.str 'g' = [[*a* *b*] [*c*]];\n"
+      "    var.many.str 'f' = [*x*];\n"
+      "    print.stdout[echo[loan 'g'] echo[loan 'f'] \\n];\n"
+      "}\n";
+  const Checked deep = run(nestedMany);
+  CHECK(deep.checked.ok());
+  std::set<std::string> asked;
+  for (const auto &[what, with] : deep.checked.instantiations)
+    asked.insert(with);
+  CHECK(asked == std::set<std::string>({"loan.many.many.str", "loan.many.str"}));
+
   // A blank filled in with a type that is more than one word. Filling wrote one
   // segment, which is every type a scalar and no type else: a `many` came out
   // spelled `unknown`, and an `or-nothing` came out spelled as the thing inside

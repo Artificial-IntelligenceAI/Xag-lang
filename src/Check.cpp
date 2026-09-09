@@ -1102,7 +1102,10 @@ private:
       out += "loanmut.";
     if (type.orNothing)
       out += "or-nothing.";
-    if (type.holds())
+    // One per level. Written once whatever the depth, a blank filled in with a
+    // `many many str` was written out as taking a `many.str`, and the call that
+    // asked for the copy was then refused by it.
+    for (unsigned at = 0; at < type.deep; ++at)
       out += "many.";
     const Type inner = type.holds() ? type.element : type.kind;
     out += inner == Type::Struct ? shapeName(type.named) : std::string(name(inner));
