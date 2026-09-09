@@ -817,6 +817,44 @@ private:
     return type.kind == Type::Blank || type.element == Type::Blank;
   }
 
+  // What the blank must be, given what a parameter asks for and what the caller
+  // brought. `any` against `int64` says int64; `many.any` against `many.str`
+  // says str.
+  static Ty blankFrom(Ty wanted, Ty got) {
+    if (wanted.kind == Type::Blank)
+      return got;
+    if (wanted.element == Type::Blank && got.kind == wanted.kind)
+      return elementOf(got);
+    return Ty{};
+  }
+
+  // The same type with the blank filled in.
+  static Ty filledIn(Ty type, Ty blank) {
+    if (blank == Ty{})
+      return type;
+    if (type.kind == Type::Blank)
+      return Ty{blank.kind, blank.element, type.orNothing, blank.named};
+    if (type.element == Type::Blank)
+      return Ty{type.kind, blank.kind, type.orNothing, blank.named};
+    return type;
+  }
+
+  // Written down, which is what filling a blank into a chain needs. A struct is
+  // spelled by the name it was given.
+  std::string spelledAs(Ty type) const {
+    return type.kind == Type::Struct ? shapeName(type.named) : std::string(name(type.kind));
+  }
+
+  // Remembered so that the generic can be built for it later, once each however
+  // often it is called.
+  void calledWith(const std::string &what, Ty blank) {
+    const std::string spelled = spelledAs(blank);
+    for (const auto &[already, with] : result_.instantiations)
+      if (already == what && with == spelled)
+        return;
+    result_.instantiations.push_back({what, spelled});
+  }
+
   Ty exprKind(const Expr &e, Ty expected) {
     switch (e.kind) {
     case ExprKind::Name: {
@@ -1239,8 +1277,17 @@ private:
                    " and wants " + std::to_string(signature.params.size()) + ".",
                {"a call gives a function what its parameters ask for"});
     }
+    // A blank is the caller's to fill. The first argument whose parameter has one
+    // says what it is, and every other `any` in the signature is then that —
+    // which is what makes `any` one blank rather than a wildcard per spot.
+    Ty blank{};
     for (unsigned i = 0; i < e.args.values.size(); ++i) {
-      const Ty want = i < signature.params.size() ? signature.params[i] : Ty{};
+      const Ty asked = i < signature.params.size() ? signature.params[i] : Ty{};
+      if (blank == Ty{} && hasBlank(asked)) {
+        blank = blankFrom(asked, value(e.args.values[i], Ty{}));
+        continue;
+      }
+      const Ty want = filledIn(asked, blank);
       const Ty got = value(e.args.values[i], want);
       if (want != Type::Unknown && got != Type::Unknown && got != want)
         complain(e.args.values[i].span, "E0506",
@@ -1248,7 +1295,11 @@ private:
                      std::string(name(want)) + "`.",
                  {"nothing converts on its own"});
     }
-    return signature.result;
+    if (blank != Ty{}) {
+      calledWith(path, blank);
+      result_.blankAt[&e] = spelledAs(blank);
+    }
+    return filledIn(signature.result, blank);
   }
 
   // Showing writes one piece after another, so what it writes has to be one

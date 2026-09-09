@@ -94,6 +94,7 @@ add_library(xagfront STATIC
   src/MirElaborate.cpp
   src/Interpret.cpp
   src/Ahead.cpp
+  src/Expand.cpp
   src/Fold.cpp
   src/Loops.cpp
   src/Regions.cpp

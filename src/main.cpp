@@ -2,6 +2,7 @@
 #include "xag/Loops.h"
 #include "xag/Ahead.h"
 #include "xag/Check.h"
+#include "xag/Expand.h"
 #include "xag/Fold.h"
 #include "xag/Fast.h"
 #include "xag/Interpret.h"
@@ -504,13 +505,32 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   if (report(source, parsed.diagnostics) != 0)
     return false;
-  const xag::CheckResult checked = xag::check(source, parsed.program);
+  xag::CheckResult checked = xag::check(source, parsed.program);
   if (report(source, checked.diagnostics) != 0)
     return false;
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+
+  // A generic is written out once per type it was called with, and every call
+  // pointed at the copy it meant. After this there are no blanks anywhere, so
+  // everything below reads ordinary functions — which is why none of them had
+  // to learn what a blank is.
+  //
+  // Read a second time, because the copies have never been read: the first pass
+  // deliberately left every generic body alone, since whether a thing copies is
+  // the very question the blank had not answered. This is the pass that answers
+  // it, once per type, and it is where a generic's own mistakes are found.
+  static xag::Program expanded;
+  const xag::Program *program = &parsed.program;
+  if (xag::expand(const_cast<xag::Program &>(parsed.program), checked, expanded)) {
+    program = &expanded;
+    checked = xag::check(source, expanded);
+    if (report(source, checked.diagnostics) != 0)
+      return false;
+  }
+
+  const xag::OwnResult owned = xag::own(source, *program);
   if (report(source, owned.diagnostics) != 0)
     return false;
-  built = xag::build(source, parsed.program, checked, settingsUsed(path));
+  built = xag::build(source, *program, checked, settingsUsed(path));
   if (report(source, built.diagnostics) != 0)
     return false;
   xag::elaborate(built.mir);
@@ -622,34 +642,20 @@ int buildFile(const std::string &path) {
 }
 
 int mirFile(const std::string &path) {
-  std::string text;
-  if (!readSource(path, text))
-    return 1;
-
-  const xag::Source source(path, text);
-  const xag::LexResult lexed = xag::lex(source);
-  if (!lexed.ok())
-    return report(source, lexed.diagnostics);
-  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
-  if (!parsed.ok())
-    return report(source, parsed.diagnostics);
-  const xag::CheckResult checked = xag::check(source, parsed.program);
-  if (!checked.ok())
-    return report(source, checked.diagnostics);
-  const xag::OwnResult owned = xag::own(source, parsed.program);
-  if (!owned.ok())
-    return report(source, owned.diagnostics);
-
-  xag::MirResult built = xag::build(source, parsed.program, checked, settingsUsed(path));
-  xag::elaborate(built.mir);
-  if (!built.ok())
-    return report(source, built.diagnostics);
-  // Shown as the interpreters are given it — the program as written, refused
+  // The same road every other command takes. It had a pipeline of its own,
+  // which is how `xagc run` once came to accept programs the others refused —
+  // and how `xagc mir` came to refuse a generic that `run`, `fast` and `build`
+  // had all just agreed about, because expanding one happens on that road and
+  // not on this.
+  //
+  // Shown as the interpreters are given it: the program as written, refused
   // where it is certainly wrong but not rewritten. What the optimiser makes of
-  // it afterwards is the compiler's business, and `xagc ir` shows that.
-  const xag::FoldResult folded = xag::fold(source, built.mir, xag::Rewriting::No);
-  if (!folded.ok())
-    return report(source, folded.diagnostics);
+  // it afterwards is `xagc ir`.
+  std::string text;
+  xag::MirResult built;
+  int status = 0;
+  if (!ready(path, text, built, status))
+    return status;
   xag::print(built.mir, std::cout);
   return 0;
 }

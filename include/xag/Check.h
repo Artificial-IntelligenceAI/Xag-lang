@@ -166,6 +166,10 @@ struct CheckResult {
   // a chain. One entry per pair however often it is called.
   std::vector<std::pair<std::string, std::string>> instantiations;
 
+  // Which call filled which blank, so that expanding knows what each one should
+  // be pointed at. Keyed by node, like everything else the checker works out.
+  std::unordered_map<const Expr *, std::string> blankAt;
+
   // The most times any counted loop in this file goes round, where both its
   // ends are written down. Free to work out — the number is already computed to
   // bound what the loop adds up — and it is what lets a run say, before it

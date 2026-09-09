@@ -1,4 +1,5 @@
 #include "xag/Check.h"
+#include "xag/Expand.h"
 #include "xag/Fold.h"
 #include "xag/Mir.h"
 #include "xag/Lexer.h"
@@ -762,8 +763,71 @@ void aGenericBodyIsNotReadWithTheBlankInIt() {
   CHECK(run("fn.int64 'twice' [int64 'n'] { }\nSTART { }\n").code(0) == "E0513");
 }
 
+// Written once, built once per type it is called with, and no blank left in
+// anything that follows.
+void aGenericIsWrittenOutPerType() {
+  const std::string program =
+      "fn.any 'same' [any 'x'] { give ['x']; }\n"
+      "START {\n"
+      "    var.int64 'n' = [*3*];\n"
+      "    var.bool 'b' = [*true*];\n"
+      "    print.stdout[same['n'] same['b'] \\n];\n"
+      "}\n";
+  const xag::Source source("test.xag", program);
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(parsed.ok());
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+  CHECK(checked.instantiations.size() == 2);
+
+  xag::Program expanded;
+  CHECK(xag::expand(parsed.program, checked, expanded));
+
+  // The generic itself is gone, and one copy stands for each type.
+  bool generic = false, forInt = false, forBool = false;
+  for (const xag::Item &item : expanded.items) {
+    generic = generic || item.name == "same";
+    forInt = forInt || item.name == "same$int64";
+    forBool = forBool || item.name == "same$bool";
+  }
+  CHECK(!generic);
+  CHECK(forInt);
+  CHECK(forBool);
+
+  // And the copies read clean, which the generic never could have.
+  CHECK(xag::check(source, expanded).ok());
+
+  // Called twice at one type is one copy, not two.
+  const std::string twice =
+      "fn.any 'same' [any 'x'] { give ['x']; }\n"
+      "START {\n"
+      "    var.int64 'n' = [*3*];\n"
+      "    print.stdout[same['n'] same['n'] \\n];\n"
+      "}\n";
+  const xag::Source other("test.xag", twice);
+  const xag::LexResult lexed2 = xag::lex(other);
+  xag::ParseResult parsed2 = xag::parse(other, lexed2.tokens);
+  const xag::CheckResult checked2 = xag::check(other, parsed2.program);
+  CHECK(checked2.instantiations.size() == 1);
+
+  // A generic nothing calls is written out not at all, rather than written out
+  // with a blank still in it.
+  const std::string unused =
+      "fn.any 'same' [any 'x'] { give ['x']; }\nSTART { }\n";
+  const xag::Source third("test.xag", unused);
+  const xag::LexResult lexed3 = xag::lex(third);
+  xag::ParseResult parsed3 = xag::parse(third, lexed3.tokens);
+  const xag::CheckResult checked3 = xag::check(third, parsed3.program);
+  xag::Program none;
+  CHECK(xag::expand(parsed3.program, checked3, none));
+  CHECK(none.items.size() == 1);
+  CHECK(none.items.front().kind == xag::ItemKind::Start);
+}
+
 int main() {
   aGenericBodyIsNotReadWithTheBlankInIt();
+  aGenericIsWrittenOutPerType();
   aNameMustBeDeclared();
   aNameIsDeclaredOnce();
   aTypeMustExist();
