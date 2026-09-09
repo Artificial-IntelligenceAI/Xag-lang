@@ -67,6 +67,17 @@ struct Ty {
   // — an array of maybes wants a table of types rather than a pair, which is
   // the same wall `many.many` stands at.
   bool orNothing = false;
+  // Where an `Unknown` came from: the mistake that made this type unknowable.
+  // An `Unknown` used to be anonymous, so everything downstream met a type it
+  // could say nothing about and could not tell whether that was the reader's
+  // doing or an earlier refusal's. It carried on regardless, which is how one
+  // typo produced a second error blaming a value that was fine.
+  //
+  // Only ever set when `kind` is `Unknown`, and it travels: a type that came
+  // out unknown because its operand was unknown keeps the operand's, so what a
+  // diagnostic finally names is the mistake that started the chain rather than
+  // the last link in it.
+  Span from{};
 
   constexpr Ty() = default;
   constexpr Ty(Type k) : kind(k) {}
@@ -78,10 +89,34 @@ struct Ty {
   constexpr bool holds() const { return kind == Type::Many; }
   constexpr bool mayBeNothing() const { return orNothing; }
   // What is inside, once the `or-nothing` is taken off.
-  constexpr Ty within() const { return Ty{kind, element, false, named}; }
+  constexpr Ty within() const {
+    Ty inside{kind, element, false, named};
+    inside.from = from;
+    return inside;
+  }
   constexpr bool isStruct() const { return kind == Type::Struct; }
+  // Whether this is unknown because of something already refused, rather than
+  // unknown for a reason nobody has worked out.
+  constexpr bool tracedBack() const {
+    return kind == Type::Unknown && (from.begin != 0 || from.end != 0);
+  }
 };
 
+// An unknown type that knows what made it unknown. Everything that hands one of
+// these on hands the span on with it.
+constexpr Ty unknownFrom(Span where) {
+  Ty t;
+  t.from = where;
+  return t;
+}
+
+// Where two types disagree, an unknown that was traced back beats one that was
+// not: the chain is only as good as its first link, and a link with no span is
+// no link.
+constexpr Ty eitherTrace(Ty a, Ty b) { return a.tracedBack() ? a : b; }
+
+// `from` is deliberately not compared. It says where a type came from, not what
+// it is, and two unknowns are the same unknown however they were arrived at.
 constexpr bool operator==(Ty a, Ty b) {
   return a.kind == b.kind && a.element == b.element && a.orNothing == b.orNothing &&
          a.named == b.named;

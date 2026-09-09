@@ -913,7 +913,71 @@ void aGenericCallingAGenericIsWrittenOutToo() {
   CHECK(copies == 1);
 }
 
+// One typo, and everything it broke shown underneath it rather than as
+// refusals of its own — and the ones that used to be passed over in silence
+// brought back.
+void oneMistakeIsReportedAsOneMistake() {
+  const Checked c = run(
+      "fn.int64 'double' [int64 'v'] { give ['v' + 'v']; }\n"
+      "START {\n"
+      "    var.in64 'n' = [*3*];\n"
+      "    var.str 's' = ['n'];\n"
+      "    var.int64 'a' = ['n' + *1*];\n"
+      "    var.int64 'c' = [double['n']];\n"
+      "    var.bool 'ok' = ['n'];\n"
+      "}\n");
+  CHECK(!c.checked.ok());
+
+  // The root is the type word, and every other refusal knows it came from
+  // there. Three of these five used to be said in total silence.
+  const std::vector<xag::Diagnostic> &raw = c.checked.diagnostics;
+  CHECK(raw.size() == 7);
+  unsigned roots = 0, followOns = 0;
+  xag::Span rootSpan{};
+  for (const xag::Diagnostic &one : raw) {
+    if (one.follows.begin == 0 && one.follows.end == 0) {
+      ++roots;
+      rootSpan = one.span;
+      CHECK(one.code == "E0503");
+    } else {
+      ++followOns;
+    }
+  }
+  CHECK(roots == 1);
+  // Six, not five: the sum is refused twice, once by the operation and once by
+  // the declaration it was written into. They point at the same place, and
+  // folding shows that place once.
+  CHECK(followOns == 6);
+  // Every one of them names the mistake that started it, not the last link.
+  for (const xag::Diagnostic &one : raw)
+    if (one.follows.begin != 0 || one.follows.end != 0)
+      CHECK(one.follows.begin == rootSpan.begin);
+
+  // And what the reader is shown is one error with five places under it.
+  const std::vector<xag::Diagnostic> folded = xag::foldFollowOns(raw);
+  CHECK(folded.size() == 1);
+  CHECK(folded.front().code == "E0503");
+  CHECK(folded.front().notes.size() == 5);
+  for (const xag::Note &note : folded.front().notes)
+    CHECK(note.label.rfind("and because of that,", 0) == 0);
+
+  // A mistake that started by itself is left exactly as it was.
+  const Checked alone = run("START {\n    print.stdout[*1000* \\n];\n}\n");
+  CHECK(alone.code(0) == "E0507");
+  CHECK(alone.checked.diagnostics.front().follows.begin == 0);
+  CHECK(xag::foldFollowOns(alone.checked.diagnostics).size() == 1);
+  // With its tip intact: it is the tip that is wrong on a follow-on, not here.
+  CHECK(!alone.checked.diagnostics.front().tips.empty());
+
+  // A follow-on whose root nobody printed is kept rather than lost.
+  std::vector<xag::Diagnostic> orphan;
+  orphan.push_back(xag::Diagnostic{xag::Span{40, 44}, "E0506", "this was not checked."});
+  orphan.back().follows = xag::Span{9, 13};
+  CHECK(xag::foldFollowOns(orphan).size() == 1);
+}
+
 int main() {
+  oneMistakeIsReportedAsOneMistake();
   aGenericBodyIsNotReadWithTheBlankInIt();
   aGenericIsWrittenOutPerType();
   aGenericCallingAGenericIsWrittenOutToo();

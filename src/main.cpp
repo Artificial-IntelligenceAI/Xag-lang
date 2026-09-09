@@ -163,9 +163,13 @@ bool readSource(const std::string &path, std::string &text) {
   return true;
 }
 
-int report(const xag::Source &source, const std::vector<xag::Diagnostic> &diagnostics) {
-  if (diagnostics.empty())
+int report(const xag::Source &source, const std::vector<xag::Diagnostic> &raw) {
+  if (raw.empty())
     return 0;
+  // What followed from something else goes underneath it first, so that one
+  // mistake is shown as one mistake with everything it broke drawn under it,
+  // and the tally at the end counts mistakes rather than consequences.
+  const std::vector<xag::Diagnostic> diagnostics = xag::foldFollowOns(raw);
   // Refusals and warnings are shown apart, because they are answers to
   // different questions: one says the code was not built, the other says it was
   // and here is what could not be worked out.

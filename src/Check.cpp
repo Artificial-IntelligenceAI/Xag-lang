@@ -237,6 +237,18 @@ private:
                                              std::move(tips), std::move(notes)});
   }
 
+  // A refusal that happened only because of an earlier one. It is shown
+  // underneath the mistake it came from rather than counted as a mistake of its
+  // own, so a reader with one typo is told about one typo and can see, in the
+  // same place, everything the typo broke.
+  void because(Span from, Span span, std::string code, std::string message,
+               std::vector<std::string> rules, std::vector<std::string> tips = {}) {
+    Diagnostic one{span,          std::move(code),  std::move(message), "here",
+                   std::move(rules), std::move(tips), {}};
+    one.follows = from;
+    result_.diagnostics.push_back(std::move(one));
+  }
+
   // Said rather than refused: what the compiler could not settle either way.
   void warn(Span span, std::string code, std::string message,
             std::vector<std::string> rules, std::vector<std::string> tips = {}) {
@@ -277,7 +289,7 @@ private:
     if (last.isName) {
       complain(last.span, "E0503", "a chain ends in a type, and a loan is not one.",
                {"the segment nearest the name is the type"});
-      return Type::Unknown;
+      return unknownFrom(last.span);
     }
     const Type type = typeNamed(last.text);
     unsigned which = 0;
@@ -292,7 +304,7 @@ private:
       if (!isShape) {
         complain(last.span, "E0503", "`" + last.text + "` is not a type.",
                  {"a size is always written, and only sizes the standard defines"});
-        return Type::Unknown;
+        return unknownFrom(last.span);
       }
     }
     // `many` stands with the type and says the name holds several of it, and
@@ -317,7 +329,7 @@ private:
                several ? "there is no holding several of `nothing`."
                        : "`nothing` is already nothing, and cannot be it twice.",
                {"`nothing` is an answer, and not a value to keep"});
-      return Type::Unknown;
+      return unknownFrom(chain.segments[at].span);
     }
 
     Ty settled = isShape ? (several ? Ty{Type::Many, Type::Struct, false, which}
@@ -869,6 +881,17 @@ private:
 
     case ExprKind::Written:
       if (expected == Type::Unknown) {
+        // Written into something that is unknown for a reason already refused.
+        // Saying it takes its type from a parameter or from itself would send
+        // the reader looking at a value that was never the problem — the tip is
+        // right in general and wrong here, so it is not given.
+        if (expected.tracedBack()) {
+          because(expected.from, e.span, "E0507",
+                  "nothing here says what this written value is.",
+                  {"a written value takes its type from what it is written into, from "
+                   "the parameter it is passed to, or from itself"});
+          return unknownFrom(expected.from);
+        }
         complain(e.span, "E0507", "nothing here says what this written value is.",
                  {"a written value takes its type from what it is written into, from the "
                   "parameter it is passed to, or from itself"},
@@ -1085,6 +1108,20 @@ private:
     const Ty right =
         expr(*e.children[1], comparing || (!logical && asked == Type::Unknown) ? left : asked);
 
+    // One side could not be worked out, because something it was built from was
+    // already refused. Nothing here can be checked against anything, and every
+    // check below would pass over it without a word — which is how a reader
+    // loses sight of how far one mistake reached. Said once for the whole
+    // operation rather than once per side: it is one thing that went wrong.
+    const Ty broken = eitherTrace(left, right);
+    if (broken.tracedBack()) {
+      because(broken.from, e.span, "E0506",
+              "`" + op + "` was not checked here.",
+              {"an operation is checked against what its sides are, and what one of "
+               "them is could not be worked out"});
+      return comparing || logical ? Ty{Type::Bool} : unknownFrom(broken.from);
+    }
+
     if (comparing) {
       if (left != Type::Unknown && right != Type::Unknown && left != right)
         complain(e.span, "E0506",
@@ -1122,7 +1159,10 @@ private:
                  {"a size is always written, so widening one is something a program "
                   "says rather than something that happens to it."});
     }
-    return answered == Type::Unknown ? Type::Unknown : answered;
+    return answered == Type::Unknown ? eitherTrace(left, right).kind == Type::Unknown
+                                            ? eitherTrace(left, right)
+                                            : Ty{Type::Unknown}
+                                    : answered;
   }
 
   Ty call(const Expr &e, Ty expected) {
@@ -1289,6 +1329,15 @@ private:
       }
       const Ty want = filledIn(asked, blank);
       const Ty got = value(e.args.values[i], want);
+      // Same as anywhere else a check has to be skipped: say that it was, and
+      // say what made it impossible, rather than passing over it in silence.
+      if (want.kind != Type::Unknown && got.tracedBack()) {
+        because(got.from, e.args.values[i].span, "E0506",
+                "this was not checked against what `" + path + "` wants.",
+                {"a call gives a function what its parameters ask for, and what this "
+                 "is could not be worked out"});
+        continue;
+      }
       if (want != Type::Unknown && got != Type::Unknown && got != want)
         complain(e.args.values[i].span, "E0506",
                  "this is a `" + std::string(name(got)) + "` and `" + path + "` wants a `" +
@@ -1770,6 +1819,20 @@ private:
       complain(list.span, "E0505", "one name takes one value.",
                {"a comma separates values, and there is one name here"});
     const Ty got = value(list.values[0], want);
+    // What this holds could not be worked out, because something it was built
+    // from was already refused. This used to be passed over without a word,
+    // which left the reader unable to see how far one mistake had reached —
+    // and quietly not checking a thing is worse than saying so.
+    //
+    // Only when the name here is a real type: a declaration whose own type word
+    // was refused has said so on this very line, and pointing at it again would
+    // be telling somebody twice.
+    if (want.kind != Type::Unknown && got.tracedBack()) {
+      because(got.from, list.values[0].span.begin ? list.values[0].span : where, "E0506",
+              "this value was not checked against a `" + std::string(name(want)) + "`.",
+              {"a name holds what it was given, and what this is could not be worked out"});
+      return;
+    }
     if (want != Type::Unknown && got != Type::Unknown && got != want)
       complain(list.values[0].span.begin ? list.values[0].span : where, "E0506",
                "this is a `" + std::string(name(got)) + "` and a `" + std::string(name(want)) +

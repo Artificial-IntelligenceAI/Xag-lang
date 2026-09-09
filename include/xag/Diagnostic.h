@@ -45,7 +45,28 @@ struct Diagnostic {
   // Last, so that every place that builds one of these by listing its parts
   // keeps working and means what it always did: a refusal.
   Severity severity = Severity::Error;
+  // What this one followed from: the span of the mistake that made it happen.
+  // Empty on a mistake that started by itself, which is most of them.
+  //
+  // A reader with one typo should be told about one typo. Everything the typo
+  // broke is worth seeing — it is the size of the mistake — but seeing it as
+  // five separate refusals means looking for five things to fix when there is
+  // one. So a diagnostic that follows from another is folded underneath it, and
+  // the count says one.
+  //
+  // Last, and after `severity`, so that every place that builds one of these by
+  // listing its parts keeps working and means what it always did.
+  Span follows{};
 };
+
+// Folds every diagnostic that followed from another underneath the one it
+// followed from, and hands back what is left: the mistakes that started by
+// themselves, each carrying what it broke.
+//
+// A follow-on whose root is not among these is kept as it is. That happens when
+// the root was a warning nobody printed, or when a pass stopped before the root
+// was reached, and dropping it would be losing the only thing said about it.
+std::vector<Diagnostic> foldFollowOns(std::vector<Diagnostic> diagnostics);
 
 // One diagnostic, with its own file/line header and underlined source line.
 void render(const Source &source, const Diagnostic &diagnostic, std::ostream &out);

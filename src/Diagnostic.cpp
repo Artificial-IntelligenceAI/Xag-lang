@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <ostream>
 #include <string>
+#include <unordered_map>
 
 namespace xag {
 
@@ -51,6 +52,52 @@ void renderTally(std::size_t errors, std::ostream &out) {
 void renderWarningTally(std::size_t warnings, std::ostream &out) {
   out << '\n' << warnings << (warnings == 1 ? " warning.\n" : " warnings.\n");
   out << "If I am wrong about any of that, please tell me: " << kIssues << '\n';
+}
+
+// What a follow-on reads as once it is standing under its root: its own
+// sentence, joined on. The full stop comes off because the label is not the end
+// of anything — another one may be underneath it.
+std::string asConsequence(const Diagnostic &one) {
+  std::string said = one.message;
+  while (!said.empty() && (said.back() == '.' || said.back() == ' '))
+    said.pop_back();
+  return "and because of that, " + said;
+}
+
+std::vector<Diagnostic> foldFollowOns(std::vector<Diagnostic> diagnostics) {
+  // Where each root stands, by the place it points at. A root is anything that
+  // followed from nothing, which is every diagnostic that is not a consequence.
+  std::unordered_map<unsigned, std::size_t> rootAt;
+  for (std::size_t i = 0; i < diagnostics.size(); ++i)
+    if (diagnostics[i].follows.begin == 0 && diagnostics[i].follows.end == 0)
+      rootAt.emplace(diagnostics[i].span.begin, i);
+
+  std::vector<bool> folded(diagnostics.size(), false);
+  for (std::size_t i = 0; i < diagnostics.size(); ++i) {
+    const Diagnostic &one = diagnostics[i];
+    if (one.follows.begin == 0 && one.follows.end == 0)
+      continue;
+    auto found = rootAt.find(one.follows.begin);
+    if (found == rootAt.end())
+      continue; // Nothing to stand under. Left where it is rather than lost.
+    Diagnostic &root = diagnostics[found->second];
+
+    // The same place twice says nothing the first time did not. One typo read
+    // in two passes reaches here as two consequences pointing at one span.
+    bool already = root.span.begin == one.span.begin;
+    for (const Note &note : root.notes)
+      already = already || note.span.begin == one.span.begin;
+    if (!already)
+      root.notes.push_back(Note{one.span, asConsequence(one)});
+    folded[i] = true;
+  }
+
+  std::vector<Diagnostic> left;
+  left.reserve(diagnostics.size());
+  for (std::size_t i = 0; i < diagnostics.size(); ++i)
+    if (!folded[i])
+      left.push_back(std::move(diagnostics[i]));
+  return left;
 }
 
 namespace {
