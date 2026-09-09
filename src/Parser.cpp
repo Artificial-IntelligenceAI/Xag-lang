@@ -189,6 +189,33 @@ private:
   }
 
   // Abandon a broken statement at the next boundary and read the next one.
+  // A statement that is only a value, worked out and then dropped on the floor.
+  //
+  // Xag has no expression statements: every statement declares, changes, calls,
+  // or decides. `int32:*1* + int32:*2*` is none of those, and what the parser
+  // used to say about it was three errors — one about `int32` not being a call,
+  // and two about the `:` after it, which was never the trouble. The trouble is
+  // the whole line, and now it says so.
+  //
+  // The span runs to the `;` or the `}`, because it is the *value* that has
+  // nowhere to go and not any one token in it.
+  void aValueGoingNowhere() {
+    const Span from = peek().span;
+    unsigned last = at_;
+    while (!atEnd() && !check(TokenKind::Semicolon) && !check(TokenKind::RBrace)) {
+      last = at_;
+      advance();
+    }
+    complain(Span{from.begin, tokens_[last].span.end}, "E0109",
+             "this works something out, and nothing is done with it.",
+             {"a statement declares, changes, calls, or decides, and a value on its "
+              "own is none of those"},
+             {"a value goes somewhere: `var.int32 'n' = [...]` gives it a name, "
+              "`set 'n' = [...]` changes one that has a name already, and "
+              "`print.stdout[...]` shows it."});
+    accept(TokenKind::Semicolon);
+  }
+
   void recover() {
     while (!atEnd()) {
       if (accept(TokenKind::Semicolon))
@@ -915,6 +942,13 @@ private:
     }
 
     if (!check(TokenKind::Word)) {
+      // A name, or a written value, at the start of a statement: whatever
+      // follows, this is a value and not a statement.
+      if (check(TokenKind::Name) || check(TokenKind::Written) ||
+          check(TokenKind::LParen)) {
+        aValueGoingNowhere();
+        return nullptr;
+      }
       complain(peek().span, "E0106", "a statement begins with a word.", {}, {},
                std::string("found ") + describe(peek().kind));
       recover();
@@ -939,7 +973,14 @@ private:
       return s;
     }
 
+    // A chain not followed by `[` is not a call, and not followed by a name is
+    // not a declaration — so it is a value, and a value is not a statement.
+    const bool calls = check(TokenKind::LBracket);
     at_ = mark;
+    if (!calls) {
+      aValueGoingNowhere();
+      return nullptr;
+    }
     s->kind = StmtKind::Call;
     s->call = call();
     expect(TokenKind::Semicolon, "`;`");

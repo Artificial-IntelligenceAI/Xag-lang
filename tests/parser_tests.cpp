@@ -385,9 +385,34 @@ void aStructNamesWhatItHolds() {
   CHECK(inStart("print.stdout['p'.x.y \\n];").ok());
 }
 
+// Xag has no expression statements. A value written on its own is worked out
+// and dropped, and saying so once beats three errors about the tokens in it.
+void aValueOnItsOwnIsSaidSoOnce() {
+  // What it used to answer with was `E0107` about `int32` not being a call, and
+  // then two more about the `:` after it, which was never the trouble.
+  const Parsed typed = inStart("int32:*1* + int32:*2*");
+  CHECK(typed.code(0) == "E0109");
+  CHECK(typed.code(1) == "(none)");
+
+  // The same mistake starting with a name went to `E0106`, "a statement begins
+  // with a word" — true, and no help at all.
+  const Parsed named = inStart("var.int64 'n' = [*1*];\n    'n' + *1*;");
+  CHECK(named.code(0) == "E0109");
+  CHECK(named.code(1) == "(none)");
+
+  // And a written value with nowhere to go.
+  CHECK(inStart("*1*;").code(0) == "E0109");
+
+  // What must still be its own answer.
+  CHECK(inStart("print.stdout[str:*hi* \\n];").ok());
+  CHECK(inStart("var.int64 'n' = [*1*]\n    var.int64 'm' = [*2*];").code(0) == "E0103");
+  CHECK(run("START { }\n}\n").code(0) == "E0104");
+}
+
 } // namespace
 
 int main() {
+  aValueOnItsOwnIsSaidSoOnce();
   wholeProgramParses();
   aDeclarationAndACallTellApart();
   precedenceIsMathematics();
