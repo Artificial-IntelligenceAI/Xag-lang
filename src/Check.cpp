@@ -73,9 +73,14 @@ struct FamilyWord {
   const char *asks; // how a sentence says it
 };
 
-// The words a blank may be narrowed with. `loan` and `loanmut` are not here:
-// how a thing is held is a question the chain already asks — `loan.any` says it
-// — and a second way of saying one thing is a second thing to keep true.
+// The words a blank may be narrowed with — the same list `is` asks with, read in
+// the other direction.
+//
+// `loan` and `loanmut` belong here and are missing, because nothing here could
+// answer them: a `Ty` does not know whether it is a borrow. To this pass a
+// `loan.int64` field is an `int64`, and how a thing is held is `Own.cpp`'s to
+// say. `is loan` will want the same answer, so it is one piece of work rather
+// than two, and it waits for `whichever`.
 constexpr FamilyWord kFamilies[] = {
     {"number", Family::Number, "a number"},
     {"int", Family::Int, "an `int`"},
@@ -964,8 +969,23 @@ private:
 
   // Written down, which is what filling a blank into a chain needs. A struct is
   // spelled by the name it was given.
+  // A type written the way a chain writes it, dots and all: `int64`, `point`,
+  // `many.int64`, `or-nothing.many.point`.
+  //
+  // It used to be one word, which is every type a scalar and no type else. A
+  // blank filled in with a `many` came out spelled `unknown`, and a blank filled
+  // in with an `or-nothing` came out spelled as the thing inside it — so the
+  // copy took a plain `int64` and refused the very call that asked for it. This
+  // is what a blank is *for*, and it worked on scalars and structs only.
   std::string spelledAs(Ty type) const {
-    return type.kind == Type::Struct ? shapeName(type.named) : std::string(name(type.kind));
+    std::string out;
+    if (type.orNothing)
+      out += "or-nothing.";
+    if (type.holds())
+      out += "many.";
+    const Type inner = type.holds() ? type.element : type.kind;
+    out += inner == Type::Struct ? shapeName(type.named) : std::string(name(inner));
+    return out;
   }
 
   // Remembered so that the generic can be built for it later, once each however

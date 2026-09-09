@@ -2,6 +2,8 @@
 
 #include "xag/Check.h"
 
+#include <vector>
+
 namespace xag {
 
 ExprPtr clone(const ExprPtr &expr) {
@@ -100,21 +102,41 @@ namespace {
 unsigned fillChain(Chain &chain, std::string_view spelled) {
   unsigned filled = 0;
   for (std::size_t i = 0; i < chain.segments.size(); ++i) {
-    ChainSegment &seg = chain.segments[i];
-    if (seg.isName || seg.text != "any")
+    if (chain.segments[i].isName || chain.segments[i].text != "any")
       continue;
-    seg.text = std::string(spelled);
-    ++filled;
-    // What the blank asked for goes with it. `any.number` filled in at `int64`
-    // is `int64`, not `int64.number` — the question has been answered, and the
-    // word asking it has nothing left to say. Leaving it behind wrote out a
-    // chain the checker then refused, naming a word the reader never typed
-    // beside that type.
+    // Every segment written here carries the blank's own span: the blank is
+    // where the reader wrote this, and where anything said about it should
+    // point.
+    const Span at = chain.segments[i].span;
+
+    // What the blank asked for goes with it, and goes first. `any.number`
+    // filled in at `int64` is `int64`, not `int64.number` — the question has
+    // been answered, and the word asking it has nothing left to say. Taken off
+    // before anything is written in, so the indices below are counted against a
+    // chain that is not about to change under them.
     if (i + 1 < chain.segments.size() && !chain.segments[i + 1].isName &&
-        namesFamily(chain.segments[i + 1].text)) {
-      seg.span.end = chain.segments[i + 1].span.end;
+        namesFamily(chain.segments[i + 1].text))
       chain.segments.erase(chain.segments.begin() + static_cast<long>(i) + 1);
+
+    // A type is a chain fragment rather than a word: `many.int64` is two
+    // segments and `or-nothing.many.point` is three. Written in as one segment
+    // they became a word no reader ever wrote and no checker ever knew — which
+    // is why a blank filled in with a `many` came out spelled `unknown`.
+    std::vector<std::string> parts;
+    for (std::size_t from = 0;;) {
+      const std::size_t dot = spelled.find('.', from);
+      const std::size_t to = dot == std::string_view::npos ? spelled.size() : dot;
+      parts.emplace_back(spelled.substr(from, to - from));
+      if (dot == std::string_view::npos)
+        break;
+      from = dot + 1;
     }
+    chain.segments[i].text = parts.front();
+    ++filled;
+    for (std::size_t extra = 1; extra < parts.size(); ++extra)
+      chain.segments.insert(chain.segments.begin() + static_cast<long>(i + extra),
+                            ChainSegment{at, parts[extra], false});
+    i += parts.size() - 1;
   }
   return filled;
 }

@@ -189,11 +189,37 @@ A refused call answers an unknown rather than the blank it could not fill, so
 everything built on it folds underneath the refusal instead of being reported as
 news of its own.
 
-**`loan` and `loanmut` are not constraint words**, though they are `is` words.
-How a thing is held is a question the chain already asks — `loan.any 'x'` says
-it — and a second way of saying one thing is a second thing to keep true. The
-two lists are near-identical rather than identical, and the ten that are shared
-are the ones that name a **type**.
+**Ten of the twelve words are built.** `loan` and `loanmut` are missing, and not
+because they do not belong: this document says one list read both ways, and it
+already answered the objection — `many.int64` says *make one*, `is many` says
+*it is one*, and a borrow behaves the same. It is the same for `any.many`, which
+is built.
+
+They are missing because **nothing in the checker could answer them**. A `Ty`
+knows a kind, an element, a struct and whether it may hold nothing; it does not
+know whether it is a borrow. To the checker a `loan.int64` field *is* an
+`int64` — `struct 'holder' [loan.int64 'x']` checks clean and comes out as one —
+and how a thing is held is `Own.cpp`'s to say, in a `Mode` the checker never
+sees.
+
+`is loan` wants exactly the same answer. So it is one piece of work rather than
+two: teach `Ty` how a thing is held, and both words arrive together. It waits
+for `whichever`.
+
+### A blank is filled in with a chain, not a word
+
+Filling a blank in wrote **one segment**, which is every type a scalar and no
+type else. A blank filled in with a `many` came out spelled `unknown`; one
+filled in with an `or-nothing` came out spelled as the thing inside it, so the
+copy took a plain `int64` and refused the very call that had asked for it.
+
+A type is a chain fragment: `many.int64` is two segments, `or-nothing.many.point`
+is three. Both ends know that now — what a type is spelled as, and what filling
+a blank writes — and the copies are named for it: `echo$many.int64`,
+`echo$or-nothing.str`.
+
+This was there from the day generics were built and was found by asking whether
+`any.many` worked. It did not, and neither did bare `any` handed a `many`.
 
 Bare `any` stays the floor: it takes anything, and what can be done with it is
 what can be done with every type — hold it, move it, lend it, hand it back.

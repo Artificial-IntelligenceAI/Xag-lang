@@ -1050,6 +1050,47 @@ void aBlankMaySayWhatItTakes() {
       for (const xag::ChainSegment &seg : item.chain.segments)
         CHECK(seg.isName || seg.text != "number");
 
+  // A blank filled in with a type that is more than one word. Filling wrote one
+  // segment, which is every type a scalar and no type else: a `many` came out
+  // spelled `unknown`, and an `or-nothing` came out spelled as the thing inside
+  // it, so the copy took a plain `int64` and refused the call that asked for it.
+  const std::string wider =
+      "fn.int64 'echo' [any 'v'] { give [*0*]; }\n"
+      "START {\n"
+      "    var.many.int64 'a' = [*1* *2*];\n"
+      "    var.or-nothing.str 'b' = [nothing];\n"
+      "    print.stdout[echo[move 'a'] echo[move 'b'] \\n];\n"
+      "}\n";
+  const xag::Source held("test.xag", wider);
+  const xag::LexResult heldLex = xag::lex(held);
+  xag::ParseResult heldParsed = xag::parse(held, heldLex.tokens);
+  const xag::CheckResult heldChecked = xag::check(held, heldParsed.program);
+  CHECK(heldChecked.ok());
+  CHECK(heldChecked.instantiations.size() == 2);
+  CHECK(heldChecked.instantiations[0].second == "many.int64");
+  CHECK(heldChecked.instantiations[1].second == "or-nothing.str");
+
+  xag::Program wide;
+  CHECK(xag::expand(heldParsed.program, heldChecked, wide));
+  // The copies read clean, which is the whole test: a chain spelled `unknown`
+  // does not, and neither does one that lost its `or-nothing`.
+  CHECK(xag::check(held, wide).ok());
+  bool asMany = false, asMaybe = false;
+  for (const xag::Item &item : wide.items) {
+    asMany = asMany || item.name == "echo$many.int64";
+    asMaybe = asMaybe || item.name == "echo$or-nothing.str";
+    if (item.name == "echo$many.int64") {
+      // Two segments where the blank stood, not one.
+      CHECK(item.params.size() == 1);
+      const std::vector<xag::ChainSegment> &segs = item.params[0].chain.segments;
+      CHECK(segs.size() == 2);
+      CHECK(segs[0].text == "many");
+      CHECK(segs[1].text == "int64");
+    }
+  }
+  CHECK(asMany);
+  CHECK(asMaybe);
+
   // Every family word, against a type inside it and a type outside it.
   CHECK(xag::inFamily(xag::Ty{xag::Type::Int64}, xag::Family::Number));
   CHECK(!xag::inFamily(xag::Ty{xag::Type::Str}, xag::Family::Number));
