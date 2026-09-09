@@ -233,4 +233,36 @@ when the chain is already where everything about one lives.
 
 ## Open
 
-- Nothing. Everything asked has been answered, and none of it is built.
+- Nothing about the design. Everything asked has been answered.
+
+## What it costs to build
+
+Tried on 2026-09-09 and backed out, because the shape is worth knowing before
+anybody starts again.
+
+Adding `any` as a type word and binding it at a call is an afternoon: the first
+argument whose parameter has a blank says what the blank is, every other `any`
+in the signature is then that, and the answer's type is filled in the same way.
+That much worked.
+
+Then the call fails on **ownership**, and it is not a bug:
+
+```text
+`'n'` is handed over here, and nothing says so.        E0406
+```
+
+`Own.cpp` decides whether a thing copies or is handed over by looking at the
+type word, and `any` is not a type it knows. Whether a generic's parameter
+copies **depends on what it is called with** — `int64` copies, `str` is handed
+over — so ownership cannot be settled until the type is. The same is true of
+`MirBuild`, and of everything else that asks whether something copies.
+
+So generics are not a front-end feature. They reach four passes, and the way
+that keeps them out of all four is the one this document already assumes: a
+generic is **expanded away before anything runs**, once per type it is called
+with, so `Check`, `Own`, `MirBuild` and `Native` never meet a blank at all.
+
+That needs the binding, which is the checker's to work out, and then a **deep
+copy of an item's tree** with the blank replaced — and the tree is held in
+`unique_ptr`s with no clone. Writing that clone is the first real piece of work,
+and nothing else can start without it.
