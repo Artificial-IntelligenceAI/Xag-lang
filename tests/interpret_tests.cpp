@@ -1,5 +1,7 @@
 #include "xag/Check.h"
 #include "xag/Interpret.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Own.h"
@@ -37,7 +39,7 @@ std::string given;
 
 Ran run(const std::string &text) {
   Ran out;
-  const xag::Source source("test.xag", text);
+  const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
   if (!lexed.ok())
     return out;
@@ -86,7 +88,7 @@ Ran run(const std::string &text) {
 // The same run, watching. Answers how many places a sum came round, and -1 when
 // the program did not get as far as running.
 int watched(const std::string &text) {
-  const xag::Source source("test.xag", text);
+  const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
   if (!lexed.ok())
     return -1;

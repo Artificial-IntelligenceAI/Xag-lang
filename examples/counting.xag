@@ -1,13 +1,17 @@
-# Chains, defaults, and a loop.
+READ_ME {
+Chains, defaults, and a loop.
+}
 
-const.int64 'LIMIT' = [*10*];
+PREP {
+    const.int64 'LIMIT' = [*10*];
 
-fn.int64 'sum-to' [int64 'n'] {
-    var.mut.int64 'total' = [*0*];
-    loop.range.int64 'i' = [*1*, 'n'] {
-        set 'total' = ['total' + 'i'];
+    fn.int64 'sum-to' [int64 'n'] {
+        var.mut.int64 'total' = [*0*];
+        loop.range.int64 'i' = [*1*, 'n'] {
+            set 'total' = ['total' + 'i'];
+        }
+        give ['total'];
     }
-    give ['total'];
 }
 
 START {

@@ -1,18 +1,23 @@
-# Lending, and the name that says how long a loan lasts.
+READ_ME {
+Lending, and the name that says how long a loan lasts.
 
-# One borrowed parameter, so there is only one thing the answer could be
-# borrowed from and nothing has to be named.
-fn.loan.str 'echo' [loan.str 'text'] {
-    give ['text'];
+One borrowed parameter, so there is only one thing the answer could be
+borrowed from and nothing has to be named.
 }
 
-# Two borrowed parameters. The answer comes from one of them, the compiler
-# cannot see which, so the loan is named and everything on it says so.
-fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {
-    if count['a'] >== count['b'] {
-        give ['a'];
-    } else {
-        give ['b'];
+PREP {
+    fn.loan.str 'echo' [loan.str 'text'] {
+        give ['text'];
+    }
+
+    # Two borrowed parameters. The answer comes from one of them, the compiler
+    # cannot see which, so the loan is named and everything on it says so.
+    fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {
+        if count['a'] >== count['b'] {
+            give ['a'];
+        } else {
+            give ['b'];
+        }
     }
 }
 

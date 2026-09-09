@@ -1,23 +1,27 @@
-# Lending for reading, lending for writing, and handing over for good.
-
-fn.int64 'size' [loan.str 'text'] {
-    give [count['text']];
+READ_ME {
+Lending for reading, lending for writing, and handing over for good.
 }
 
-fn.nothing 'shout' [loanmut.str 'text'] {
-    set 'text' = ['text' *!*];
-}
+PREP {
+    fn.int64 'size' [loan.str 'text'] {
+        give [count['text']];
+    }
 
-fn.nothing 'keep' [str 'text'] {
-    print.stdout[str:*kept: * 'text' \n];
-}
+    fn.nothing 'shout' [loanmut.str 'text'] {
+        set 'text' = ['text' *!*];
+    }
 
-# Two things are lent and one comes back, so the loan is named.
-fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {
-    if count['a'] >== count['b'] {
-        give ['a'];
-    } else {
-        give ['b'];
+    fn.nothing 'keep' [str 'text'] {
+        print.stdout[str:*kept: * 'text' \n];
+    }
+
+    # Two things are lent and one comes back, so the loan is named.
+    fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {
+        if count['a'] >== count['b'] {
+            give ['a'];
+        } else {
+            give ['b'];
+        }
     }
 }
 

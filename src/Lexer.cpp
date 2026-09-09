@@ -11,6 +11,7 @@ const char *describe(TokenKind kind) {
   case TokenKind::Name:         return "a name";
   case TokenKind::Written:      return "a written value";
   case TokenKind::Escape:       return "an escape";
+  case TokenKind::Markdown:     return "what a `READ_ME` says";
   case TokenKind::Dot:          return "`.`";
   case TokenKind::Comma:        return "`,`";
   case TokenKind::Semicolon:    return "`;`";
@@ -151,6 +152,69 @@ private:
               "consulting what is around it."});
   }
 
+  // From the `{` after `READ_ME` to the `}` that closes it, kept exactly. The
+  // `{` and the `}` are emitted as themselves, so the parser reads the same
+  // shape it reads for every other block; what is between them arrives as one
+  // token nobody has to take apart.
+  void takeWhatItSays() {
+    skipTrivia();
+    if (at_ >= text_.size() || text_[at_] != '{')
+      return; // Not a block. The parser says so, in its own words.
+    const unsigned brace = at_;
+    ++at_;
+    emit(TokenKind::LBrace, brace);
+
+    const unsigned begin = at_;
+    unsigned end = text_.size();
+    unsigned closing = text_.size();
+    // Two ways to end, because there are two ways to write one.
+    //
+    // On one line — `READ_ME { }`, which is what an empty one looks like — it
+    // ends at the first `}`, because there is nowhere else it could.
+    //
+    // Over several, it ends at a `}` standing at the start of a line, which is
+    // where every block at the top of a file ends. Anywhere else inside those
+    // lines a `}` is part of what is being said, so a fenced block full of them
+    // reads as written.
+    bool anyLines = false;
+    for (unsigned at = at_; at < text_.size(); ++at) {
+      if (text_[at] == '\n') {
+        anyLines = true;
+        continue;
+      }
+      if (text_[at] != '}')
+        continue;
+      if (anyLines && at != 0 && text_[at - 1] != '\n')
+        continue;
+      end = at;
+      closing = at;
+      break;
+    }
+    // What is said is everything up to that line, less the newline before it,
+    // and less the space around it — an empty one says nothing rather than
+    // saying a space, and blank lines at either end of prose are not part of it.
+    unsigned from = begin;
+    unsigned said = end;
+    while (from < said && std::isspace(static_cast<unsigned char>(text_[from])))
+      ++from;
+    while (said > from && std::isspace(static_cast<unsigned char>(text_[said - 1])))
+      --said;
+    emit(TokenKind::Markdown, begin, std::string(text_.substr(from, said - from)));
+    result_.tokens.back().span.end = end;
+
+    if (closing >= text_.size()) {
+      complain(Span{brace, brace + 1}, "E0010",
+               "this `READ_ME` is never closed.",
+               {"a block ends where it began, at the edge of the line"},
+               {"what a `READ_ME` says is kept exactly, so it ends at a `}` "
+                "standing alone at the start of a line — a `}` anywhere else is "
+                "part of what it says."});
+      at_ = text_.size();
+      return;
+    }
+    at_ = closing;
+  }
+
   void one() {
     const unsigned begin = at_;
     const char c = text_[at_];
@@ -251,7 +315,20 @@ private:
         }
         break;
       }
-      emit(TokenKind::Word, begin, std::string(text_.substr(begin, at_ - begin)));
+      const std::string word(text_.substr(begin, at_ - begin));
+      // `READ_ME` is the one word that stops the reading. What follows its `{`
+      // is prose, and prose uses every mark this reader knows — so it is taken
+      // whole rather than read and then ignored.
+      //
+      // It ends at a `}` standing alone at the start of a line, the way every
+      // block at the top of a file ends. Anywhere else a `}` is just a `}`, so
+      // a fenced code block full of them says what it means.
+      if (word == "READ_ME") {
+        emit(TokenKind::Word, begin, word);
+        takeWhatItSays();
+        return;
+      }
+      emit(TokenKind::Word, begin, word);
       return;
     }
 

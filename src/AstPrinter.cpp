@@ -191,6 +191,10 @@ struct Printer {
 
 void print(const Program &program, std::ostream &out) {
   Printer printer{out};
+  // What the file says, shown as one line saying how much of it there is. The
+  // prose itself is not the tree's business, and printing it would put markdown
+  // in the middle of a printed tree.
+  out << "READ_ME " << program.readMe.size() << " character(s)\n";
   for (const Item &item : program.items)
     printer.item(item);
 }

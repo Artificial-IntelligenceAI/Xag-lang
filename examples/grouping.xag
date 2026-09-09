@@ -1,13 +1,17 @@
-# A `struct` gives a name to a group of things, each with a name and a type of
-# its own. It is written where a function is, and reads the same way, because it
-# asks the same question: what is in here, in what order, and called what.
+READ_ME {
+A `struct` gives a name to a group of things, each with a name and a type of
+its own. It is written where a function is, and reads the same way, because it
+asks the same question: what is in here, in what order, and called what.
+}
 
-struct 'point' [int64 'x', int64 'y']
+PREP {
+    struct 'point' [int64 'x', int64 'y']
 
-struct 'runner' [str 'name', point 'at']
+    struct 'runner' [str 'name', point 'at']
 
-fn.int64 'across' [loan.point 'p'] {
-    give ['p'.x + 'p'.y];
+    fn.int64 'across' [loan.point 'p'] {
+        give ['p'.x + 'p'.y];
+    }
 }
 
 START {

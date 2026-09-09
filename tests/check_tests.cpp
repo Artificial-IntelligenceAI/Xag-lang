@@ -5,6 +5,8 @@
 #include <set>
 #include "xag/Fold.h"
 #include "xag/Mir.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Parser.h"
 
@@ -36,7 +38,7 @@ struct Checked {
 };
 
 Checked run(const std::string &text) {
-  Checked c{xag::Source("test.xag", text), {}, {}, {}};
+  Checked c{xag::Source("test.xag", xag::asFile(text)), {}, {}, {}};
   c.lexed = xag::lex(c.source);
   c.parsed = xag::parse(c.source, c.lexed.tokens);
   c.checked = xag::check(c.source, c.parsed.program);
@@ -63,7 +65,7 @@ std::string boundedIn(const std::string &body) {
 // The first code from the pass that runs once the middle layer is built, or ""
 // when it had nothing to say.
 std::string builtWith(const std::string &text, xag::Rewriting rewriting) {
-  const xag::Source source("test.xag", text);
+  const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
@@ -776,7 +778,7 @@ void aGenericIsWrittenOutPerType() {
       "    var.bool 'b' = [*true*];\n"
       "    print.stdout[same['n'] same['b'] \\n];\n"
       "}\n";
-  const xag::Source source("test.xag", program);
+  const xag::Source source("test.xag", xag::asFile(program));
   const xag::LexResult lexed = xag::lex(source);
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   CHECK(parsed.ok());
@@ -808,7 +810,7 @@ void aGenericIsWrittenOutPerType() {
       "    var.int64 'n' = [*3*];\n"
       "    print.stdout[same['n'] same['n'] \\n];\n"
       "}\n";
-  const xag::Source other("test.xag", twice);
+  const xag::Source other("test.xag", xag::asFile(twice));
   const xag::LexResult lexed2 = xag::lex(other);
   xag::ParseResult parsed2 = xag::parse(other, lexed2.tokens);
   const xag::CheckResult checked2 = xag::check(other, parsed2.program);
@@ -818,7 +820,7 @@ void aGenericIsWrittenOutPerType() {
   // with a blank still in it.
   const std::string unused =
       "fn.any 'same' [any 'x'] { give ['x']; }\nSTART { }\n";
-  const xag::Source third("test.xag", unused);
+  const xag::Source third("test.xag", xag::asFile(unused));
   const xag::LexResult lexed3 = xag::lex(third);
   xag::ParseResult parsed3 = xag::parse(third, lexed3.tokens);
   const xag::CheckResult checked3 = xag::check(third, parsed3.program);
@@ -840,7 +842,7 @@ void aGenericCallingAGenericIsWrittenOutToo() {
       "    var.bool 'b' = [*true*];\n"
       "    print.stdout[twice['n'] twice['b'] \\n];\n"
       "}\n";
-  const xag::Source source("test.xag", nested);
+  const xag::Source source("test.xag", xag::asFile(nested));
   const xag::LexResult lexed = xag::lex(source);
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   CHECK(parsed.ok());
@@ -885,7 +887,7 @@ void aGenericCallingAGenericIsWrittenOutToo() {
       "    var.int64 'a' = [*5*];\n"
       "    print.stdout[down['a'] \\n];\n"
       "}\n";
-  const xag::Source other("test.xag", itself);
+  const xag::Source other("test.xag", xag::asFile(itself));
   const xag::LexResult lexed2 = xag::lex(other);
   xag::ParseResult parsed2 = xag::parse(other, lexed2.tokens);
   CHECK(parsed2.ok());
@@ -1025,8 +1027,14 @@ void aBlankMaySayWhatItTakes() {
   CHECK(c.code(0) == "E0539");
   CHECK(c.checked.diagnostics.front().message ==
         "`point` is not a number, and `twice` asks for one.");
-  // On the caller's own line — line 6, the print — and not inside `twice`.
-  CHECK(c.source.positionOf(c.checked.diagnostics.front().span.begin).line == 6);
+  // On the caller's own line — the print — and not inside `twice`. Found by
+  // looking rather than counted, so that what a file has to be wrapped in
+  // cannot make this say the wrong thing.
+  const std::string_view whole = c.source.text();
+  const std::string_view::size_type calls = whole.find("twice['p']");
+  CHECK(calls != std::string_view::npos);
+  CHECK(c.source.positionOf(c.checked.diagnostics.front().span.begin).line ==
+        c.source.positionOf(static_cast<unsigned>(calls)).line);
 
   // The same generic at a type it does take is an ordinary call, and the word
   // saying what it takes does not survive into the copy: filling `any.number`
@@ -1037,7 +1045,7 @@ void aBlankMaySayWhatItTakes() {
       "    var.int64 'n' = [*7*];\n"
       "    print.stdout[twice['n'] \\n];\n"
       "}\n";
-  const xag::Source source("test.xag", fine);
+  const xag::Source source("test.xag", xag::asFile(fine));
   const xag::LexResult lexed = xag::lex(source);
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
@@ -1061,7 +1069,7 @@ void aBlankMaySayWhatItTakes() {
       "    var.or-nothing.str 'b' = [nothing];\n"
       "    print.stdout[echo[move 'a'] echo[move 'b'] \\n];\n"
       "}\n";
-  const xag::Source held("test.xag", wider);
+  const xag::Source held("test.xag", xag::asFile(wider));
   const xag::LexResult heldLex = xag::lex(held);
   xag::ParseResult heldParsed = xag::parse(held, heldLex.tokens);
   const xag::CheckResult heldChecked = xag::check(held, heldParsed.program);
@@ -1118,7 +1126,7 @@ void aBlankMaySayWhatItTakes() {
 // the copies — which means these are found by the second reading, the way the
 // driver finds them.
 std::string insideTheCopies(const std::string &text) {
-  const xag::Source source("test.xag", text);
+  const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   if (!parsed.ok())
@@ -1148,7 +1156,7 @@ void whicheverKeepsOneArm() {
       "    var.bool 'b' = [*true*];\n"
       "    print.stdout[show['n'] show['b'] \\n];\n"
       "}\n";
-  const xag::Source source("test.xag", program);
+  const xag::Source source("test.xag", xag::asFile(program));
   const xag::LexResult lexed = xag::lex(source);
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   CHECK(parsed.ok());
@@ -1222,7 +1230,7 @@ void howAThingIsHeldIsItsOwnQuestion() {
       "    var.mut.int64 'n' = [*7*];\n"
       "    print.stdout[howHeld['n'] howHeld[loan 'n'] howHeld[loanmut 'n'] \\n];\n"
       "}\n";
-  const xag::Source source("test.xag", program);
+  const xag::Source source("test.xag", xag::asFile(program));
   const xag::LexResult lexed = xag::lex(source);
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   CHECK(parsed.ok());
@@ -1292,7 +1300,7 @@ void howAThingIsHeldIsItsOwnQuestion() {
       "    var.mut.int64 'n' = [*1*];\n"
       "    print.stdout[f[loan 'n'] g[loanmut 'n'] \\n];\n"
       "}\n";
-  const xag::Source held2("test.xag", lent);
+  const xag::Source held2("test.xag", xag::asFile(lent));
   const xag::LexResult lentLex = xag::lex(held2);
   xag::ParseResult lentParsed = xag::parse(held2, lentLex.tokens);
   const xag::CheckResult lentChecked = xag::check(held2, lentParsed.program);
@@ -1362,7 +1370,7 @@ void loopPartsWritesOneCopyPerField() {
       "    var.point 'p' = [*20* *22*];\n"
       "    print.stdout[(show[loan 'p']) \\n];\n"
       "}\n";
-  const xag::Source source("test.xag", program);
+  const xag::Source source("test.xag", xag::asFile(program));
   const xag::LexResult lexed = xag::lex(source);
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   CHECK(parsed.ok());

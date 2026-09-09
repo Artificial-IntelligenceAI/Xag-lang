@@ -8,6 +8,8 @@
 #include "xag/Check.h"
 #include "xag/Fast.h"
 #include "xag/Interpret.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Own.h"
@@ -56,7 +58,7 @@ Said capture(const xag::Mir &mir, bool quick) {
 }
 
 void agree(const std::string &text, int line) {
-  const xag::Source source("test.xag", text);
+  const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);

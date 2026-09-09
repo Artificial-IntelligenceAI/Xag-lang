@@ -1140,12 +1140,63 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   Twenty million rounds with a branch in them: nine seconds of build without it,
   three hundredths with. The same program either way, and the same answer.
 
+## A file is three blocks
+
+```
+READ_ME {
+
+}
+
+PREP {
+
+}
+
+START {
+
+}
+```
+
+All three are written, in that order, whether or not there is anything in them.
+A shape that is sometimes there is a shape a reader has to look for; this one is
+always in the same place.
+
+**`PREP` is everything outside `START`** — the structs, the constants, the
+functions. It reads like a recipe: what the dish is made of, then the method.
+The split it names is not given-against-not — a `var` in `START` is given too —
+but **lasts the whole program** against **lasts while it runs**.
+
+`GIVEN` and `NAMES` were tried and dropped: a `var` in `START` is given a name
+as much as a `const` is, so both would name the block after something it shares
+with the thing it is meant to be the opposite of.
+
+**`READ_ME` is prose**, kept exactly and read by nobody. It is there so that what
+a file is for lives in the file rather than beside it.
+
+Markdown uses every mark Xag does — braces, backticks, `*`, `'` — so it cannot
+be read as Xag and then passed over. The reader stops reading: `READ_ME` is the
+one word that turns the lexer off, and what follows arrives as a single token.
+
+It ends **at a `}` standing at the start of a line**, which is where every block
+at the top of a file ends. On one line — `READ_ME { }`, which is what an empty
+one looks like — it ends at the first `}`, because there is nowhere else it
+could.
+
+The cost is exact and worth writing down: a `}` at the start of a line inside the
+prose ends the block early, fenced code included. Indent it by one space and it
+is prose again. The alternative was a delimiter nothing else in the language
+uses, and a second thing to remember is worse than a rule with one edge.
+
+Errors: `E0111` when one of the three is missing, and it says which; `E0110` for
+anything standing outside all three; `E0104` when a `var` is written in `PREP`,
+which is the one mistake the split invites.
+
 ## Capitals
 
-`START` and `UNSAFE` are written in capitals so they can be found. That is the
-whole reason. Where a program begins, and where it stops being checked, are the
-two things a reader scans for and a reviewer greps for, and capitals make them
-impossible to miss in a file of lower-case words.
+`READ_ME`, `PREP`, `START` and `UNSAFE` are written in capitals so they can be
+found. That is the whole reason. The shape of a file, where a program begins,
+and where it stops being checked are what a reader scans for and a reviewer
+greps for, and capitals make them impossible to miss in a file of lower-case
+words.
 
 It is not a system, and nothing else is capitalised by it. `export` and
 `program` are lower case in **Open** above and stay that way unless there is the

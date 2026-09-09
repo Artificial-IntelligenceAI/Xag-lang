@@ -1,9 +1,14 @@
-# Adding up whatever is given, and saying so when something is not a number.
-#
-# `read.stdin` answers a `str` or nothing: the end of the input is not an empty
-# line, because an empty line is something a program may legitimately read.
-# `number` answers whichever number the chain beside it asked for, or nothing,
-# because text that is not a number has no number in it.
+READ_ME {
+Adding up whatever is given, and saying so when something is not a number.
+
+`read.stdin` answers a `str` or nothing: the end of the input is not an empty
+line, because an empty line is something a program may legitimately read.
+`number` answers whichever number the chain beside it asked for, or nothing,
+because text that is not a number has no number in it.
+}
+
+PREP {
+}
 
 START {
     var.many.str 'given' = [arguments[]];

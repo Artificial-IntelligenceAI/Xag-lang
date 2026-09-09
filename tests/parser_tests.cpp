@@ -1,3 +1,5 @@
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/AstClone.h"
 #include "xag/Parser.h"
@@ -39,7 +41,7 @@ struct Parsed {
 };
 
 Parsed run(const std::string &text) {
-  Parsed p{xag::Source("test.xag", text), {}, {}, {}};
+  Parsed p{xag::Source("test.xag", xag::asFile(text)), {}, {}, {}};
   p.lexed = xag::lex(p.source);
   p.parsed = xag::parse(p.source, p.lexed.tokens);
   std::ostringstream out;
@@ -438,7 +440,8 @@ void aValueOnItsOwnIsSaidSoOnce() {
   // What must still be its own answer.
   CHECK(inStart("print.stdout[str:*hi* \\n];").ok());
   CHECK(inStart("var.int64 'n' = [*1*]\n    var.int64 'm' = [*2*];").code(0) == "E0103");
-  CHECK(run("START { }\n}\n").code(0) == "E0104");
+  // Nothing stands outside the three blocks a file is.
+  CHECK(run("START { }\n}\n").code(0) == "E0110");
 }
 
 // A clone is faithful when the printer cannot tell the two apart. The printer
@@ -476,7 +479,7 @@ void aCloneIsIndistinguishable() {
       "    }\n"
       "}\n";
 
-  const xag::Source source("test.xag", program);
+  const xag::Source source("test.xag", xag::asFile(program));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   CHECK(parsed.ok());
@@ -511,7 +514,7 @@ void theBlankIsFilledEverywhereAChainIs() {
       "    }\n"
       "    give ['best'];\n"
       "}\n";
-  const xag::Source source("test.xag", generic);
+  const xag::Source source("test.xag", xag::asFile(generic));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   CHECK(parsed.ok());
@@ -540,7 +543,7 @@ void theBlankIsFilledEverywhereAChainIs() {
       "fn.loan.'any'.str 'pick' [loan.'any'.str 'a', loan.'any'.str 'b'] {\n"
       "    give ['a'];\n"
       "}\n";
-  const xag::Source second("test.xag", named);
+  const xag::Source second("test.xag", xag::asFile(named));
   const xag::LexResult lexed2 = xag::lex(second);
   const xag::ParseResult parsed2 = xag::parse(second, lexed2.tokens);
   CHECK(parsed2.ok());

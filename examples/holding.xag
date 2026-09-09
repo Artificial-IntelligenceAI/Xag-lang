@@ -1,12 +1,16 @@
-# A `many` holds a fixed number of values of one type. Its length is settled
-# when it is made, and every place has something in it from then on.
+READ_ME {
+A `many` holds a fixed number of values of one type. Its length is settled
+when it is made, and every place has something in it from then on.
+}
 
-fn.int64 'total' [loan.many.int64 'xs'] {
-    var.mut.int64 'sum' = [*0*];
-    loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {
-        set 'sum' = ['sum' + 'xs'['i']];
+PREP {
+    fn.int64 'total' [loan.many.int64 'xs'] {
+        var.mut.int64 'sum' = [*0*];
+        loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {
+            set 'sum' = ['sum' + 'xs'['i']];
+        }
+        give ['sum'];
     }
-    give ['sum'];
 }
 
 START {

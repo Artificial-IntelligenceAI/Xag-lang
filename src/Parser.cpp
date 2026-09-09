@@ -145,14 +145,90 @@ public:
   Parser(const Source &source, const std::vector<Token> &tokens)
       : source_(source), tokens_(tokens) {}
 
+  // A file is three blocks, in this order, and all three are written whether or
+  // not there is anything in them:
+  //
+  //     READ_ME { }      what it says, in prose
+  //     PREP { }         everything that lasts the whole program
+  //     START { }        the part that runs
+  //
+  // Written even when empty, because a shape that is sometimes there is a shape
+  // a reader has to look for. This one is always in the same place.
   ParseResult run() {
+    readMeBlock();
+    prepBlock();
+    startBlock();
+
+    // Nothing stands outside the three.
     while (!atEnd()) {
       const unsigned before = at_;
-      topItem();
-      if (at_ == before) // never spin on a token nothing consumed
+      complain(peek().span, "E0110",
+               "a file is `READ_ME`, `PREP` and `START`, and this is outside all "
+               "three.",
+               {"a file is three blocks, in that order"},
+               {"what lasts the whole program goes in `PREP`; what runs goes in "
+                "`START`."},
+               std::string("found ") + describe(peek().kind));
+      advance();
+      if (at_ == before)
         ++at_;
     }
     return std::move(result_);
+  }
+
+  // `READ_ME { … }` — prose, kept exactly as written and read by nobody.
+  void readMeBlock() {
+    if (!checkWord("READ_ME")) {
+      missing("READ_ME", "what this file says, which may be nothing yet");
+      return;
+    }
+    advance();
+    if (!expect(TokenKind::LBrace, "`{`"))
+      return;
+    if (check(TokenKind::Markdown))
+      result_.program.readMe = advance().text;
+    expect(TokenKind::RBrace, "`}`");
+  }
+
+  // `PREP { … }` — the structs, the constants and the functions. Everything
+  // that is there for as long as the program is.
+  void prepBlock() {
+    if (!checkWord("PREP")) {
+      missing("PREP", "what the program is made of, which may be nothing yet");
+      return;
+    }
+    advance();
+    if (!expect(TokenKind::LBrace, "`{`"))
+      return;
+    while (!check(TokenKind::RBrace) && !atEnd()) {
+      const unsigned before = at_;
+      topItem();
+      if (at_ == before)
+        ++at_;
+    }
+    expect(TokenKind::RBrace, "`}`");
+  }
+
+  void startBlock() {
+    if (!checkWord("START")) {
+      missing("START", "the part that runs, which may be nothing yet");
+      return;
+    }
+    Item out;
+    out.span.begin = peek().span.begin;
+    startItem(out);
+    out.span.end = previous().span.end;
+    result_.program.items.push_back(std::move(out));
+  }
+
+  void missing(const char *word, const char *what) {
+    complain(peek().span, "E0111",
+             std::string("this file has no `") + word + "`.",
+             {"a file is `READ_ME`, then `PREP`, then `START`"},
+             {std::string("`") + word + " { }` says " + what +
+              ". All three are written whether or not there is anything in "
+              "them, so a reader finds them in the same place every time."},
+             std::string("found ") + describe(peek().kind));
   }
 
 private:
@@ -1139,16 +1215,11 @@ private:
     Item out;
     out.span.begin = peek().span.begin;
 
-    if (checkWord("START")) {
-      startItem(out);
-      out.span.end = previous().span.end;
-      result_.program.items.push_back(std::move(out));
-      return;
-    }
-
     if (!check(TokenKind::Word)) {
-      complain(peek().span, "E0104", "a file holds constants, functions and `START`.",
-               {}, {}, std::string("found ") + describe(peek().kind));
+      complain(peek().span, "E0104", "a `PREP` holds structs, constants and functions.",
+               {"what lasts the whole program is written in `PREP`"},
+               {"a `var` belongs inside something that runs, and that is `START`."},
+               std::string("found ") + describe(peek().kind));
       advance();
       return;
     }
@@ -1220,10 +1291,10 @@ private:
       expect(TokenKind::Semicolon, "`;`");
     } else {
       complain(out.chain.span, "E0104",
-               "a file holds structs, constants, functions and `START`.",
-               {"`struct`, `const`, `fn` and `START` are what stands at the top of "
-                "a file"},
-               {"a `var` belongs inside something that runs; the top level does not run."});
+               "a `PREP` holds structs, constants and functions.",
+               {"`struct`, `const` and `fn` are what a `PREP` is made of"},
+               {"a `var` belongs inside something that runs, and the part that runs "
+                "is `START`."});
       recover();
       return;
     }

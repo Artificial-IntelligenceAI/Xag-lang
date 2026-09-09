@@ -4,6 +4,8 @@
 
 #include "xag/Check.h"
 #include "xag/Fold.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Native.h"
@@ -18,7 +20,7 @@ namespace {
 int failures = 0;
 
 void emits(const std::string &program, const std::string &wanted, int line) {
-  const xag::Source source("test.xag", program);
+  const xag::Source source("test.xag", xag::asFile(program));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
@@ -61,7 +63,7 @@ void emits(const std::string &program, const std::string &wanted, int line) {
 
 // Some bugs are a call that should not be there rather than one that should.
 void rejects(const std::string &program, const std::string &unwanted, int line) {
-  const xag::Source source("test.xag", program);
+  const xag::Source source("test.xag", xag::asFile(program));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);

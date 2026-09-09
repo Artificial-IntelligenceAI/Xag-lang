@@ -3,6 +3,8 @@
 #include "xag/Loops.h"
 #include "xag/Check.h"
 #include "xag/Fold.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Own.h"
@@ -93,7 +95,7 @@ xag::Building stops() {
 
 Settled settle(const std::string &text, const xag::Building &building = {}) {
   Settled out;
-  const xag::Source source("test.xag", text);
+  const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
   if (!lexed.ok())
     return out;
@@ -324,7 +326,7 @@ void aLoopWithAnAnswerIsWrittenAsItsAnswer() {
       "        else { set 'total' = ['total' - *3*]; }\n"
       "    }\n"
       "    print.stdout[str:*total = * 'total' \\n];\n}\n";
-  const xag::Source source("test.xag", branching);
+  const xag::Source source("test.xag", xag::asFile(branching));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
@@ -441,7 +443,7 @@ void aLoopThatFillsAnArrayIsNotWrittenAway() {
       "        set 'xs'['i'] = ['i' x *11*];\n"
       "    }\n"
       "    print.stdout[str:*b = * 'xs'[*3*] \\n];\n}\n";
-  const xag::Source source("test.xag", filling);
+  const xag::Source source("test.xag", xag::asFile(filling));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
@@ -470,7 +472,7 @@ void aNameIsChangedByMoreThanBeingAssignedTo() {
       "        set 'sum' = ['sum' + 'xs'['i']];\n"
       "    }\n}\n";
   const auto mirOf = [](const std::string &text) {
-    const xag::Source source("test.xag", text);
+    const xag::Source source("test.xag", xag::asFile(text));
     const xag::LexResult lexed = xag::lex(source);
     const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
     const xag::CheckResult checked = xag::check(source, parsed.program);

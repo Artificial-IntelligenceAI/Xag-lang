@@ -2,6 +2,8 @@
 // looked at. These are the things that may not happen in between.
 
 #include "xag/Check.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Own.h"
@@ -22,7 +24,7 @@ struct Held {
 
 Held run(const std::string &text) {
   Held out;
-  const xag::Source source("test.xag", text);
+  const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   if (!lexed.ok() || !parsed.ok())

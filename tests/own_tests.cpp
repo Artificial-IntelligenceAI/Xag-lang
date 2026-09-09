@@ -1,4 +1,6 @@
 #include "xag/Check.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Own.h"
 #include "xag/Parser.h"
@@ -46,7 +48,7 @@ struct Owned {
 };
 
 Owned run(const std::string &text) {
-  Owned o{xag::Source("test.xag", text), {}, {}, {}, {}};
+  Owned o{xag::Source("test.xag", xag::asFile(text)), {}, {}, {}, {}};
   o.lexed = xag::lex(o.source);
   o.parsed = xag::parse(o.source, o.lexed.tokens);
   o.checked = xag::check(o.source, o.parsed.program);

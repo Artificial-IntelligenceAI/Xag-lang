@@ -1,66 +1,70 @@
-# A blank, written `any`, is a type the caller picks. A function with one in it
-# is not a function yet — it is a shape, and the compiler writes it out once for
-# every type anybody calls it with, before anything else runs. Nothing after
-# that ever meets a blank.
-
-struct 'point' [int64 'x', int64 'y']
-struct 'line' [point 'from', point 'to']
-
-# Bare `any` is the floor: it takes anything, and what can be done with it is
-# what can be done with every type — hold it, hand it back, lend it.
-fn.any 'same' [any 'v'] {
-    give ['v'];
+READ_ME {
+A blank, written `any`, is a type the caller picks. A function with one in it
+is not a function yet — it is a shape, and the compiler writes it out once for
+every type anybody calls it with, before anything else runs. Nothing after
+that ever meets a blank.
 }
 
-# `whichever` looks like `when` and is not. A `when` is a choice the program
-# makes while running, with both arms in it. This one is decided while
-# compiling: by the time it is read, `'v'` has a real type, so only the arm that
-# was chosen is carried into the program. Which is why `is str` may count
-# something that is text in one copy and not in another.
-fn.str 'show' [loan.any 'v'] {
-    whichever 'v' {
-        is number { give [convert-to-str['v']]; }
-        is bool   { give [convert-to-str['v']]; }
-        is str    { give [str:*"* 'v' str:*"*]; }
-        is many   { give [str:*several: * (convert-to-str[count['v']])]; }
+PREP {
+    struct 'point' [int64 'x', int64 'y']
+    struct 'line' [point 'from', point 'to']
 
-        # A struct it has never seen, walked. `loop.parts` is not really a
-        # loop: what a field holds is a different type on every turn, so the
-        # body is written out once per field rather than built once and run
-        # several times. A turn hands over the field — `'p'.name` is what it is
-        # called and `'p'.value` is what it holds — and `show` calls itself,
-        # which is how a `line` made of `point`s is shown at all.
-        is struct {
-            var.mut.str 'out' = [str:*<*];
-            loop.parts 'p' = ['v'] {
-                set 'out' = ['out' 'p'.name str:*=* (show[loan 'p'.value]) str:* *];
+    # Bare `any` is the floor: it takes anything, and what can be done with it is
+    # what can be done with every type — hold it, hand it back, lend it.
+    fn.any 'same' [any 'v'] {
+        give ['v'];
+    }
+
+    # `whichever` looks like `when` and is not. A `when` is a choice the program
+    # makes while running, with both arms in it. This one is decided while
+    # compiling: by the time it is read, `'v'` has a real type, so only the arm that
+    # was chosen is carried into the program. Which is why `is str` may count
+    # something that is text in one copy and not in another.
+    fn.str 'show' [loan.any 'v'] {
+        whichever 'v' {
+            is number { give [convert-to-str['v']]; }
+            is bool   { give [convert-to-str['v']]; }
+            is str    { give [str:*"* 'v' str:*"*]; }
+            is many   { give [str:*several: * (convert-to-str[count['v']])]; }
+
+            # A struct it has never seen, walked. `loop.parts` is not really a
+            # loop: what a field holds is a different type on every turn, so the
+            # body is written out once per field rather than built once and run
+            # several times. A turn hands over the field — `'p'.name` is what it is
+            # called and `'p'.value` is what it holds — and `show` calls itself,
+            # which is how a `line` made of `point`s is shown at all.
+            is struct {
+                var.mut.str 'out' = [str:*<*];
+                loop.parts 'p' = ['v'] {
+                    set 'out' = ['out' 'p'.name str:*=* (show[loan 'p'.value]) str:* *];
+                }
+                give ['out' str:*>*];
             }
-            give ['out' str:*>*];
         }
     }
-}
 
-# What a value is and how it is held are two questions, so they are asked in two
-# `whichever`s. A borrowed number is a number and a borrow at once, and one
-# statement asking both would have two arms answering with no rule to choose
-# between them.
-fn.str 'held' [any 'v'] {
-    whichever 'v' {
-        is owned   { give [str:*held outright*]; }
-        is loan    { give [str:*lent for reading*]; }
-        is loanmut { give [str:*lent for writing*]; }
+    # What a value is and how it is held are two questions, so they are asked in two
+    # `whichever`s. A borrowed number is a number and a borrow at once, and one
+    # statement asking both would have two arms answering with no rule to choose
+    # between them.
+    fn.str 'held' [any 'v'] {
+        whichever 'v' {
+            is owned   { give [str:*held outright*]; }
+            is loan    { give [str:*lent for reading*]; }
+            is loanmut { give [str:*lent for writing*]; }
+        }
     }
-}
 
-# A blank may say what it will take. Without the word, a caller handing this
-# points would be told about a line inside `largest` that they did not write;
-# with it, the refusal lands on their own line.
-fn.any.number 'largest' [loan.many.any.number 'xs'] {
-    var.mut.any.number 'best' = ['xs'[*0*]];
-    loop.range.int64 'i' = [*1*, (count['xs'] - *1*)] {
-        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }
+    # A blank may say what it will take. Without the word, a caller handing this
+    # points would be told about a line inside `largest` that they did not write;
+    # with it, the refusal lands on their own line.
+    fn.any.number 'largest' [loan.many.any.number 'xs'] {
+        var.mut.any.number 'best' = ['xs'[*0*]];
+        loop.range.int64 'i' = [*1*, (count['xs'] - *1*)] {
+            if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }
+        }
+        give ['best'];
     }
-    give ['best'];
 }
 
 START {

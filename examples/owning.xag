@@ -1,16 +1,20 @@
-# What a name owns, what it lends, and what it gives away.
-
-fn.int64 'size' [loan.str 'text'] {
-    give [count['text']];
+READ_ME {
+What a name owns, what it lends, and what it gives away.
 }
 
-fn.nothing 'excite' [loanmut.str 'text'] {
-    set 'text' = ['text' *!*];
-}
+PREP {
+    fn.int64 'size' [loan.str 'text'] {
+        give [count['text']];
+    }
 
-# No ownership word, so this one takes it.
-fn.nothing 'keep' [str 'text'] {
-    print.stdout['text' \n];
+    fn.nothing 'excite' [loanmut.str 'text'] {
+        set 'text' = ['text' *!*];
+    }
+
+    # No ownership word, so this one takes it.
+    fn.nothing 'keep' [str 'text'] {
+        print.stdout['text' \n];
+    }
 }
 
 START {

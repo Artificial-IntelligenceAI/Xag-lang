@@ -1,4 +1,6 @@
 #include "xag/Check.h"
+#include "as_file.h"
+
 #include "xag/Lexer.h"
 #include "xag/Mir.h"
 #include "xag/Parser.h"
@@ -50,7 +52,7 @@ struct Built {
 };
 
 Built run(const std::string &text, bool elaborate = true) {
-  Built b{xag::Source("test.xag", text), {}, {}, {}, {}, {}};
+  Built b{xag::Source("test.xag", xag::asFile(text)), {}, {}, {}, {}, {}};
   b.lexed = xag::lex(b.source);
   b.parsed = xag::parse(b.source, b.lexed.tokens);
   b.checked = xag::check(b.source, b.parsed.program);

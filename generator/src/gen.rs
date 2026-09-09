@@ -132,6 +132,8 @@ pub struct Writer<'a> {
     shapes: Vec<Shape>,
     consts: Vec<Var>,
     next_name: u32,
+    /// What the file was written from, so that what it says can say so.
+    seed: u64,
     /// Names a loop steps itself, which nothing may borrow into a struct. The
     /// borrow would outlive the statement that took it and the next turn would
     /// change what it points at — refused, and rightly, but the refusal would
@@ -163,6 +165,7 @@ pub fn generate(seed: u64, size: u32, out: &mut String) {
         shapes: Vec::new(),
         consts: Vec::new(),
         next_name: 0,
+        seed,
         stepped: Vec::new(),
         indent: 0,
         size,
@@ -259,7 +262,12 @@ impl<'a> Writer<'a> {
     // ---- the program
 
     fn program(&mut self) {
-        self.out.push_str("# written by xag-oracle\n\n");
+        // A file is three blocks, and a generated one is a file like any other.
+        // What it says is what wrote it and what asked for it, so a case kept
+        // from a failing run says where it came from.
+        self.out.push_str("READ_ME {\nWritten by xag-oracle from seed ");
+        self.out.push_str(&self.seed.to_string());
+        self.out.push_str(".\n}\n\nPREP {\n");
 
         // Something to hand a `str` to, so that moves and their drop flags get
         // written as well as read.
@@ -342,7 +350,8 @@ impl<'a> Writer<'a> {
             self.function();
         }
 
-        self.out.push_str("START {\n");
+        // Everything that lasts the whole program has been written by here.
+        self.out.push_str("}\n\nSTART {\n");
         self.scopes.push(Vec::new());
         self.indent = 1;
         let statements = self.rng.below(self.size / 2 + 1) + self.size / 2 + 1;

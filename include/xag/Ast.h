@@ -157,6 +157,9 @@ struct Item {
 
 struct Program {
   std::vector<Item> items;
+  // What the file's `READ_ME` says, exactly as written. Nothing reads it: it is
+  // there so that what a file is for lives in the file rather than beside it.
+  std::string readMe;
 };
 
 } // namespace xag

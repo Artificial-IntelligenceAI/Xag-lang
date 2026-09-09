@@ -12,6 +12,11 @@ enum class TokenKind {
   Name,    // 'greeting'
   Written, // *hello*
   Escape,  // \n \t \r \\ — an item in its own right, never inside a mark
+  // Everything between `READ_ME {` and the `}` that closes it, exactly as
+  // written. Markdown uses every mark Xag does — braces, backticks, `*`, `'` —
+  // so it cannot be read as Xag and then passed over; it has to not be read at
+  // all.
+  Markdown,
   Dot,
   Comma,
   Semicolon,
