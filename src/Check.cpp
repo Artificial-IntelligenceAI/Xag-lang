@@ -534,7 +534,11 @@ private:
     settled.asks = asks;
     // How it is held is written in the chain, and until now only `Own.cpp` read
     // it. The type carries it so that a program can ask.
-    for (const ChainSegment &seg : chain.segments) {
+    // Only what stands before the type. The word after it is what the blank
+    // asks for, not how this is held — `any.loan` asks for a borrow and is not
+    // one, and reading it as one made the asking always answer yes.
+    for (std::size_t at = 0; at < typeAt; ++at) {
+      const ChainSegment &seg = chain.segments[at];
       if (seg.isName)
         continue;
       if (seg.text == "loan")
@@ -1038,8 +1042,24 @@ private:
   // brought. `any` against `int64` says int64; `many.any` against `many.str`
   // says str.
   static Ty blankFrom(Ty wanted, Ty got) {
-    if (wanted.kind == Type::Blank)
-      return got;
+    if (wanted.kind == Type::Blank) {
+      Ty filled = got;
+      // A chain that already says how it holds this has said it. `loan.any 'v'`
+      // is a read-borrow of whatever it is given, and a caller lending it for
+      // writing is lending something that may also be read — so the blank is
+      // `loan.int64` either way, and there is one copy rather than two.
+      //
+      // Taking it from the caller instead built `f$loanmut.int64` from a
+      // parameter whose chain said `loan`, and then refused the very call that
+      // had asked for it.
+      if (wanted.held != Held::Owned)
+        filled.held = wanted.held;
+      return filled;
+    }
+    // Only when the blank is the whole type. In `loan.many.any 'xs'` the borrow
+    // is of the `many`, and each place inside it is held no way at all — saying
+    // otherwise filled `var.mut.any 'best'` in with `loan.int64`, so the body
+    // declared a borrow and then wrote through it.
     if (wanted.element == Type::Blank && got.kind == wanted.kind)
       return elementOf(got);
     return Ty{};

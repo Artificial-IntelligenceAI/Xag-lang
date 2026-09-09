@@ -1282,6 +1282,60 @@ void howAThingIsHeldIsItsOwnQuestion() {
             "}\n")
             .checked.ok());
 
+  // How a thing is held belongs to the chain, and a chain that already says it
+  // does not say it twice. `loan.any` filled in with a borrowed `int64` is
+  // `loan.int64`, and the copy takes exactly what a hand-written one would.
+  const std::string lent =
+      "fn.int64 'f' [loan.any 'v'] { give [*0*]; }\n"
+      "fn.int64 'g' [loanmut.any 'v'] { give [*0*]; }\n"
+      "START {\n"
+      "    var.mut.int64 'n' = [*1*];\n"
+      "    print.stdout[f[loan 'n'] g[loanmut 'n'] \\n];\n"
+      "}\n";
+  const xag::Source held2("test.xag", lent);
+  const xag::LexResult lentLex = xag::lex(held2);
+  xag::ParseResult lentParsed = xag::parse(held2, lentLex.tokens);
+  const xag::CheckResult lentChecked = xag::check(held2, lentParsed.program);
+  CHECK(lentChecked.ok());
+  xag::Program lentOut;
+  CHECK(xag::expand(lentParsed.program, lentChecked, lentOut));
+  CHECK(xag::check(held2, lentOut).ok());
+  for (const xag::Item &item : lentOut.items)
+    if (item.name == "f$loan.int64" || item.name == "g$loanmut.int64") {
+      unsigned saidHowHeld = 0;
+      for (const xag::ChainSegment &seg : item.params[0].chain.segments)
+        if (!seg.isName && (seg.text == "loan" || seg.text == "loanmut"))
+          ++saidHowHeld;
+      CHECK(saidHowHeld == 1);
+    }
+
+  // A caller lending for writing where the chain asks to read is one copy, not
+  // two, and is refused by the same rule that refuses it for any function.
+  const Checked tighter = run(
+      "fn.int64 'f' [loan.any 'v'] { give [*0*]; }\n"
+      "START {\n"
+      "    var.mut.int64 'n' = [*1*];\n"
+      "    print.stdout[f[loanmut 'n'] \\n];\n"
+      "}\n");
+  CHECK(tighter.checked.instantiations.size() == 1);
+  CHECK(tighter.checked.instantiations[0].second == "loan.int64");
+
+  // In `loan.many.any` the borrow is of the `many`, and each place inside it is
+  // held no way at all — saying otherwise filled `var.mut.any 'best'` in with
+  // `loan.int64`, so the body declared a borrow and then wrote through it.
+  const Checked inside = run(
+      "fn.any 'largest' [loan.many.any 'xs'] {\n"
+      "    var.mut.any 'best' = ['xs'[*0*]];\n"
+      "    give ['best'];\n"
+      "}\n"
+      "START {\n"
+      "    var.many.int64 'ints' = [*3* *9* *4*];\n"
+      "    print.stdout[(largest[loan 'ints']) \\n];\n"
+      "}\n");
+  CHECK(inside.checked.ok());
+  CHECK(inside.checked.instantiations.size() == 1);
+  CHECK(inside.checked.instantiations[0].second == "int64");
+
   CHECK(xag::axisOf(xag::Family::Loan) == xag::Axis::How);
   CHECK(xag::axisOf(xag::Family::Owned) == xag::Axis::How);
   CHECK(xag::axisOf(xag::Family::Number) == xag::Axis::What);

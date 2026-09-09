@@ -133,6 +133,18 @@ unsigned fillChain(Chain &chain, std::string_view spelled) {
         break;
       from = dot + 1;
     }
+    // How a thing is held belongs to the chain, and a chain that already says
+    // it does not say it twice. `loan.any` filled in with `loan.int64` is
+    // `loan.int64`, not `loan.loan.int64`.
+    if (parts.size() > 1 && (parts.front() == "loan" || parts.front() == "loanmut")) {
+      bool alreadySaid = false;
+      for (std::size_t at = 0; at < i; ++at)
+        alreadySaid = alreadySaid || (!chain.segments[at].isName &&
+                                      (chain.segments[at].text == "loan" ||
+                                       chain.segments[at].text == "loanmut"));
+      if (alreadySaid)
+        parts.erase(parts.begin());
+    }
     chain.segments[i].text = parts.front();
     ++filled;
     for (std::size_t extra = 1; extra < parts.size(); ++extra)

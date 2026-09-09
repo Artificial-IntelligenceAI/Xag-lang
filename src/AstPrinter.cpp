@@ -74,6 +74,10 @@ struct Printer {
       out << " '" << s.name << "'\n";
       values(s.value, depth + 1);
       break;
+    case StmtKind::Unsafe:
+      out << "UNSAFE\n";
+      block(s.body, depth + 1);
+      break;
     case StmtKind::LoopParts:
       out << "loop.parts '" << s.name << "'\n";
       values(s.value, depth + 1);
