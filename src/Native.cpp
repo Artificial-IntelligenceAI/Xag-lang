@@ -169,6 +169,13 @@ private:
   // numbers holds nothing that has an owner, and asking is what keeps a drop of
   // one from being written at all.
   bool ownsAnything(const MirType &type) const {
+    // A borrow owns nothing, whatever it borrows. Taking the loan off first and
+    // asking about what is underneath says the opposite, and said it about
+    // every borrowed field a struct holds — which was harmless while nothing
+    // could tell the middle layer that a field was a borrow, and a double free
+    // the moment something could.
+    if (type.isLoan())
+      return false;
     const MirType bare = withoutLoan(type);
     if (copiesNamed(bare) || bare.held == Type::Nothing)
       return false;
@@ -193,6 +200,10 @@ private:
   // sent a struct held inside a struct to `xag_many_drop`, which was handed
   // something that was never allocated and aborted.
   void letGo(const MirType &type, llvm::Value *at) {
+    // Letting go of a borrow is doing nothing: what it points at belongs to
+    // whoever lent it, and is still theirs afterwards.
+    if (type.isLoan())
+      return;
     const MirType bare = withoutLoan(type);
     if (!ownsAnything(bare))
       return;

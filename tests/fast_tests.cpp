@@ -293,6 +293,21 @@ void onTurningNumbersIntoText() {
   AGREE("struct 'holder' [loan.int64 'x']\n"
         "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
         "  print.stdout['h'.x \\n]; }\n");
+  // A borrowed `str` field, which asks the question the others do not: who
+  // ends it. Nobody — a borrow owns nothing, whatever it borrows, and what it
+  // points at is still the lender's afterwards. Read as an owned one it was
+  // freed twice, and the built program stopped where the interpreters ran on.
+  AGREE("struct 'holds' [str 'kept', loan.str 'seen']\n"
+        "START { var.str 'a' = [*ab* *cd*]; var.str 'b' = [*x*];\n"
+        "  var.holds 'h' = [move 'b' loan 'a'];\n"
+        "  print.stdout['h'.kept str:*|* 'h'.seen str:*|* 'a' \\n]; }\n");
+  // The same, with nothing reading it at all: the double free was in letting
+  // go, so a struct nobody looks at is the sharper case.
+  AGREE("struct 'holds' [str 'kept', loan.str 'seen']\n"
+        "START { var.str 'a' = [*ab* *cd*];\n"
+        "  var.holds 'h' = [*alpha* loan 'a'];\n"
+        "  print.stdout[str:*made* \\n]; }\n");
+
   AGREE("struct 'both' [loan.int64 'a', str 'b']\n"
         "START { var.int64 'n' = [*4*]; var.both 'p' = [loan 'n' *hi*];\n"
         "  print.stdout['p'.a str:*|* 'p'.b \\n]; }\n");

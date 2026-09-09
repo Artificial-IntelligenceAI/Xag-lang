@@ -100,9 +100,11 @@ enum Held {
     /// not this file — and it did not build at all: the checker took it, both
     /// interpreters answered, and LLVM's own verifier refused the module.
     ///
-    /// Only what copies, for now. A borrowed `str` field asks a second question
-    /// — who ends it — and that one is answered by a rule rather than by a
-    /// layout.
+    /// Text included, which asks a second question the others do not: who ends
+    /// it. A borrow ends nothing, so the struct has to leave it alone and
+    /// whoever lent it has to still have it afterwards. Every case checks its
+    /// own allocation balance, so a struct that freed what it borrowed would be
+    /// a finding rather than a silence.
     Lent(Ty),
 }
 
@@ -355,7 +357,11 @@ impl<'a> Writer<'a> {
             let held = if !self.shapes.is_empty() && self.rng.chance(25) {
                 Held::Group(self.rng.below(self.shapes.len() as u32) as usize)
             } else if self.rng.chance(20) {
-                let ty = if self.rng.chance(20) { Ty::Bool } else { self.pick_whole() };
+                let ty = match self.rng.below(10) {
+                    0..=1 => Ty::Str,
+                    2 => Ty::Bool,
+                    _ => self.pick_whole(),
+                };
                 Held::Lent(ty)
             } else {
                 Held::Plain(match self.rng.below(10) {
