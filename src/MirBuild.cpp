@@ -675,7 +675,13 @@ private:
     std::vector<Operand> parts;
     if (!list.values.empty()) {
       const Value &v = list.values[0];
-      if (v.items.size() == 1 && checked_.of(v.items[0].get()).holds()) {
+      // A lone item that is already the whole array is the whole array. Asking
+      // only whether it is *a* `many` was right while a `many` held one level:
+      // one row of a `many` of a `many` is a `many` too, so `[[*ab*]]` put the
+      // row itself where the array goes, and letting go of it walked one `str`
+      // as though it were an array of them.
+      if (v.items.size() == 1 && checked_.of(v.items[0].get()).holds() &&
+          spell(checked_.of(v.items[0].get())) == spelled) {
         Operand operand = operandOf(*v.items[0]);
         const TypeRef type = operand.type;
         emit(Statement{StatementKind::Assign, span, place, {}, {},

@@ -301,6 +301,17 @@ void onTurningNumbersIntoText() {
   AGREE("START { var.many.many.int64 'g' = [[*1* *2* *3*] [*4* *5*]];\n"
         "  print.stdout[(count[loan 'g']) str:*|* (count[loan 'g'[*0*]]) \\n];\n"
         "  print.stdout['g'[*0*][*2*] str:*|* 'g'[*1*][*0*] \\n]; }\n");
+  // One row. A lone item that is already the whole array is the whole array —
+  // and one row of a `many` of a `many` is a `many` too, so asking only whether
+  // the item was *a* `many` put the row itself where the array goes. Letting go
+  // of it then walked one `str` as though it were an array of them.
+  AGREE("START { var.many.many.str 'w' = [[*ab*]];\n"
+        "  print.stdout['w'[*0*][*0*] str:*|* (count[loan 'w']) \\n]; }\n");
+  AGREE("START { var.many.many.int64 'g' = [[*7*]]; print.stdout['g'[*0*][*0*] \\n]; }\n");
+  // And a lone item that really is the whole array still is one.
+  AGREE("START { var.many.str 'a' = [*x* *y*]; var.many.str 'b' = [move 'a'];\n"
+        "  print.stdout['b'[*1*] \\n]; }\n");
+
   // Text in one, so that every place owns something and the whole of it has to
   // be let go of a level at a time.
   AGREE("START { var.many.many.str 'w' = [[*ab* *cd*] [*ef*]];\n"
