@@ -147,6 +147,11 @@ constexpr Ty unknownFrom(Span where) {
 // no link.
 constexpr Ty eitherTrace(Ty a, Ty b) { return a.tracedBack() ? a : b; }
 
+// Whether two families could both answer to one type, so that a `whichever`
+// asking both would have a choice to make and no rule to make it by. Every pair
+// is disjoint except the four number families under `number`.
+bool overlaps(Family a, Family b);
+
 // Whether a type is one of the things a family holds. A blank asking for a
 // family is answered by this at the call that fills it in.
 bool inFamily(Ty type, Family family);
@@ -243,6 +248,13 @@ struct CheckResult {
   // Which call filled which blank, so that expanding knows what each one should
   // be pointed at. Keyed by node, like everything else the checker works out.
   std::unordered_map<const Expr *, std::string> blankAt;
+
+  // Which arm of each `whichever` was chosen, by the type the subject turned
+  // out to be. The statement is replaced by that arm's block before ownership
+  // or the middle layer run, so nothing downstream ever meets the word — the
+  // same erasure a generic gets, and for the same reason: the arms that were
+  // not chosen are written against types this copy does not have.
+  std::unordered_map<const Stmt *, unsigned> chosenArm;
 
   // The most times any counted loop in this file goes round, where both its
   // ends are written down. Free to work out — the number is already computed to

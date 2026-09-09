@@ -593,6 +593,20 @@ private:
 
   void statement(const Stmt &s) {
     switch (s.kind) {
+    case StmtKind::Whichever:
+      // Never here. A `whichever` is decided while checking and the statement is
+      // replaced by the arm that was chosen, so reaching this pass means the
+      // pruning did not happen — and quietly walking past it would drop
+      // whichever arm the reader meant, silently, from a program that then
+      // builds. Said in the voice that means the fault is ours, and stopped,
+      // because the middle layer has no way to say anything at all.
+      result_.diagnostics.push_back(Diagnostic{
+          s.span, "", "I did not finish reading a `whichever` before building this.",
+          "here",
+          {"Only the arm it chose should have reached here, and the whole statement "
+           "arrived instead."},
+          {}, {}, Severity::Mine});
+      break;
     case StmtKind::Declare: {
       const Mode mode = modeOfChain(s.chain);
       const bool copies = copyChain(s.chain);

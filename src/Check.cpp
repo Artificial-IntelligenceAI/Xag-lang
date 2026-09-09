@@ -117,6 +117,17 @@ const char *asksFor(Family family) {
   return "anything";
 }
 
+bool overlaps(Family a, Family b) {
+  if (a == b)
+    return true;
+  const auto underNumber = [](Family f) {
+    return f == Family::Int || f == Family::Uint || f == Family::Bin ||
+           f == Family::Deci;
+  };
+  return (a == Family::Number && underNumber(b)) ||
+         (b == Family::Number && underNumber(a));
+}
+
 bool inFamily(Ty type, Family family) {
   switch (family) {
   case Family::Anything:
@@ -1834,6 +1845,89 @@ private:
       break;
     }
 
+    case StmtKind::Whichever: {
+      // Decided here, and nowhere else. The subject has a concrete type by the
+      // time this runs — a generic has already been written out once per type
+      // it was called with — so which arm is meant is a question with one
+      // answer, and the arms that were not chosen are never read at all. That
+      // is the point of them: `is str` may call `count` on something that is a
+      // `str` only in the copy where it is one.
+      const Ty subject = s.condition ? expr(*s.condition, Ty{}) : Ty{};
+      if (s.condition)
+        couldNotCheck(subject, s.condition->span,
+                      "this was not checked for what kind of thing it is.",
+                      "a `whichever` chooses by what kind of thing something is, and "
+                      "what this is could not be worked out");
+      if (subject == Ty{})
+        break;
+
+      std::vector<Family> asked(s.branches.size(), Family::Anything);
+      bool everyWordKnown = true;
+      for (unsigned i = 0; i < s.branches.size(); ++i) {
+        const Branch &arm = s.branches[i];
+        if (!namesFamily(arm.family)) {
+          complain(arm.familySpan, "E0540",
+                   "`" + arm.family + "` is not a kind of thing.",
+                   {"a `whichever` chooses by kind, and the kinds are a fixed list"},
+                   {"`number`, `int`, `uint`, `bin`, `deci`, `str`, `bool`, `many`, "
+                    "`or-nothing`, `struct`. A name of a type is not one of them: "
+                    "twenty-odd arms doing the same thing is what the kinds are for."});
+          everyWordKnown = false;
+          continue;
+        }
+        asked[i] = familyNamed(arm.family);
+      }
+      if (!everyWordKnown)
+        break;
+
+      // Two arms that could both answer leave the compiler picking, and there
+      // is no rule here saying one word is nearer than another — the language
+      // has no such idea anywhere else, and adding one for this would be adding
+      // it everywhere.
+      bool overlapping = false;
+      for (unsigned i = 0; i < s.branches.size(); ++i)
+        for (unsigned j = i + 1; j < s.branches.size(); ++j)
+          if (overlaps(asked[i], asked[j])) {
+            complain(s.branches[j].familySpan, "E0541",
+                     asked[i] == asked[j]
+                         ? "`" + s.branches[j].family + "` is asked twice here."
+                         : "`" + s.branches[i].family + "` and `" +
+                               s.branches[j].family + "` both answer to some types.",
+                     {"a `whichever` asks each kind once, and no two arms may overlap"},
+                     {"pick a level: `number`, or the four under it. Refusing costs "
+                      "nothing today, and going from refused to allowed later breaks "
+                      "nothing written before it."},
+                     "here", {Note{s.branches[i].familySpan, "and this one here"}});
+            overlapping = true;
+          }
+      if (overlapping)
+        break;
+
+      unsigned chose = s.branches.size();
+      for (unsigned i = 0; i < s.branches.size(); ++i)
+        if (inFamily(subject, asked[i])) {
+          chose = i;
+          break;
+        }
+      if (chose == s.branches.size()) {
+        complain(s.condition->span, "E0542",
+                 "nothing here covers a `" + name(subject) + "`.",
+                 {"every case a `whichever` covers is written out"},
+                 {"which arm this is turned out to be is settled while compiling, so "
+                  "an uncovered one is not a case that might never come up — it is "
+                  "this program, now, with nothing to do."});
+        break;
+      }
+      result_.chosenArm[&s] = chose;
+      // Only the arm that was chosen. Reading the rest would be reading code
+      // written for a type that is not here.
+      scopes_.emplace_back();
+      for (const StmtPtr &inner : s.branches[chose].body.stmts)
+        statement(*inner);
+      scopes_.pop_back();
+      break;
+    }
+
     case StmtKind::When: {
       // Every case, once each. The compiler insisting on that is the whole
       // reason to write a `when` rather than an `if` — a case nobody wrote is a
@@ -2057,10 +2151,21 @@ private:
 
   // Whether every way out of here hands back an answer. A loop does not count:
   // it may run no times at all, and then it has answered nothing.
-  static bool alwaysGives(const Block &block) {
+  bool alwaysGives(const Block &block) const {
     for (const StmtPtr &s : block.stmts) {
       if (s->kind == StmtKind::Give)
         return true;
+      // A `whichever` is the arm it chose and nothing else, so it answers when
+      // that arm answers. Asking every arm would refuse a `show` that gives from
+      // all of them — which is the shape everybody writes — because an arm that
+      // is not here cannot be read, and an arm that is here is the whole of it.
+      if (s->kind == StmtKind::Whichever) {
+        const auto chose = result_.chosenArm.find(s.get());
+        if (chose != result_.chosenArm.end() && chose->second < s->branches.size() &&
+            alwaysGives(s->branches[chose->second].body))
+          return true;
+        continue;
+      }
       if (s->kind != StmtKind::If)
         continue;
       bool otherwise = false, everyArm = true;

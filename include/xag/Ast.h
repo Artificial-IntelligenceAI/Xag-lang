@@ -91,6 +91,12 @@ struct Branch {
   std::string holds;
   Span holdsSpan;
   bool matchesNothing = false;
+  // `whichever 'x' { is number { … } }` — the arm is chosen by what kind of
+  // thing the subject is, and this is the word that says which kind. Held as
+  // written rather than as a family: whether the word names one is a question
+  // for the checker, the same as whether a word names a type.
+  std::string family;
+  Span familySpan;
   Block body;
 };
 
@@ -101,6 +107,7 @@ enum class StmtKind {
   LoopRange, // loop.range.i64 'i' = [a, b] { }
   LoopWhile, // loop.while […] { }
   When,      // when 'x' { is 'value' { } is nothing { } }
+  Whichever, // whichever 'x' { is number { } is str { } }
   Break,     // break;
   Give,      // give […];
   Call,      // print.stdout[…];

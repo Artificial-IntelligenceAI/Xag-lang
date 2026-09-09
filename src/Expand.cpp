@@ -120,6 +120,54 @@ void namesCalled(const Block &block, std::unordered_set<std::string> &called) {
 
 } // namespace
 
+namespace {
+
+void pruneBlock(Block &block, const CheckResult &checked, unsigned &done);
+
+void pruneStmt(Stmt &s, const CheckResult &checked, unsigned &done) {
+  for (Branch &branch : s.branches)
+    pruneBlock(branch.body, checked, done);
+  pruneBlock(s.body, checked, done);
+}
+
+void pruneBlock(Block &block, const CheckResult &checked, unsigned &done) {
+  std::vector<StmtPtr> kept;
+  kept.reserve(block.stmts.size());
+  for (StmtPtr &s : block.stmts) {
+    if (!s)
+      continue;
+    // Deeper first, so a `whichever` inside the arm that was chosen is settled
+    // before that arm is lifted out of the statement holding it.
+    pruneStmt(*s, checked, done);
+    if (s->kind != StmtKind::Whichever) {
+      kept.push_back(std::move(s));
+      continue;
+    }
+    auto chose = checked.chosenArm.find(s.get());
+    if (chose == checked.chosenArm.end() || chose->second >= s->branches.size()) {
+      kept.push_back(std::move(s)); // Never reached, so never decided.
+      continue;
+    }
+    // The arm stands where the statement stood. Its block is not kept as a
+    // block: a `whichever` is not a scope of its own, it is a choice about
+    // which lines are here at all.
+    for (StmtPtr &inner : s->branches[chose->second].body.stmts)
+      if (inner)
+        kept.push_back(std::move(inner));
+    ++done;
+  }
+  block.stmts = std::move(kept);
+}
+
+} // namespace
+
+unsigned prune(Program &program, const CheckResult &checked) {
+  unsigned done = 0;
+  for (Item &item : program.items)
+    pruneBlock(item.body, checked, done);
+  return done;
+}
+
 bool expand(Program &program, const CheckResult &checked, Program &out) {
   std::unordered_set<std::string> generic;
   for (const Item &item : program.items)

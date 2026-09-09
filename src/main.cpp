@@ -507,7 +507,11 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   const xag::LexResult lexed = xag::lex(source);
   if (report(source, lexed.diagnostics) != 0)
     return false;
-  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  // Not const: expansion points calls at the copies they meant, and pruning
+  // lifts the arm a `whichever` chose out of the statement holding it. Both
+  // write into the tree the checker walked, because what the checker worked out
+  // is keyed by those nodes and a copy's nodes are not those.
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   if (report(source, parsed.diagnostics) != 0)
     return false;
   xag::CheckResult checked = xag::check(source, parsed.program);
@@ -553,6 +557,12 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
     if (report(source, checked.diagnostics) != 0)
       return false;
   }
+
+  // Every `whichever` becomes the arm it chose. After this the word is gone
+  // from the tree, so ownership and the middle layer read ordinary blocks and
+  // had to learn nothing about it — the same trick generics get, and for the
+  // same reason.
+  xag::prune(const_cast<xag::Program &>(*program), checked);
 
   const xag::OwnResult owned = xag::own(source, *program);
   if (report(source, owned.diagnostics) != 0)

@@ -74,6 +74,16 @@ struct Printer {
       out << " '" << s.name << "'\n";
       values(s.value, depth + 1);
       break;
+    case StmtKind::Whichever:
+      out << "whichever\n";
+      if (s.condition)
+        expr(*s.condition, depth + 1);
+      for (const Branch &arm : s.branches) {
+        indent(depth + 1);
+        out << "is " << arm.family << '\n';
+        block(arm.body, depth + 2);
+      }
+      break;
     case StmtKind::Set:
       out << "set '" << s.name << "'";
       for (const std::string &field : s.fields)

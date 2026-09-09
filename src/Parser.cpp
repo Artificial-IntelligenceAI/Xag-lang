@@ -901,6 +901,57 @@ private:
       return s;
     }
 
+    // `whichever 'x' { is number { … } is str { … } }`
+    //
+    // It looks like `when` and is not: a `when` is a choice the program makes
+    // while running, with both arms in it, and a `whichever` is decided while
+    // compiling — only the arm that was chosen survives into the program. The
+    // word says the choosing rather than the asking, which is what is actually
+    // happening.
+    if (checkWord("whichever")) {
+      s->kind = StmtKind::Whichever;
+      advance();
+      s->condition = item();
+      if (expect(TokenKind::LBrace, "`{`")) {
+        while (!check(TokenKind::RBrace) && !atEnd()) {
+          Branch arm;
+          arm.span.begin = peek().span.begin;
+          arm.hasCondition = false;
+          if (!checkWord("is")) {
+            complain(peek().span, "E0108",
+                     "a `whichever` is made of `is` and nothing else.",
+                     {"every case a `whichever` covers is written out"}, {},
+                     std::string("found ") + describe(peek().kind));
+            recover();
+            break;
+          }
+          advance();
+          // Any word, and whether it names a kind of thing is the checker's
+          // question — the same wall that keeps type words out of here.
+          if (check(TokenKind::Word)) {
+            const Token got = advance();
+            arm.family = got.text;
+            arm.familySpan = got.span;
+          } else {
+            complain(peek().span, "E0108",
+                     "an `is` here says what kind of thing the subject is.",
+                     {"every case a `whichever` covers is written out"},
+                     {"`whichever` chooses by kind, and a kind is a word: `number`, "
+                      "`str`, `many`, `struct`. A `when` is the one that takes a name."},
+                     std::string("found ") + describe(peek().kind));
+            recover();
+            break;
+          }
+          arm.body = block();
+          arm.span.end = previous().span.end;
+          s->branches.push_back(std::move(arm));
+        }
+        expect(TokenKind::RBrace, "`}`");
+      }
+      s->span.end = previous().span.end;
+      return s;
+    }
+
     // A block where the compiler is allowed to be told to do less. It holds
     // statements like any other block and changes nothing about them; what it
     // grants is asked for inside it, by name, so that grepping for the word

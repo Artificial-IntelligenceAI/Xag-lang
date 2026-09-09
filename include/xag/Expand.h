@@ -26,4 +26,18 @@ namespace xag {
 // there.
 bool expand(Program &program, const CheckResult &checked, Program &out);
 
+// Replaces every `whichever` with the arm that was chosen, so that nothing after
+// this meets the word — the same erasure a generic gets, and for the same
+// reason: the arms nobody chose are written against types this copy does not
+// have, and reading them would refuse a program that is correct.
+//
+// The program is written into rather than copied, because what the checker
+// worked out is keyed by the statements it walked and a copy's statements are
+// not those. Answers how many were replaced.
+//
+// A `whichever` the checker never reached is left standing. That is a statement
+// inside an arm nobody chose, or in a generic body nobody called, and it is
+// carried out with the arm it sits in.
+unsigned prune(Program &program, const CheckResult &checked);
+
 } // namespace xag

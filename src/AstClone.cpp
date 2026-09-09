@@ -47,6 +47,8 @@ Branch clone(const Branch &branch) {
   out.holds = branch.holds;
   out.holdsSpan = branch.holdsSpan;
   out.matchesNothing = branch.matchesNothing;
+  out.family = branch.family;
+  out.familySpan = branch.familySpan;
   out.body = clone(branch.body);
   return out;
 }

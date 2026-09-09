@@ -1113,7 +1113,102 @@ void aBlankMaySayWhatItTakes() {
   CHECK(xag::inFamily(xag::Ty{xag::Type::Str}, xag::Family::Anything));
 }
 
+// The first code a generic's own body is refused with. A generic is not read
+// while the blank is still in it, so anything inside one is only ever said about
+// the copies — which means these are found by the second reading, the way the
+// driver finds them.
+std::string insideTheCopies(const std::string &text) {
+  const xag::Source source("test.xag", text);
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  if (!parsed.ok())
+    return "(not parsed)";
+  const xag::CheckResult first = xag::check(source, parsed.program);
+  if (!first.ok())
+    return first.diagnostics.front().code;
+  xag::Program expanded;
+  if (!xag::expand(parsed.program, first, expanded))
+    return "(nothing to expand)";
+  const xag::CheckResult second = xag::check(source, expanded);
+  return second.diagnostics.empty() ? "(none)" : second.diagnostics.front().code;
+}
+
+// Choosing an arm while compiling, and carrying only that arm into the program.
+void whicheverKeepsOneArm() {
+  const std::string program =
+      "fn.str 'show' [any 'v'] {\n"
+      "    whichever 'v' {\n"
+      "        is number { give [convert-to-str['v']]; }\n"
+      "        is str    { give ['v']; }\n"
+      "        is bool   { give [str:*a bool*]; }\n"
+      "    }\n"
+      "}\n"
+      "START {\n"
+      "    var.int64 'n' = [*42*];\n"
+      "    var.bool 'b' = [*true*];\n"
+      "    print.stdout[show['n'] show['b'] \\n];\n"
+      "}\n";
+  const xag::Source source("test.xag", program);
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(parsed.ok());
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  CHECK(checked.ok());
+
+  xag::Program expanded;
+  CHECK(xag::expand(parsed.program, checked, expanded));
+  const xag::CheckResult again = xag::check(source, expanded);
+  CHECK(again.ok());
+  // One `whichever` in each copy, and each chose a different arm: `int64` took
+  // the first, `bool` the third.
+  CHECK(again.chosenArm.size() == 2);
+  std::set<unsigned> chosen;
+  for (const auto &[where, arm] : again.chosenArm)
+    chosen.insert(arm);
+  CHECK(chosen == std::set<unsigned>({0u, 2u}));
+
+  // And after pruning the word is gone, with one arm's statements standing
+  // where the whole statement stood.
+  CHECK(xag::prune(expanded, again) == 2);
+  for (const xag::Item &item : expanded.items)
+    for (const xag::StmtPtr &s : item.body.stmts)
+      CHECK(s->kind != xag::StmtKind::Whichever);
+  for (const xag::Item &item : expanded.items)
+    if (item.name == "show$bool") {
+      CHECK(item.body.stmts.size() == 1);
+      CHECK(item.body.stmts[0]->kind == xag::StmtKind::Give);
+    }
+
+  // Two arms that could both answer leave the compiler picking, and there is no
+  // rule here saying one word is nearer than another.
+  CHECK(insideTheCopies("fn.str 'f' [any 'v'] {\n"
+            "    whichever 'v' { is number { give [str:*n*]; } is int { give [str:*i*]; } }\n"
+            "}\n"
+            "START { var.int64 'n' = [*1*]; print.stdout[f['n'] \\n]; }\n") == "E0541");
+  CHECK(insideTheCopies("fn.str 'f' [any 'v'] {\n"
+            "    whichever 'v' { is str { give [str:*a*]; } is str { give [str:*b*]; } }\n"
+            "}\n"
+            "START { var.str 's' = [*x*]; print.stdout[f[move 's'] \\n]; }\n") == "E0541");
+
+  // Which arm this is turned out to be is settled while compiling, so an
+  // uncovered one is this program, now, with nothing to do.
+  CHECK(insideTheCopies("fn.str 'f' [any 'v'] {\n"
+            "    whichever 'v' { is number { give [str:*n*]; } }\n"
+            "}\n"
+            "START { var.bool 'b' = [*true*]; print.stdout[f['b'] \\n]; }\n") == "E0542");
+
+  CHECK(insideTheCopies("fn.str 'f' [any 'v'] {\n"
+            "    whichever 'v' { is banana { give [str:*n*]; } }\n"
+            "}\n"
+            "START { var.int64 'n' = [*1*]; print.stdout[f['n'] \\n]; }\n") == "E0540");
+
+  // A function answering from every arm answers: asking every arm rather than
+  // the one that is here would refuse the shape everybody writes.
+  CHECK(run(program).checked.ok());
+}
+
 int main() {
+  whicheverKeepsOneArm();
   aBlankMaySayWhatItTakes();
   oneMistakeIsReportedAsOneMistake();
   aGenericBodyIsNotReadWithTheBlankInIt();

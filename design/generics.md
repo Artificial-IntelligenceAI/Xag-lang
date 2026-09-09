@@ -347,3 +347,48 @@ Two things make that settle:
 Sixty-four rounds is the ceiling. A file that has not settled by then is not a
 file anybody wrote; it is expansion failing to settle, so it is reported in the
 voice that says the fault is ours.
+
+## `whichever`, built
+
+**Built 2026-09-09**, for the ten kinds that name a type. `is loan` and
+`is loanmut` are the same one piece of work as `any.loan`, and wait with it.
+
+Decided while building, in one place:
+
+- **The checker chooses.** By the time it reads a `whichever` the subject has a
+  concrete type — a generic has already been written out once per type it was
+  called with — so which arm is meant has one answer. It reads **only that arm**.
+  That is the point of them: `is str` may call `count` on something that is a
+  `str` only in the copy where it is one.
+- **A prune pass erases the word.** The arm stands where the statement stood,
+  and nothing after that meets a `whichever` — ownership, the middle layer and
+  the backend needed to learn nothing about it. The same erasure a generic gets,
+  and for the same reason.
+- **A `whichever` is not a scope.** It is a choice about which lines are here at
+  all, so the arm's statements are lifted out rather than kept as a block.
+
+Two things the design had not settled, decided in the building:
+
+**Nothing covering the type is refused** — `E0542`, `nothing here covers a
+`bool``. It is settled while compiling against a type that is known, so an
+uncovered one is not a case that might never come up: it is this program, now,
+with nothing to do. Falling through silently is the opposite of how the rest of
+this compiler behaves.
+
+**A function answers when the arm that is here answers.** Asking every arm would
+refuse the shape everybody writes — `show`, giving from all of them — because an
+arm that is not here cannot be read and an arm that is here is the whole of it.
+
+```
+fn.str 'show' [any 'v'] {
+    whichever 'v' {
+        is number { give [convert-to-str['v']]; }
+        is str    { give ['v']; }
+        is bool   { give [str:*a bool*]; }
+    }
+}
+```
+
+`show['n'] show['d'] show['s'] show['b']` builds `show$int64`, `show$deci64`,
+`show$str` and `show$bool` — four functions, each holding one arm and no trace
+of the other two.
