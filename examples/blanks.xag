@@ -1,0 +1,94 @@
+# A blank, written `any`, is a type the caller picks. A function with one in it
+# is not a function yet — it is a shape, and the compiler writes it out once for
+# every type anybody calls it with, before anything else runs. Nothing after
+# that ever meets a blank.
+
+struct 'point' [int64 'x', int64 'y']
+struct 'line' [point 'from', point 'to']
+
+# Bare `any` is the floor: it takes anything, and what can be done with it is
+# what can be done with every type — hold it, hand it back, lend it.
+fn.any 'same' [any 'v'] {
+    give ['v'];
+}
+
+# `whichever` looks like `when` and is not. A `when` is a choice the program
+# makes while running, with both arms in it. This one is decided while
+# compiling: by the time it is read, `'v'` has a real type, so only the arm that
+# was chosen is carried into the program. Which is why `is str` may count
+# something that is text in one copy and not in another.
+fn.str 'show' [loan.any 'v'] {
+    whichever 'v' {
+        is number { give [convert-to-str['v']]; }
+        is bool   { give [convert-to-str['v']]; }
+        is str    { give [str:*"* 'v' str:*"*]; }
+        is many   { give [str:*several: * (convert-to-str[count['v']])]; }
+
+        # A struct it has never seen, walked. `loop.parts` is not really a
+        # loop: what a field holds is a different type on every turn, so the
+        # body is written out once per field rather than built once and run
+        # several times. A turn hands over the field — `'p'.name` is what it is
+        # called and `'p'.value` is what it holds — and `show` calls itself,
+        # which is how a `line` made of `point`s is shown at all.
+        is struct {
+            var.mut.str 'out' = [str:*<*];
+            loop.parts 'p' = ['v'] {
+                set 'out' = ['out' 'p'.name str:*=* (show[loan 'p'.value]) str:* *];
+            }
+            give ['out' str:*>*];
+        }
+    }
+}
+
+# What a value is and how it is held are two questions, so they are asked in two
+# `whichever`s. A borrowed number is a number and a borrow at once, and one
+# statement asking both would have two arms answering with no rule to choose
+# between them.
+fn.str 'held' [any 'v'] {
+    whichever 'v' {
+        is owned   { give [str:*held outright*]; }
+        is loan    { give [str:*lent for reading*]; }
+        is loanmut { give [str:*lent for writing*]; }
+    }
+}
+
+# A blank may say what it will take. Without the word, a caller handing this
+# points would be told about a line inside `largest` that they did not write;
+# with it, the refusal lands on their own line.
+fn.any.number 'largest' [loan.many.any.number 'xs'] {
+    var.mut.any.number 'best' = ['xs'[*0*]];
+    loop.range.int64 'i' = [*1*, (count['xs'] - *1*)] {
+        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }
+    }
+    give ['best'];
+}
+
+START {
+    var.int64 'n' = [*42*];
+    var.str 'word' = [*ada*];
+    var.many.int64 'scores' = [*10* *20* *30*];
+    var.line 'l' = [point[*1* *2*] point[*3* *4*]];
+
+    # One function, four types, four copies — and a different arm inside each.
+    print.stdout[(show[loan 'n']) str:*  * (show[loan 'word']) \n];
+    print.stdout[(show[loan 'scores']) str:*  * (show[loan 'l']) \n];
+
+    # The same shape at two different number types.
+    var.many.deci64 'weights' = [*1.25* *9.50* *4.75*];
+    print.stdout[str:*largest: * (largest[loan 'scores'])
+                 str:* and * (largest[loan 'weights']) \n];
+
+    # The floor, twice, at types that have nothing in common.
+    # A written value handed to a blank is refused, and rightly: nothing beside
+    # it says what it is, and the blank is the caller's to fill rather than
+    # something to fill in from. So it takes a name.
+    var.bool 'flag' = [*true*];
+    var.int64 'again' = [same['n']];
+    var.bool 'yes' = [same['flag']];
+    print.stdout[str:*same: * 'again' str:*  * 'yes' \n];
+
+    # And the other question, asked of one name held three ways.
+    var.mut.int64 'counter' = [*0*];
+    print.stdout[(held['counter']) str:*, * (held[loan 'counter'])
+                 str:*, * (held[loanmut 'counter']) \n];
+}

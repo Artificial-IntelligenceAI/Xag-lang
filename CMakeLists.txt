@@ -184,6 +184,19 @@ else()
                  "so the decimal unit is not asked")
 endif()
 
+# Every example, both ways. They were read by hand and by nothing else, so
+# eight files showing what the language is for would not have said a word if
+# they stopped working.
+file(GLOB XAG_EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.xag)
+foreach(example ${XAG_EXAMPLES})
+  get_filename_component(shown ${example} NAME_WE)
+  add_test(NAME example_${shown}
+           COMMAND ${CMAKE_COMMAND}
+                   -DXAGC=$<TARGET_FILE:xagc>
+                   -DSOURCE=${example}
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/example_agrees.cmake)
+endforeach()
+
 # The decimal knob, asked of the compiler itself rather than of a library: what
 # a build has is a fact about the build, and the only way to ask it is to run it.
 add_test(NAME decimal_software
