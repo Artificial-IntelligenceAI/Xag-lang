@@ -396,12 +396,6 @@ private:
       // `or-nothing.many.T` is fine; `many.or-nothing.T` is an array of them,
       // and that is a type that wants a table rather than a pair of words.
       (void)0;
-    if (deep > 1)
-      complain(Span{c.segments[upTo].span.begin, c.segments[upTo + deep - 1].span.end},
-               "E0210", "a `many` holds values, and not more `many`s.",
-               {"a `many` is one level deep"},
-               {"a second level is a real thing to build rather than something to "
-                "half-support, and it is not built yet."});
 
     int furthest = -1;               // the last place filled, so order can be read
     Span seen[8];                    // where each slot was answered
@@ -585,9 +579,42 @@ private:
              {}, "which of these first?");
   }
 
+  // What an `if`, a `when` or a `loop.while` asks. The same as any other value
+  // except that it takes no brackets: `if` bounds it on the left and `{` on the
+  // right, so there is nothing for a `[` to be doing there — and now that `[`
+  // opens several values where an item goes, one written here would quietly be
+  // read as a `many` rather than refused.
+  ExprPtr askedItem() {
+    ExprPtr asked = item();
+    if (asked && asked->kind == ExprKind::Several)
+      complain(asked->span, "E0105", "a condition takes no brackets.",
+               {"a condition is one value, bounded by the word before it and the `{` "
+                "after it"},
+               {"brackets bound a list that nothing else bounds, and this is already "
+                "bounded."});
+    return asked;
+  }
+
   ExprPtr primary() {
     const Token &token = peek();
     switch (token.kind) {
+    // `[…]` where an item goes: several values made where they stand, which is
+    // how a `many` of a `many` is written. A `[` after a *name* is an index, and
+    // that is decided before this is reached — nothing here can be one, because
+    // there is no name in front of it.
+    case TokenKind::LBracket: {
+      advance();
+      auto several = make(ExprKind::Several, token.span, std::string());
+      while (!check(TokenKind::RBracket) && !atEnd()) {
+        const unsigned before = at_;
+        several->children.push_back(item());
+        if (at_ == before)
+          break;
+      }
+      several->span.end = peek().span.end;
+      expect(TokenKind::RBracket, "`]`");
+      return several;
+    }
     case TokenKind::Name: {
       advance();
       ExprPtr so_far;
@@ -601,6 +628,19 @@ private:
         expect(TokenKind::RBracket, "`]`");
         so_far = make(ExprKind::Index, span, token.text);
         so_far->children.push_back(std::move(where));
+        // `'g'[*0*][*1*]` — reaching into what was just reached. What is being
+        // reached into rides as a second child, because the first one is the
+        // index and everything already written reads it there.
+        while (check(TokenKind::LBracket)) {
+          advance();
+          ExprPtr deeper = item();
+          Span wider{token.span.begin, peek().span.end};
+          expect(TokenKind::RBracket, "`]`");
+          auto again = make(ExprKind::Index, wider, std::string());
+          again->children.push_back(std::move(deeper));
+          again->children.push_back(std::move(so_far));
+          so_far = std::move(again);
+        }
       } else {
         so_far = make(ExprKind::Name, token.span, token.text);
       }
@@ -947,7 +987,7 @@ private:
     if (checkWord("when")) {
       s->kind = StmtKind::When;
       advance();
-      s->condition = item();
+      s->condition = askedItem();
       if (expect(TokenKind::LBrace, "`{`")) {
         while (!check(TokenKind::RBrace) && !atEnd()) {
           Branch arm;
@@ -997,7 +1037,7 @@ private:
     if (checkWord("whichever")) {
       s->kind = StmtKind::Whichever;
       advance();
-      s->condition = item();
+      s->condition = askedItem();
       if (expect(TokenKind::LBrace, "`{`")) {
         while (!check(TokenKind::RBrace) && !atEnd()) {
           Branch arm;
@@ -1060,7 +1100,7 @@ private:
         advance(); // if / else-if / else
         branch.hasCondition = !isElse;
         if (!isElse) {
-          branch.condition = item();
+          branch.condition = askedItem();
           holdsName(branch.holds, branch.holdsSpan);
         }
         branch.body = block();
@@ -1107,7 +1147,7 @@ private:
       validate(s->chain, isWhile ? kLoopWhile : isParts ? kLoopParts : kLoopRange);
       if (isWhile) {
         s->kind = StmtKind::LoopWhile;
-        s->condition = item();
+        s->condition = askedItem();
         holdsName(s->holds, s->holdsSpan);
       } else {
         // `loop.parts` reads exactly like a counted loop — a name, `=`, and what

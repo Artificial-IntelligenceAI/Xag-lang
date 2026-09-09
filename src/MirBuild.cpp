@@ -203,8 +203,8 @@ private:
     const std::size_t n = chain.segments.size();
     std::size_t at = n - 1;
     std::string built = chain.type().text;
-    if (at > 0 && !chain.segments[at - 1].isName &&
-        chain.segments[at - 1].text == "many") {
+    while (at > 0 && !chain.segments[at - 1].isName &&
+           chain.segments[at - 1].text == "many") {
       built = "many " + built;
       --at;
     }
@@ -260,8 +260,8 @@ private:
       out.orNothing = true;
       spelled.remove_prefix(std::string_view("or-nothing ").size());
     }
-    if (spelled.rfind("many ", 0) == 0) {
-      out.many = true;
+    while (spelled.rfind("many ", 0) == 0) {
+      ++out.many;
       spelled.remove_prefix(std::string_view("many ").size());
     }
     out.held = typeNamed(spelled);
@@ -439,15 +439,24 @@ private:
       // Reading a place gives back what sits in it. When that is something with
       // an owner, what comes back is a loan into the array rather than a copy —
       // there is one of it, and it stays where it is.
-      const unsigned *of = findName(e.text);
-      if (!of)
-        return temporary(typeRef("?"), true);
-      const std::string held = elementOf(body_.types[body_.locals[*of].type.index]);
+      // What is being reached into: a name, or something already reached into.
+      // `'g'[*0*][*1*]` is the second, and the first reach is what it reaches
+      // into — lowered here so that the two read the same way from here on.
+      unsigned of = 0;
+      if (e.children.size() > 1) {
+        of = lower(*e.children[1]);
+      } else {
+        const unsigned *named = findName(e.text);
+        if (!named)
+          return temporary(typeRef("?"), true);
+        of = *named;
+      }
+      const std::string held = elementOf(body_.types[body_.locals[of].type.index]);
       const bool copiesElement = copiesNamed(held);
       const std::string spelled = copiesElement ? held : "loan " + held;
       const unsigned into = temporary(typeRef(spelled), copiesElement);
       std::vector<Operand> parts;
-      parts.push_back(Operand{OperandKind::Copy, *of, {}, body_.locals[*of].type});
+      parts.push_back(Operand{OperandKind::Copy, of, {}, body_.locals[of].type});
       parts.push_back(e.children.empty()
                           ? Operand{OperandKind::Written, 0, "0", typeRef("int64")}
                           : operandOf(*e.children[0]));
@@ -491,6 +500,26 @@ private:
                      RValue{RValueKind::Part, e.text, {}, which,
                             {Operand{OperandKind::Copy, of, {}, body_.locals[of].type}},
                             typeRef(as)}});
+      return into;
+    }
+
+    case ExprKind::Several: {
+      // Brackets where an item goes: a `many` made where it stands. What it
+      // holds is one level in from what it is going into.
+      const std::string spelled = spell(type);
+      const std::string holds = elementOf(spelled);
+      (void)holds;
+      std::vector<Operand> parts;
+      // Each item is lowered where it stands. One that is itself several ends
+      // up here again, one level in, which is the whole of how a `many` of a
+      // `many` is built.
+      for (const ExprPtr &child : e.children)
+        if (child)
+          parts.push_back(operandOf(*child));
+      const unsigned into = owningTemporary(typeRef(spelled));
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
+                     RValue{RValueKind::Collect, {}, {}, 0, std::move(parts),
+                            typeRef(spelled)}});
       return into;
     }
 
@@ -808,9 +837,22 @@ private:
         const std::string held =
             elementOf(body_.types[body_.locals[*local].type.index]);
         Operand at = operandOf(*s.index);
-        Operand value = s.value.values.empty()
-                            ? Operand{OperandKind::Written, 0, "", typeRef(held)}
-                            : valueOperand(s.value.values[0]);
+        Operand value;
+        // What goes in a place may itself be several values, or a group of
+        // them, and building one of those needs the same reading that building
+        // a name does. Read as a lone value instead, `set 'w'[*1*] = [*x* *y*]`
+        // joined two pieces of text and put the joined one where a `many str`
+        // goes.
+        const std::string inside = within(withoutLoan(held));
+        if (inside.rfind("many ", 0) == 0 || shapeOf(inside)) {
+          const unsigned into = owningTemporary(typeRef(held));
+          assignInto(into, s.value, s.span);
+          value = Operand{OperandKind::Move, into, {}, typeRef(held)};
+        } else {
+          value = s.value.values.empty()
+                      ? Operand{OperandKind::Written, 0, "", typeRef(held)}
+                      : valueOperand(s.value.values[0]);
+        }
         emit(Statement{StatementKind::Store, s.span, *local, {}, std::move(at),
                        RValue{RValueKind::Use, {}, {}, 0, {std::move(value)},
                               typeRef(held)}});

@@ -295,6 +295,36 @@ void onTurningNumbersIntoText() {
   AGREE("struct 'holder' [loan.int64 'x']\n"
         "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
         "  print.stdout['h'.x \\n]; }\n");
+  // A `many` of a `many`, which was `E0210` until there was something to build
+  // it as. Brackets where an item goes make one; a name in front of them is
+  // still an index, and `'g'[*0*][*1*]` reaches into what was just reached.
+  AGREE("START { var.many.many.int64 'g' = [[*1* *2* *3*] [*4* *5*]];\n"
+        "  print.stdout[(count[loan 'g']) str:*|* (count[loan 'g'[*0*]]) \\n];\n"
+        "  print.stdout['g'[*0*][*2*] str:*|* 'g'[*1*][*0*] \\n]; }\n");
+  // Text in one, so that every place owns something and the whole of it has to
+  // be let go of a level at a time.
+  AGREE("START { var.many.many.str 'w' = [[*ab* *cd*] [*ef*]];\n"
+        "  print.stdout['w'[*0*][*1*] str:*|* 'w'[*1*][*0*] \\n]; }\n");
+  // Writing a whole place. What goes in one may itself be several, and reading
+  // it as a lone value joined two pieces of text into one and put that where a
+  // `many str` goes.
+  AGREE("START { var.mut.many.many.str 'w' = [[*ab*] [*ef*]];\n"
+        "  set 'w'[*1*] = [*x* *y* *z*];\n"
+        "  print.stdout[(count[loan 'w'[*1*]]) str:*|* 'w'[*1*][*2*] \\n]; }\n");
+  // Walked both ways round, through a borrow, in a function that never sees
+  // where it came from.
+  AGREE("fn.int64 'total' [loan.many.many.int64 'g'] {\n"
+        "  var.mut.int64 'sum' = [*0*];\n"
+        "  loop.range.int64 'i' = [*0*, (count['g'] - *1*)] {\n"
+        "    loop.range.int64 'j' = [*0*, (count['g'['i']] - *1*)] {\n"
+        "      set 'sum' = ['sum' + 'g'['i']['j']];\n"
+        "    }\n  }\n  give ['sum'];\n}\n"
+        "START { var.many.many.int64 'g' = [[*1* *2* *3*] [*4* *5*] [*6*]];\n"
+        "  print.stdout[(total[loan 'g']) \\n]; }\n");
+  // Three deep, because nothing says two.
+  AGREE("START { var.many.many.many.int64 'g' = [[[*1*] [*2* *3*]] [[*4*]]];\n"
+        "  print.stdout['g'[*0*][*1*][*1*] \\n]; }\n");
+
   // A sum going into a field that may hold nothing. What goes into one of these
   // is asked for as the thing itself — an `or-nothing bin64` is not a number,
   // so a sum asked for with the wrapper still on had nothing saying what its

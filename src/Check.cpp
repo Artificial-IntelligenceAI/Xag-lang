@@ -56,12 +56,14 @@ const char *shapeName(unsigned which) {
 std::string name(Ty type) {
   const std::string one =
       type.kind == Type::Struct ? shapeName(type.named) : name(type.kind);
-  const std::string inside =
-      type.holds()
-          ? std::string("many ") +
-                (type.element == Type::Struct ? shapeName(type.named)
-                                              : name(type.element))
-          : one;
+  std::string inside =
+      type.holds() ? (type.element == Type::Struct ? shapeName(type.named)
+                                                   : name(type.element))
+                   : one;
+  // One `many` per level, so a `many` of a `many` says so rather than reading
+  // as either one of them.
+  for (unsigned at = 0; at < type.deep; ++at)
+    inside = "many " + inside;
   return type.orNothing ? "or-nothing " + inside : inside;
 }
 
@@ -491,10 +493,14 @@ private:
     // `or-nothing` stands outside that and says the whole of it may be missing.
     // The parser has already refused a second level of either.
     std::size_t at = typeAt;
-    bool several = false, orNothing = false;
-    if (at > 0 && !chain.segments[at - 1].isName &&
-        chain.segments[at - 1].text == "many") {
-      several = true;
+    unsigned several = 0;
+    bool orNothing = false;
+    // However many were written. A second `many` is a `many` of a `many`, and
+    // there is no limit written down because there is no place a limit would
+    // come from.
+    while (at > 0 && !chain.segments[at - 1].isName &&
+           chain.segments[at - 1].text == "many") {
+      ++several;
       --at;
     }
     if (at > 0 && !chain.segments[at - 1].isName &&
@@ -514,6 +520,7 @@ private:
     Ty settled = isShape ? (several ? Ty{Type::Many, Type::Struct, false, which}
                                     : structNamed(which))
                          : (several ? many(type) : Ty{type});
+    settled.deep = several;
     if (orNothing)
       settled = orNothingOf(settled);
     // What the blank will take rides along with it, and is asked at the call
@@ -1125,6 +1132,20 @@ private:
     }
 
     case ExprKind::Written:
+      // A written value is one value. It takes its type from what it is written
+      // into, and a `many` is not a type one value can take — the brackets that
+      // make one are what goes there. Without this, `var.many.many.int64 'g' =
+      // [*1* *2*]` was taken, and each written number claimed to be a whole
+      // array.
+      if (expected.holds()) {
+        complain(e.span, "E0506",
+                 "`*" + e.text + "*` is one value, and a `" + name(expected) +
+                     "` holds several.",
+                 {"a written value is one value"},
+                 {"brackets where an item goes make a `many`: `[[*1* *2*] [*3*]]` is "
+                  "two of them."});
+        return unknownFrom(e.span);
+      }
       if (expected == Type::Unknown) {
         // Written into something that is unknown for a reason already refused.
         // Saying it takes its type from a parameter or from itself would send
@@ -1259,6 +1280,40 @@ private:
       }
       return expected;
 
+    case ExprKind::Several: {
+      // Brackets where an item goes: several values, made where they stand.
+      // What they are is what the `many` around them holds, one level in.
+      if (!expected.holds()) {
+        complain(e.span, "E0506",
+                 expected.kind == Type::Unknown
+                     ? std::string("nothing here says what these several values are.")
+                     : "a `" + name(expected) + "` is one value, and these are several.",
+                 {"brackets where an item goes make a `many`"},
+                 {"they take their type from the `many` they go into, and there is "
+                  "none here to take it from."});
+        for (const ExprPtr &child : e.children)
+          if (child)
+            expr(*child, Ty{});
+        return unknownFrom(e.span);
+      }
+      const Ty holds = elementOf(expected);
+      for (const ExprPtr &child : e.children) {
+        if (!child)
+          continue;
+        const Ty got = expr(*child, holds);
+        couldNotCheck(got, child->span,
+                      "this was not checked against a `" + name(holds) + "`.",
+                      "a `many` holds one type, and what this is could not be worked "
+                      "out");
+        if (got != Ty{} && got != holds)
+          complain(child->span, "E0506",
+                   "this is a `" + name(got) + "`, and a `" + name(expected) +
+                       "` holds `" + name(holds) + "`.",
+                   {"nothing converts on its own"});
+      }
+      return expected;
+    }
+
     case ExprKind::Field:
       return field(e);
 
@@ -1305,22 +1360,33 @@ private:
   Ty element(const Expr &e) {
     if (!e.children.empty())
       expr(*e.children[0], Type::Int64);
-    const Symbol *symbol = lookup(e.text);
-    if (!symbol) {
-      complain(e.span, "E0501", "`'" + e.text + "'` is not declared.",
-               {"a name means something only after a declaration says what it means"});
-      return unknownFrom(e.span);
+    // What is being reached into: a name, or something already reached into.
+    // `'g'[*0*][*1*]` is the second, and there is no name on it — the first
+    // reach is what it reaches into.
+    const std::string called = e.children.size() > 1 ? std::string("this")
+                                                     : "`'" + e.text + "'`";
+    Ty of;
+    if (e.children.size() > 1) {
+      of = expr(*e.children[1], Ty{});
+    } else {
+      const Symbol *symbol = lookup(e.text);
+      if (!symbol) {
+        complain(e.span, "E0501", "`'" + e.text + "'` is not declared.",
+                 {"a name means something only after a declaration says what it means"});
+        return unknownFrom(e.span);
+      }
+      of = symbol->type;
     }
-    if (!symbol->type.holds()) {
-      if (symbol->type.kind == Type::Unknown) {
-        couldNotCheck(symbol->type, e.span,
-                      "`'" + e.text + "'` was not read as something holding several.",
+    if (!of.holds()) {
+      if (of.kind == Type::Unknown) {
+        couldNotCheck(of, e.span,
+                      called + " was not read as something holding several.",
                       "an element is one of the values a `many` holds, and what this "
-                      "name is could not be worked out");
-        return symbol->type;
+                      "is could not be worked out");
+        return of;
       }
       complain(e.span, "E0514",
-               "`'" + e.text + "'` is a `" + name(symbol->type) +
+               called + " is a `" + name(of) +
                    "`, and holds one value rather than several.",
                {"an element is one of the values a `many` holds"},
                {"a name holding one value is that value, and there is no first of it."});
@@ -1336,7 +1402,7 @@ private:
                  {"nothing converts on its own"},
                  {"`count` answers an `int64`, and two sizes never meet on their own."});
     }
-    return elementOf(symbol->type);
+    return elementOf(of);
   }
 
   // What a condition has to be, which depends on whether a name is being lent

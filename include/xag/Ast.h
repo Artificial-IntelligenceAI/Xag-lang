@@ -50,7 +50,14 @@ enum class ExprKind {
   Escape,  // \n                        text
   Typed,   // str:*hello*               text is the type, one child
   Borrow,  // loan 'x' / loanmut / move   text is the word, one child
-  Index,   // 'xs'[*2*]                 text is the name, one child: the index
+  // 'xs'[*2*]   text is the name when there is one, and `children[0]` is the
+  // index. A second child is what is being reached into, written only where
+  // that is not a plain name — `'g'[*0*][*1*]` reaches into the first reach.
+  Index,
+  // […] standing where an item goes: several values, made where they stand.
+  // `children` are the items. This is how a `many` of a `many` is written, and
+  // the only place a `[` opens something that is not already a list.
+  Several,
   Nothing, // nothing                   what an `or-nothing` holds when it holds none
   Field,   // 'p'.x                     text is the field, one child: what it is of
   Call,    // print.stdout[…]           path is the dotted callee, args

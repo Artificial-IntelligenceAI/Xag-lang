@@ -13,7 +13,8 @@ std::string spell(const MirType &type) {
     out += "loan ";
   if (type.orNothing)
     out += "or-nothing ";
-  if (type.many)
+  // One per level, so a `many` of a `many` reads as one.
+  for (unsigned at = 0; at < type.many; ++at)
     out += "many ";
   out += type.held == Type::Struct ? name(structNamed(type.named)) : name(type.held);
   return out;

@@ -513,6 +513,34 @@ var.many.int64 'zeroes' = [fill[*0*, 'n']];
 copied — a number or a `bool`. There is no copying a `str` in Xag, so there is
 nothing for `fill` to put in each place, and it says so (`E0515`).
 
+### A `many` of a `many`
+
+```
+var.many.many.int64 'grid' = [[*1* *2* *3*] [*4* *5*]];
+print.stdout['grid'[*0*][*2*] \n];
+```
+
+**Brackets where an item goes make one.** Nothing new is written: `[…]` already
+bounds a list, and at the start of an item there is no name in front of it, so it
+cannot be an index. `many[…]` was considered — it is how a struct inside a struct
+is written — but that naming exists because `point[…]` had to be told apart from
+an index, and here there is nothing to tell apart.
+
+**Reaching in is the same brackets again.** `'grid'[*0*][*1*]` reaches into what
+was just reached.
+
+A written value is one value, so `[*1* *2*]` into a `many.many.int64` is refused:
+each item has to be several, and the brackets that make one are what goes there.
+
+Deeper than two is written the same way and costs nothing extra — nothing says
+two, so nothing stops at two.
+
+**What it took.** `many` stopped being a yes-or-no and became a count, in the
+checker and in the middle layer alike. `elementOf` takes one level off instead of
+all of them. That is the whole of the change: an earlier note here guessed a
+second level would want a table of types, and it does not — the combination that
+would is `many.or-nothing.T`, which is refused for its own reasons.
+
 ### An element is reached with the name's own brackets
 
 ```
@@ -1087,8 +1115,6 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   move what is held and a loan of it would then point at nowhere — a rule
   Regions would have to learn, and the first place ownership here stops being a
   demonstration.
-- **A `many` of a `many`.** One level, and `E0210` says so. A second is where a
-  type stops fitting in a pair of words and wants a table of its own.
 - **Showing something that is not one piece.** A print writes one piece after
   another, and three things are not one piece. A `many` and a struct are several
   (`E0516`): what stands between two of them, and whether a struct's field names

@@ -140,13 +140,19 @@ struct Ty {
   // How this is held. Never compared: a `loan.int64` is an `int64` everywhere it
   // was one before this existed, and only a program that asks can tell.
   Held held = Held::Owned;
+  // How many `many`s stand around what is held. One for `many.int64`, two for
+  // `many.many.int64`, and none at all otherwise — so `kind` says `Many` exactly
+  // when this is more than nothing, and every `many` written before this existed
+  // is one deep without saying so.
+  unsigned deep = 0;
 
   constexpr Ty() = default;
-  constexpr Ty(Type k) : kind(k) {}
-  constexpr Ty(Type k, Type e) : kind(k), element(e) {}
-  constexpr Ty(Type k, Type e, bool n) : kind(k), element(e), orNothing(n) {}
+  constexpr Ty(Type k) : kind(k), deep(k == Type::Many ? 1 : 0) {}
+  constexpr Ty(Type k, Type e) : kind(k), element(e), deep(k == Type::Many ? 1 : 0) {}
+  constexpr Ty(Type k, Type e, bool n)
+      : kind(k), element(e), orNothing(n), deep(k == Type::Many ? 1 : 0) {}
   constexpr Ty(Type k, Type e, bool n, unsigned w)
-      : kind(k), element(e), named(w), orNothing(n) {}
+      : kind(k), element(e), named(w), orNothing(n), deep(k == Type::Many ? 1 : 0) {}
 
   constexpr bool holds() const { return kind == Type::Many; }
   constexpr bool mayBeNothing() const { return orNothing; }
@@ -154,6 +160,7 @@ struct Ty {
   constexpr Ty within() const {
     Ty inside{kind, element, false, named};
     inside.from = from;
+    inside.deep = deep;
     return inside;
   }
   constexpr bool isStruct() const { return kind == Type::Struct; }
@@ -193,13 +200,22 @@ bool inFamily(Ty type, Family family);
 // one signature has one blank, so there are never two to tell apart.
 constexpr bool operator==(Ty a, Ty b) {
   return a.kind == b.kind && a.element == b.element && a.orNothing == b.orNothing &&
-         a.named == b.named;
+         a.named == b.named && a.deep == b.deep;
 }
 constexpr bool operator!=(Ty a, Ty b) { return !(a == b); }
 
 constexpr Ty many(Type element) { return Ty{Type::Many, element}; }
+// A `many` of whatever this already is, one level further out.
+constexpr Ty manyOf(Ty inside) {
+  Ty out{Type::Many, inside.holds() ? inside.element : inside.kind, inside.orNothing,
+         inside.named};
+  out.deep = inside.deep + 1;
+  return out;
+}
 constexpr Ty orNothingOf(Ty inside) {
-  return Ty{inside.kind, inside.element, true, inside.named};
+  Ty out{inside.kind, inside.element, true, inside.named};
+  out.deep = inside.deep;
+  return out;
 }
 constexpr Ty structNamed(unsigned which) {
   return Ty{Type::Struct, Type::Unknown, false, which};
@@ -210,6 +226,14 @@ constexpr Ty structNamed(unsigned which) {
 // number behind, so every `many` of a struct resolved to whichever struct was
 // declared first, and only a program with one of them looked right.
 constexpr Ty elementOf(Ty array) {
+  // One level in. A `many` of a `many` gives back a `many`, which is the whole
+  // of what a second level means.
+  if (array.deep > 1) {
+    Ty inner = array;
+    inner.deep = array.deep - 1;
+    inner.orNothing = false;
+    return inner;
+  }
   return array.element == Type::Struct ? structNamed(array.named)
                                        : Ty{array.element};
 }

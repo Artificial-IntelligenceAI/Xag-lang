@@ -32,7 +32,13 @@ struct Printer {
     case ExprKind::Escape:  out << "escape \\" << e.text << '\n'; break;
     case ExprKind::Typed:   out << "typed " << e.text << '\n'; break;
     case ExprKind::Borrow:  out << "transfer " << e.text << '\n'; break;
-    case ExprKind::Index:   out << "element of '" << e.text << "'\n"; break;
+    case ExprKind::Index:
+      if (e.children.size() > 1)
+        out << "element of what was reached\n";
+      else
+        out << "element of '" << e.text << "'\n";
+      break;
+    case ExprKind::Several: out << "several\n"; break;
     case ExprKind::Nothing: out << "nothing\n"; break;
     case ExprKind::Field:   out << "field " << e.text << '\n'; break;
     case ExprKind::Unary:   out << "unary " << e.text << '\n'; break;

@@ -309,7 +309,15 @@ void anElementIsReadAndWritten() {
 void manyStandsWithTheType() {
   CHECK(inStart("var.many.int64 'xs' = [*1* *2*];").ok());
   CHECK(run("fn.many.int64 'f' [loan.many.str 'ws'] { give [*1*]; }\n").ok());
-  CHECK(inStart("var.many.many.int64 'g' = [];").code(0) == "E0210");
+  // A second `many` is a `many` of a `many`, and was refused as `E0210` until
+  // there was something to build it as.
+  CHECK(inStart("var.many.many.int64 'g' = [[*1* *2*] [*3*]];").ok());
+  CHECK(inStart("var.many.many.many.int64 'g' = [[[*1*]] [[*2*]]];").ok());
+  // Brackets where an item goes make one; a name in front of them is still an
+  // index, and a condition still takes none.
+  CHECK(inStart("var.many.int64 'xs' = [*1*];\n    "
+                "print.stdout['xs'[*0*] \\n];").ok());
+  CHECK(!inStart("if ['a' >== 'b'] { }").parsed.ok());
   CHECK(inStart("var.many.mut.int64 'xs' = [*1*];").code(0) == "E0209");
 }
 

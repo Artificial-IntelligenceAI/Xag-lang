@@ -29,7 +29,10 @@ struct MirType {
 
   Lending lending = Lending::None;
   bool orNothing = false;
-  bool many = false;
+  // How many `many`s stand around what is held: one for `many int64`, two for
+  // `many many int64`. Read as a yes-or-no everywhere that only asks whether
+  // this is several at all, which is most places.
+  unsigned many = 0;
   // What is left once the words above are off it. `named` says which struct,
   // when `held` is one.
   Type held = Type::Unknown;
@@ -63,9 +66,13 @@ struct MirType {
   }
   bool operator!=(const MirType &other) const { return !(*this == other); }
 
+  // One level in. A `many` of a `many` gives back a `many`, which is the whole
+  // of what a second level means — taking them all off at once said a place of
+  // `many many int64` held an `int64`, and the backend read a number out of a
+  // slot holding an array.
   MirType element() const {
     MirType out = within();
-    out.many = false;
+    out.many = many > 0 ? many - 1 : 0;
     return out;
   }
 };
