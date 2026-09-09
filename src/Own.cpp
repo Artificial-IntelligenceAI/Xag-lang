@@ -608,6 +608,29 @@ private:
     }
   }
 
+  // Whether one item standing alone is the whole struct rather than the first
+  // of the things it holds. A lone item that is already the struct is the
+  // struct — and a struct with exactly one field is where the two readings
+  // meet, which is where this was getting it wrong: every one-field struct
+  // asked for its value to be handed over, however little was in it.
+  //
+  //     struct 'h' [int8 'm']
+  //     var.h 'g' = ['n'];     # `'n'` is handed over here, and nothing says so
+  //
+  // The same value into a struct with two fields was taken without a word.
+  bool isTheWholeStruct(const Expr &item, const std::string &fills) {
+    const Expr *at = &item;
+    if (at->kind == ExprKind::Borrow && !at->children.empty())
+      at = at->children[0].get();
+    // `h[…]` names the struct where it is made, so it is one of these.
+    if (at->kind == ExprKind::Call && at->path.size() == 1 && at->path[0] == fills)
+      return true;
+    if (at->kind != ExprKind::Name)
+      return false;
+    const Binding *from = lookup(at->text);
+    return from && from->fills == fills;
+  }
+
   void consumeInto(const ValueList &list, Mode mode, bool copies, bool collects = false,
                    bool elementCopies = true, const std::string &fills = {}) {
     const auto *fields = fills.empty() ? nullptr : shapeNamed(fills);
@@ -615,7 +638,8 @@ private:
       // A struct's items each go into a place of their own, as a `many`'s do,
       // so each of them is handed over. Reading them as pieces of a joined
       // value let an owning one be put in and let go twice.
-      if (fields && value.items.size() != 1) {
+      if (fields && !value.items.empty() &&
+          !(value.items.size() == 1 && isTheWholeStruct(*value.items[0], fills))) {
         fillWith(value.items, fills);
         continue;
       }

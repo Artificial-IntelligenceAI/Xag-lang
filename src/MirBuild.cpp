@@ -687,7 +687,12 @@ private:
                 Span where) {
     if (holds.empty())
       return;
-    const std::string inner = within(spelled);
+    // What is inside, once the borrow is off it. The subject may be a borrow
+    // already — reaching into one of the things a struct holds lends it where
+    // it stands — and asking what is inside a `loan or-nothing int8` without
+    // taking the loan off first gave `loan loan or-nothing int8`, a pointer to
+    // a pointer that no engine could read.
+    const std::string inner = within(withoutLoan(spelled));
     const bool copies = copiesNamed(inner);
     const std::string as = copies ? inner : "loan " + inner;
     const unsigned into = addLocal(holds, typeRef(as), copies);

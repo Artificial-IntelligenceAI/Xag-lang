@@ -237,7 +237,17 @@ private:
 
   // A written value, made ready before anything runs.
   uint32_t constantFor(const Operand &operand, Op &how) {
-    const MirType type = typing(operand.type).lent();
+    MirType type = typing(operand.type).lent();
+    // What is written is the value, whatever else may be absent: `*7*` going
+    // into something that may hold nothing is a seven, held. Asking with the
+    // `or-nothing` still on it answered "no kind I know" and the digits were
+    // kept as text — which read back as zero, and as `false` for a `bool`.
+    //
+    // Only a name was ever given one of these before, and a name carries its
+    // own type. One of the things a struct holds is given the *field's*, which
+    // is where the two parted company.
+    if (type.orNothing && operand.written != "nothing")
+      type = type.within();
     const Type named = plainly(type);
     Constant value;
     if (named == Type::Bool) {

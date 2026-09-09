@@ -575,7 +575,12 @@ private:
         double read = 0;
         xag_bin_reads(operand.written.data(), operand.written.size(), widthOf(named),
                       &read);
-        return llvm::ConstantFP::get(typeFor(type), read);
+        // Built at the width the number is, not at whatever is wrapped around
+        // it. Asked of the whole type, `or-nothing bin32` handed `ConstantFP`
+        // a two-field struct and it answered with a `ppc_fp128` sitting in a
+        // slot shaped for a `float`. Every other branch here reads `named`;
+        // this one did not.
+        return llvm::ConstantFP::get(typeFor(named), read);
       }
       return textOf(unescape(operand.written));
     }

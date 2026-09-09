@@ -106,6 +106,10 @@ enum Held {
     /// own allocation balance, so a struct that freed what it borrowed would be
     /// a finding rather than a silence.
     Lent(Ty),
+    /// One that may hold nothing. Built, asked, and let go of — and nothing
+    /// wrote one until now, so a value went straight into a field shaped
+    /// `{ is it there, what it is }` and the module came out ill-formed.
+    Maybe(Ty),
 }
 
 /// A struct the program declared, and what it holds in the order it holds it.
@@ -373,6 +377,13 @@ impl<'a> Writer<'a> {
                     _ => self.pick_whole(),
                 };
                 Held::Lent(ty)
+            } else if self.rng.chance(18) {
+                let ty = match self.rng.below(10) {
+                    0..=3 => Ty::Str,
+                    4 => Ty::Bool,
+                    _ => self.pick_whole(),
+                };
+                Held::Maybe(ty)
             } else {
                 Held::Plain(match self.rng.below(10) {
                     0..=2 => Ty::Str,
@@ -385,6 +396,10 @@ impl<'a> Writer<'a> {
                 Held::Plain(ty) => self.out.push_str(ty.written()),
                 Held::Lent(ty) => {
                     self.out.push_str("loan.");
+                    self.out.push_str(ty.written());
+                }
+                Held::Maybe(ty) => {
+                    self.out.push_str("or-nothing.");
                     self.out.push_str(ty.written());
                 }
                 Held::Group(which) => {
@@ -446,6 +461,9 @@ impl<'a> Writer<'a> {
                 Held::Plain(ty) => out.push((field.clone(), *ty)),
                 Held::Lent(ty) if !writable => out.push((field.clone(), *ty)),
                 Held::Lent(_) => {}
+                // Reached only by asking. Showing one would not say which of
+                // the two it is, and that is refused where it is written.
+                Held::Maybe(_) => {}
                 Held::Group(inner) if depth < 2 => {
                     for (rest, ty) in self.paths(*inner, gone, depth + 1, writable) {
                         out.push((format!("{field}.{rest}"), ty));
@@ -599,6 +617,16 @@ impl<'a> Writer<'a> {
                 // Every one of them is a place of its own, so text is written
                 // whole rather than as pieces that would join anywhere else.
                 Held::Plain(ty) => self.expr(*ty, if *ty == Ty::Str { 0 } else { 1 }),
+                Held::Maybe(ty) => {
+                    // Either a value or none, because both have to be written:
+                    // an absence writes its own pair, and a value has to be
+                    // wrapped on the way in.
+                    if self.rng.chance(35) {
+                        self.out.push_str("nothing");
+                    } else {
+                        self.expr(*ty, if *ty == Ty::Str { 0 } else { 1 });
+                    }
+                }
                 Held::Lent(ty) => {
                     // Whatever is here to borrow from. `buildable` has already
                     // said there is something, so this cannot come back empty.
@@ -785,7 +813,7 @@ impl<'a> Writer<'a> {
     }
 
     fn statement(&mut self) {
-        match self.rng.below(23) {
+        match self.rng.below(24) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
             5..=6 => self.print(),
@@ -809,6 +837,7 @@ impl<'a> Writer<'a> {
             20 => self.describe_call(),
             21 => self.parts_call(),
             22 => self.same_call(),
+            23 => self.group_holds(),
             _ => self.print(),
         }
     }
@@ -1235,6 +1264,52 @@ impl<'a> Writer<'a> {
             return;
         };
         self.set_a_place(&name, ty, length);
+    }
+
+    /// `if 'v3'.v4 holds 'v9' { … }` — the only way to reach what a field that
+    /// may hold nothing is holding. Showing one straight out would not say
+    /// which of the two it is, and is refused where it is written.
+    fn group_holds(&mut self) {
+        let mut seen: Vec<(String, String, Ty)> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                let Some(which) = var.group else { continue };
+                if var.moved || var.lent || !var.parts_moved.is_empty() {
+                    continue;
+                }
+                for (field, held) in &self.shapes[which].fields {
+                    if let Held::Maybe(ty) = held {
+                        seen.push((var.name.clone(), field.clone(), *ty));
+                    }
+                }
+            }
+        }
+        if seen.is_empty() {
+            self.print();
+            return;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        let (name, field, ty) = seen[at].clone();
+        let got = self.fresh();
+        self.pad();
+        self.out.push_str("if '");
+        self.out.push_str(&name);
+        self.out.push_str("'.");
+        self.out.push_str(&field);
+        self.out.push_str(" holds '");
+        self.out.push_str(&got);
+        self.out.push_str("' {\n");
+        self.indent += 1;
+        self.pad();
+        self.out.push_str("print.stdout['");
+        self.out.push_str(&got);
+        self.out.push_str("' \\n];\n");
+        // What is lent inside an arm is lent for that arm only, so nothing is
+        // declared here that the rest of the scope would have to know about.
+        let _ = ty;
+        self.indent -= 1;
+        self.pad();
+        self.out.push_str("}\n");
     }
 
     /// `set 'v3'[*2*] = […]` — one place of a `many`, written.

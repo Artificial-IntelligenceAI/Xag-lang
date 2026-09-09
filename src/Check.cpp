@@ -1832,7 +1832,13 @@ private:
                           "'` is.",
                       "a struct is made with one value for each of the things it holds, "
                       "and what this is could not be worked out");
-      if (wanted != Ty{} && got != Ty{} && got != wanted)
+      // A value going into something that may hold nothing is that value, held
+      // — which is what a name is given, and was not what one of the things a
+      // struct holds was given. `var.or-nothing.int8 'o' = ['n'];` was taken and
+      // the same value into the same type inside a struct was refused, which is
+      // one rule answered two ways.
+      const bool heldInstead = wanted.mayBeNothing() && got == wanted.within();
+      if (wanted != Ty{} && got != Ty{} && got != wanted && !heldInstead)
         complain(items[i]->span, "E0506",
                  "`'" + shape.fields[i].name + "'` is a `" + name(wanted) +
                      "`, and this is a `" + name(got) + "`.",

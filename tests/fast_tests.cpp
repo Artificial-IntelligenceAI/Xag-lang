@@ -293,6 +293,43 @@ void onTurningNumbersIntoText() {
   AGREE("struct 'holder' [loan.int64 'x']\n"
         "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
         "  print.stdout['h'.x \\n]; }\n");
+  // A written value going into a field that may hold nothing, at every kind of
+  // number there is. A name carries its own type; one of the things a struct
+  // holds is given the *field's*, so the `or-nothing` was still on it when each
+  // engine asked what kind of value it was reading.
+  //
+  // The fast engine answered "no kind I know" and kept the digits as text,
+  // which read back as zero and as `false`. The backend asked `ConstantFP` for
+  // a `bin32` while holding the two-field wrapper, and was handed a
+  // `ppc_fp128` to sit in a slot shaped for a `float`.
+  AGREE("struct 'w' [or-nothing.int64 'm', int64 'n']\n"
+        "START { var.w 'g' = [*7* *2*];\n"
+        "  if 'g'.m holds 'x' { print.stdout['x' \\n]; } print.stdout['g'.n \\n]; }\n");
+  AGREE("struct 'w' [or-nothing.bool 'm', int64 'n']\n"
+        "START { var.w 'g' = [*true* *2*];\n"
+        "  if 'g'.m holds 'x' { print.stdout['x' \\n]; } print.stdout['g'.n \\n]; }\n");
+  AGREE("struct 'w' [or-nothing.bin32 'm', int64 'n']\n"
+        "START { var.w 'g' = [*2.5* *2*];\n"
+        "  if 'g'.m holds 'x' { print.stdout['x' \\n]; } print.stdout['g'.n \\n]; }\n");
+  AGREE("struct 'w' [or-nothing.deci64 'm', int64 'n']\n"
+        "START { var.w 'g' = [*1.50* *2*];\n"
+        "  if 'g'.m holds 'x' { print.stdout['x' \\n]; } print.stdout['g'.n \\n]; }\n");
+
+  // A value with a name going into a field that may hold nothing. It was taken
+  // for a name — `var.or-nothing.int8 'o' = ['n'];` — and refused for one of the
+  // things a struct holds, which is one rule answered two ways.
+  AGREE("struct 'holds' [or-nothing.int8 'm']\n"
+        "START { var.int8 'n' = [*3*]; var.holds 'g' = ['n'];\n"
+        "  if 'g'.m holds 'v' { print.stdout['v' \\n]; } }\n");
+  // A struct with exactly one field is where two readings meet: a lone item is
+  // the whole struct, except when the struct holds one thing. Every one-field
+  // struct asked for its value to be handed over, however little was in it,
+  // while the same value into a struct with two fields was taken without a
+  // word.
+  AGREE("struct 'one' [int8 'm']\n"
+        "START { var.int8 'n' = [*3*]; var.one 'g' = ['n'];\n"
+        "  print.stdout['g'.m \\n]; }\n");
+
   // A struct holding something that may hold nothing. The interpreters ran it
   // and answered; the module the backend built was ill-formed, because a value
   // was written straight into a field shaped `{ is it there, what it is }`.
