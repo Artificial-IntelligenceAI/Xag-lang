@@ -244,6 +244,40 @@ impl<'a> Writer<'a> {
             "fn.nothing 'look' [loan.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n");
         self.out.push_str(
             "fn.nothing 'edit' [loanmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n");
+
+        // Three generics, written into every program whether or not anything
+        // calls one. A generic nobody calls is written out not at all, which is
+        // itself worth generating.
+        //
+        // They are fixed rather than random because what a generic body may do
+        // depends on every type it is ever called with, and the generator does
+        // not know that when it writes the body. These three do only what every
+        // type can do — be looked at, be asked about, be handed back.
+
+        // Every kind it could be handed, so no call can fail to be covered.
+        self.out.push_str(concat!(
+            "fn.str 'describe' [loan.any 'v'] {\n",
+            "    whichever 'v' {\n",
+            "        is number     { give [convert-to-str['v']]; }\n",
+            "        is bool       { give [convert-to-str['v']]; }\n",
+            "        is str        { give [convert-to-str[count['v']]]; }\n",
+            "        is many       { give [convert-to-str[count['v']]]; }\n",
+            "        is struct     { give [str:*group*]; }\n",
+            "        is or-nothing { give [str:*maybe*]; }\n",
+            "    }\n}\n\n"));
+
+        // Walking a struct nobody wrote this function to know about, and
+        // asking each field what it is on the way past.
+        self.out.push_str(concat!(
+            "fn.str 'parts-of' [loan.any 'v'] {\n",
+            "    var.mut.str 'out' = [str:*<*];\n",
+            "    loop.parts 'p' = ['v'] {\n",
+            "        set 'out' = ['out' 'p'.name str:*=* (describe[loan 'p'.value]) str:* *];\n",
+            "    }\n",
+            "    give ['out' str:*>*];\n}\n\n"));
+
+        // The floor: what can be done with a blank when nothing narrows it.
+        self.out.push_str("fn.any 'same' [any 'v'] { give ['v']; }\n\n");
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
@@ -624,7 +658,7 @@ impl<'a> Writer<'a> {
     }
 
     fn statement(&mut self) {
-        match self.rng.below(20) {
+        match self.rng.below(23) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
             5..=6 => self.print(),
@@ -645,8 +679,92 @@ impl<'a> Writer<'a> {
             17 => self.group_read(),
             18 => self.group_set(),
             19 => self.group_part_moved(),
+            20 => self.describe_call(),
+            21 => self.parts_call(),
+            22 => self.same_call(),
             _ => self.print(),
         }
+    }
+
+    /// Any name at all, whatever it holds — a number, text, several of
+    /// something, or a group. `describe` takes every one of them, which is the
+    /// point of asking it.
+    fn anything_lendable(&mut self) -> Option<String> {
+        let mut seen: Vec<String> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if !var.moved && !var.lent && var.parts_moved.is_empty() {
+                    seen.push(var.name.clone());
+                }
+            }
+        }
+        if seen.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        Some(seen[at].clone())
+    }
+
+    /// `print.stdout[(describe[loan 'v3']) \n];` — one generic written out once
+    /// per type anything is handed to it at, and a `whichever` inside choosing
+    /// a different arm in every copy.
+    fn describe_call(&mut self) {
+        let name = match self.anything_lendable() {
+            Some(name) => name,
+            None => return self.print(),
+        };
+        self.pad();
+        self.out.push_str("print.stdout[(describe[loan '");
+        self.out.push_str(&name);
+        self.out.push_str("']) \\n];\n");
+    }
+
+    /// `print.stdout[(parts-of[loan 'v3']) \n];` — a struct walked by a
+    /// function that has never seen it, one copy of the body per field.
+    fn parts_call(&mut self) {
+        let name = match self.pick_group(false, true) {
+            Some((name, _)) => name,
+            None => return self.print(),
+        };
+        self.pad();
+        self.out.push_str("print.stdout[(parts-of[loan '");
+        self.out.push_str(&name);
+        self.out.push_str("']) \\n];\n");
+    }
+
+    /// `var.int64 'v7' = [same['v3']];` — the floor of what a blank can do,
+    /// and the one shape where the answer's type is the blank as well.
+    ///
+    /// Only what copies: handing text over would be a move, and what is being
+    /// asked about here is the blank rather than the transfer.
+    fn same_call(&mut self) {
+        let ty = match self.whole_in_scope() {
+            Some(ty) => ty,
+            None => return self.print(),
+        };
+        let name = match self.pick_name(ty) {
+            Some(name) => name,
+            None => return self.print(),
+        };
+        let fresh = self.fresh();
+        self.pad();
+        self.out.push_str("var.");
+        self.out.push_str(ty.written());
+        self.out.push_str(" '");
+        self.out.push_str(&fresh);
+        self.out.push_str("' = [same['");
+        self.out.push_str(&name);
+        self.out.push_str("']];\n");
+        self.declare(Var {
+            name: fresh,
+            ty,
+            mutable: false,
+            many: None,
+            moved: false,
+            lent: false,
+            group: None,
+            parts_moved: Vec::new(),
+        });
     }
 
     /// A name holding text that nobody is using for anything else.
