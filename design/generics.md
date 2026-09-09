@@ -1,7 +1,13 @@
 # Generics, and looking at a type
 
-**Nothing here is built.** Decided in conversation on 2026-09-08; written down so
-it does not get built the wrong way round.
+**All of this is built**, on 2026-09-08 and 2026-09-09. Decided in conversation
+first and written down so it did not get built the wrong way round, which is why
+this reads as a plan; each part says underneath it what building it settled, and
+what building it found.
+
+Nothing here is outstanding. What a blank takes, what a `whichever` chooses by,
+what a turn of `loop.parts` hands over — all of it runs, and the generator writes
+programs that use it.
 
 Xag already has generics — a program just cannot write them. `many.int64`,
 `many.point`, `or-nothing.str`: one type parameterised by another, working over
