@@ -85,6 +85,7 @@ add_library(xagfront STATIC
   src/Diagnostic.cpp
   src/Lexer.cpp
   src/Parser.cpp
+  src/AstClone.cpp
   src/AstPrinter.cpp
   src/Check.cpp
   src/Own.cpp

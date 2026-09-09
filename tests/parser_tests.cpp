@@ -1,4 +1,5 @@
 #include "xag/Lexer.h"
+#include "xag/AstClone.h"
 #include "xag/Parser.h"
 
 #include <iostream>
@@ -409,9 +410,69 @@ void aValueOnItsOwnIsSaidSoOnce() {
   CHECK(run("START { }\n}\n").code(0) == "E0104");
 }
 
+// A clone is faithful when the printer cannot tell the two apart. The printer
+// walks everything the tree holds, so anything the clone dropped or shared shows
+// up as a difference — which is a stronger check than listing the fields, since
+// listing them is exactly what the clone already does and a field forgotten in
+// one is forgotten in both.
+void aCloneIsIndistinguishable() {
+  const std::string program =
+      "struct 'point' [int64 'x', int64 'y']\n"
+      "const.int64 'LIMIT' = [*10*];\n"
+      "fn.loan.'the text'.str 'pick' [loan.'the text'.str 'a', loan.str 'b'] {\n"
+      "    if count['a'] >== count['b'] { give ['a']; }\n"
+      "    give ['a'];\n"
+      "}\n"
+      "fn.or-nothing.int64 'half' [int64 'n'] {\n"
+      "    if 'n' == *0* { give [nothing]; }\n"
+      "    give ['n' / *2*];\n"
+      "}\n"
+      "START {\n"
+      "    var.mut.many.int64 'xs' = [*1* *2* *3*];\n"
+      "    set 'xs'[*0*] = [*9*];\n"
+      "    var.point 'p' = [*1* *2*];\n"
+      "    set 'p'.y = [*7*];\n"
+      "    loop.perm.range.int64 'i' = [*1*, 'LIMIT'] {\n"
+      "        if 'i' > *3* { break; }\n"
+      "    }\n"
+      "    loop.while 'p'.x > *0* { set 'p'.x = ['p'.x - *1*]; }\n"
+      "    UNSAFE {\n"
+      "        loop.no-itmt.range.int64 'j' = [*1*, *2*] { }\n"
+      "    }\n"
+      "    when half[*4*] {\n"
+      "        is 'n'     { print.stdout[str:*got * 'n' \\n]; }\n"
+      "        is nothing { print.stdout[str:*none* \\n]; }\n"
+      "    }\n"
+      "}\n";
+
+  const xag::Source source("test.xag", program);
+  const xag::LexResult lexed = xag::lex(source);
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(parsed.ok());
+
+  xag::Program copied;
+  for (const xag::Item &item : parsed.program.items)
+    copied.items.push_back(xag::clone(item));
+  CHECK(copied.items.size() == parsed.program.items.size());
+
+  std::ostringstream first;
+  std::ostringstream again;
+  xag::print(parsed.program, first);
+  xag::print(copied, again);
+  CHECK(first.str() == again.str());
+  CHECK(!first.str().empty());
+
+  // And it is a copy rather than a share: changing one leaves the other alone.
+  if (!copied.items.empty()) {
+    copied.items.front().name = "changed";
+    CHECK(parsed.program.items.front().name != "changed");
+  }
+}
+
 } // namespace
 
 int main() {
+  aCloneIsIndistinguishable();
   aValueOnItsOwnIsSaidSoOnce();
   wholeProgramParses();
   aDeclarationAndACallTellApart();
