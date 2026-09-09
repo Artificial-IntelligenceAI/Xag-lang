@@ -285,6 +285,18 @@ void onTurningNumbersIntoText() {
         "  print.stdout['a' str:* * 'c' str:* * convert-to-str['c'] \\n]; }\n"
         "START { var.int64 'a' = [*300*]; var.deci64 'c' = [*1.10*];\n"
         "  show[loan 'a', loan 'c']; }\n");
+  // A struct holding a borrow. Nothing had ever written one — no example, no
+  // test, and the generator does not — so it was laid out with a whole number
+  // where a pointer goes and would not build at all, while the interpreter read
+  // it and answered. Three engines cannot disagree about a program nobody
+  // writes.
+  AGREE("struct 'holder' [loan.int64 'x']\n"
+        "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
+        "  print.stdout['h'.x \\n]; }\n");
+  AGREE("struct 'both' [loan.int64 'a', str 'b']\n"
+        "START { var.int64 'n' = [*4*]; var.both 'p' = [loan 'n' *hi*];\n"
+        "  print.stdout['p'.a str:*|* 'p'.b \\n]; }\n");
+
   // Arithmetic and comparison on borrowed numbers, and a number written
   // through a loan. Every loan any program had made was a loan of text until
   // one lent a number, and the sum of two borrowed numbers was no step at all.

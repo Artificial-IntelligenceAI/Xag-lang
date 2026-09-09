@@ -14,6 +14,15 @@ std::string spell(Ty type) {
   return type.kind == Type::Unknown ? "?" : name(type);
 }
 
+// How a thing is held, as the middle layer writes it. Only asked where it is
+// not already known from the chain — a parameter's loan is written where the
+// parameter is, and saying it twice made `loan loan int64`.
+const char *lentAs(Ty type) {
+  return type.held == Held::Loan      ? "loan "
+         : type.held == Held::LoanMut ? "loanmut "
+                                      : "";
+}
+
 // A number is handed over by being copied, however wide it is: there is nothing
 // in one to give back.
 bool copies(Ty type) { return isNumber(type) || type == Type::Bool; }
@@ -460,16 +469,23 @@ private:
       const Shape *shape = shapeOf(held);
       unsigned which = 0;
       std::string inner = "?";
+      std::string lent;
       if (shape)
         for (unsigned i = 0; i < shape->fields.size(); ++i)
           if (shape->fields[i].name == e.text) {
             which = i;
             inner = spell(shape->fields[i].type);
+            lent = lentAs(shape->fields[i].type);
           }
       // What copies is read out; what has an owner is lent where it stands, the
-      // same as an element of a `many`.
-      const bool copiesIt = copiesNamed(inner);
-      const std::string as = copiesIt ? inner : "loan " + inner;
+      // same as an element of a `many`. A field that is already a borrow is
+      // read out as the borrow it is: lending it again would be a pointer to a
+      // pointer, and reading it as the thing itself carried an address in a
+      // slot typed as a whole number — `'h'.x` printed one.
+      const bool copiesIt = lent.empty() && copiesNamed(inner);
+      const std::string as = !lent.empty() ? lent + inner
+                             : copiesIt    ? inner
+                                           : "loan " + inner;
       const unsigned into = temporary(typeRef(as), copiesIt);
       emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Part, e.text, {}, which,

@@ -63,6 +63,17 @@ bool isText(const MirType &type) {
 // the middle layer holds it.
 MirType asMirType(Ty type) {
   MirType out;
+  // How a field is held. This was dropped on the floor, because until the
+  // checker learned what a borrow is there was nothing here to read — so a
+  // struct holding `loan.int64` was laid out with a whole number where a
+  // pointer goes, and building one failed LLVM's own verifier. Nothing had ever
+  // written such a struct: no example, no test, and the generator does not.
+  //
+  // It also decides whether the field owns what it points at. A borrowed `str`
+  // read as an owned one is a free of something somebody else still holds.
+  out.lending = type.held == Held::Loan      ? MirType::Lending::Read
+                : type.held == Held::LoanMut ? MirType::Lending::Write
+                                             : MirType::Lending::None;
   out.orNothing = type.orNothing;
   out.many = type.holds();
   out.held = type.holds() ? type.element : type.kind;
@@ -905,6 +916,11 @@ private:
                         : slots_[value.operands[0].local];
       auto *at = builder_.CreateStructGEP(typeFor(withoutLoan(of)), where,
                                           value.local);
+      // A field that is itself a borrow holds the pointer, so the pointer is
+      // what is read out. Handing back the field's own address instead gave a
+      // pointer to a pointer, and printing it printed the address.
+      if (inner.isLoan())
+        return builder_.CreateLoad(builder_.getPtrTy(), at);
       return copiesNamed(inner) ? builder_.CreateLoad(typeFor(inner), at)
                                 : static_cast<llvm::Value *>(at);
     }
