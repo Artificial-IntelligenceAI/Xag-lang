@@ -95,6 +95,15 @@ struct Var {
 enum Held {
     Plain(Ty),
     Group(usize),
+    /// A borrow of one of these, held by the struct for as long as the struct
+    /// lives. Nothing had ever written such a struct — no example, no test, and
+    /// not this file — and it did not build at all: the checker took it, both
+    /// interpreters answered, and LLVM's own verifier refused the module.
+    ///
+    /// Only what copies, for now. A borrowed `str` field asks a second question
+    /// — who ends it — and that one is answered by a rule rather than by a
+    /// layout.
+    Lent(Ty),
 }
 
 /// A struct the program declared, and what it holds in the order it holds it.
@@ -345,6 +354,9 @@ impl<'a> Writer<'a> {
             // holds itself has no size.
             let held = if !self.shapes.is_empty() && self.rng.chance(25) {
                 Held::Group(self.rng.below(self.shapes.len() as u32) as usize)
+            } else if self.rng.chance(20) {
+                let ty = if self.rng.chance(20) { Ty::Bool } else { self.pick_whole() };
+                Held::Lent(ty)
             } else {
                 Held::Plain(match self.rng.below(10) {
                     0..=2 => Ty::Str,
@@ -355,6 +367,10 @@ impl<'a> Writer<'a> {
             let field = self.fresh();
             match held {
                 Held::Plain(ty) => self.out.push_str(ty.written()),
+                Held::Lent(ty) => {
+                    self.out.push_str("loan.");
+                    self.out.push_str(ty.written());
+                }
                 Held::Group(which) => {
                     let name = self.shapes[which].name.clone();
                     self.out.push_str(&name);
@@ -398,7 +414,13 @@ impl<'a> Writer<'a> {
 
     /// Every way into a struct that ends at a plain value, written as the path
     /// it takes: `v4`, or `v4.v7` where one of them holds another struct.
-    fn paths(&self, which: usize, gone: &[String], depth: u32) -> Vec<(String, Ty)> {
+    /// Where each of the things a struct holds can be reached, and what is
+    /// there. `writable` leaves out the borrowed ones: a borrow may be read
+    /// through and never written through or taken out, so a `set` or a `move`
+    /// reaching one is a program the compiler rightly refuses — which would be
+    /// this file's mistake rather than a finding.
+    fn paths(&self, which: usize, gone: &[String], depth: u32,
+             writable: bool) -> Vec<(String, Ty)> {
         let mut out = Vec::new();
         for (field, held) in &self.shapes[which].fields {
             if depth == 0 && gone.contains(field) {
@@ -406,8 +428,10 @@ impl<'a> Writer<'a> {
             }
             match held {
                 Held::Plain(ty) => out.push((field.clone(), *ty)),
+                Held::Lent(ty) if !writable => out.push((field.clone(), *ty)),
+                Held::Lent(_) => {}
                 Held::Group(inner) if depth < 2 => {
-                    for (rest, ty) in self.paths(*inner, gone, depth + 1) {
+                    for (rest, ty) in self.paths(*inner, gone, depth + 1, writable) {
                         out.push((format!("{field}.{rest}"), ty));
                     }
                 }
@@ -418,7 +442,60 @@ impl<'a> Writer<'a> {
     }
 
     /// One of the things a struct holds that has not gone anywhere.
-    fn pick_field(&mut self, name: &str, which: usize, want: Option<Ty>) -> Option<(String, Ty)> {
+    /// Something of this type to borrow from, for a struct to hold. Unlike
+    /// every other picker this does not look past a name already lent: two
+    /// read loans of one thing are two read loans of one thing, and a struct
+    /// with two borrowed fields of one type has to come from somewhere.
+    fn lendable_copy(&mut self, ty: Ty) -> Option<String> {
+        let mut seen: Vec<String> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if var.ty == ty && var.many.is_none() && var.group.is_none() && !var.moved {
+                    seen.push(var.name.clone());
+                }
+            }
+        }
+        if seen.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        Some(seen[at].clone())
+    }
+
+    /// Whether every borrow this struct holds has something to borrow from.
+    /// A struct is declared at the top of the file and built later on, so the
+    /// building has to ask rather than assume.
+    fn buildable(&self, which: usize, depth: u32) -> bool {
+        for (_, held) in &self.shapes[which].fields {
+            match held {
+                Held::Lent(ty) => {
+                    let mut found = false;
+                    for scope in &self.scopes {
+                        for var in scope {
+                            if var.ty == *ty && var.many.is_none() && var.group.is_none()
+                                && !var.moved
+                            {
+                                found = true;
+                            }
+                        }
+                    }
+                    if !found {
+                        return false;
+                    }
+                }
+                Held::Group(inner) if depth < 3 => {
+                    if !self.buildable(*inner, depth + 1) {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    fn pick_field(&mut self, name: &str, which: usize, want: Option<Ty>,
+                  writable: bool) -> Option<(String, Ty)> {
         let gone: Vec<String> = self
             .scopes
             .iter()
@@ -427,7 +504,7 @@ impl<'a> Writer<'a> {
             .map(|v| v.parts_moved.clone())
             .unwrap_or_default();
         let here: Vec<(String, Ty)> = self
-            .paths(which, &gone, 0)
+            .paths(which, &gone, 0, writable)
             .into_iter()
             .filter(|(_, ty)| want.map_or(true, |w| *ty == w))
             .collect();
@@ -454,6 +531,10 @@ impl<'a> Writer<'a> {
             return;
         }
         let which = self.rng.below(self.shapes.len() as u32) as usize;
+        if !self.buildable(which, 0) {
+            self.print();
+            return;
+        }
         let mutable = self.rng.chance(60);
         let name = self.fresh();
         let shape_name = self.shapes[which].name.clone();
@@ -492,6 +573,17 @@ impl<'a> Writer<'a> {
                 // Every one of them is a place of its own, so text is written
                 // whole rather than as pieces that would join anywhere else.
                 Held::Plain(ty) => self.expr(*ty, if *ty == Ty::Str { 0 } else { 1 }),
+                Held::Lent(ty) => {
+                    // Whatever is here to borrow from. `buildable` has already
+                    // said there is something, so this cannot come back empty.
+                    let name = self.lendable_copy(*ty).unwrap_or_default();
+                    self.out.push_str("loan '");
+                    self.out.push_str(&name);
+                    self.out.push('\'');
+                    // Held for as long as the struct is, so nothing may hand it
+                    // over, change it, or lend it for writing from here on.
+                    self.markLent(&name, true);
+                }
                 Held::Group(inner) => {
                     // Named where it is made: a word before a bracket is a
                     // call, where a name before one is an index.
@@ -511,7 +603,7 @@ impl<'a> Writer<'a> {
             self.print();
             return;
         };
-        let Some((field, ty)) = self.pick_field(&name, which, None) else {
+        let Some((field, ty)) = self.pick_field(&name, which, None, false) else {
             self.print();
             return;
         };
@@ -533,7 +625,7 @@ impl<'a> Writer<'a> {
             self.print();
             return;
         };
-        let Some((field, ty)) = self.pick_field(&name, which, None) else {
+        let Some((field, ty)) = self.pick_field(&name, which, None, true) else {
             self.print();
             return;
         };
@@ -554,7 +646,7 @@ impl<'a> Writer<'a> {
             self.print();
             return;
         };
-        let Some((field, _)) = self.pick_field(&name, which, Some(Ty::Str)) else {
+        let Some((field, _)) = self.pick_field(&name, which, Some(Ty::Str), true) else {
             self.print();
             return;
         };
