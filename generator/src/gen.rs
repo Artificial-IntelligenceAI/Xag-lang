@@ -128,6 +128,15 @@ pub struct Writer<'a> {
     shapes: Vec<Shape>,
     consts: Vec<Var>,
     next_name: u32,
+    /// Names a loop steps itself, which nothing may borrow into a struct. The
+    /// borrow would outlive the statement that took it and the next turn would
+    /// change what it points at — refused, and rightly, but the refusal would
+    /// be this file's mistake rather than a finding.
+    ///
+    /// Kept apart from `lent` on purpose: a counter may still be read, lent for
+    /// the length of a call, and assigned to. It is only holding a borrow of one
+    /// *across* the step that cannot work.
+    stepped: Vec<String>,
     indent: usize,
     size: u32,
 }
@@ -150,6 +159,7 @@ pub fn generate(seed: u64, size: u32, out: &mut String) {
         shapes: Vec::new(),
         consts: Vec::new(),
         next_name: 0,
+        stepped: Vec::new(),
         indent: 0,
         size,
     };
@@ -456,7 +466,9 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<String> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == ty && var.many.is_none() && var.group.is_none() && !var.moved {
+                if var.ty == ty && var.many.is_none() && var.group.is_none() && !var.moved
+                    && !self.stepped.contains(&var.name)
+                {
                     seen.push(var.name.clone());
                 }
             }
@@ -480,6 +492,7 @@ impl<'a> Writer<'a> {
                         for var in scope {
                             if var.ty == *ty && var.many.is_none() && var.group.is_none()
                                 && !var.moved
+                                && !self.stepped.contains(&var.name)
                             {
                                 found = true;
                             }
@@ -1416,6 +1429,7 @@ impl<'a> Writer<'a> {
             parts_moved: Vec::new(),
         });
 
+        self.stepped.push(counter.clone());
         self.pad();
         self.out.push_str("loop.while '");
         self.out.push_str(&counter);
@@ -1437,6 +1451,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' + *1*];\n");
         self.finish_scope();
         self.scopes.pop();
+        self.stepped.retain(|name| name != &counter);
         self.indent -= 1;
         self.pad();
         self.out.push_str("}\n");
@@ -1460,7 +1475,10 @@ impl<'a> Writer<'a> {
         push_number(self.out, last);
         self.out.push_str("*] {\n");
         self.indent += 1;
-        let held = Var { name: counter, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() };
+        // Stepped by the loop, the same as a `while`'s own counter: a borrow of
+        // one held across a turn points at what the next turn changes.
+        self.stepped.push(counter.clone());
+        let held = Var { name: counter.clone(), ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() };
         if keeps {
             self.declare(held.clone());
             self.scopes.push(Vec::new());
@@ -1471,6 +1489,7 @@ impl<'a> Writer<'a> {
         self.body(statements);
         self.finish_scope();
         self.scopes.pop();
+        self.stepped.retain(|name| name != &counter);
         self.indent -= 1;
         self.pad();
         self.out.push_str("}\n");
