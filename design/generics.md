@@ -217,6 +217,12 @@ together is a comment rather than a generic.
 always written first: `fn.int64 'count-of' [loan.many.'held' 'xs']` gives back a
 plain `int64`, and `'held'` appears first among the parameters.
 
+A loan name is checked the same way. It declares itself by first appearance
+too, and today nothing checks the rest — `fn.int64 'size' [loan.'typo-here'.str
+'a']` compiles, and the label means nothing. Harmless, because with one borrow
+there is nothing to tell apart, and still a word that changes nothing, which is
+what `E0201` already refuses elsewhere. One rule in one position, enforced.
+
 ### Type parameters stay in the chain
 
 Declaring them elsewhere was considered — `[type 'held', loan.many.'held' 'xs']`,
@@ -227,8 +233,4 @@ when the chain is already where everything about one lives.
 
 ## Open
 
-- Whether a loan name should be tightened the same way. It declares itself by
-  first appearance too, and nothing checks the rest: `'typo-here'` written once
-  on a single parameter compiles and means nothing. Harmless there, because with
-  one borrow there is nothing to tell apart — but it is the same rule, enforced
-  in one place and not the other.
+- Nothing. Everything asked has been answered, and none of it is built.
