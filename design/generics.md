@@ -43,6 +43,11 @@ It is not really a loop. `'part'.value` is an `int64` on one turn and a `str` on
 the next, so the body cannot be compiled once and run twice: it is unrolled
 while compiling, one copy per field. Zig calls the same thing `inline for`.
 
+`loop.parts` walks a struct and nothing else. A `many` holds one type in every
+place, so a counted loop already reaches them and there is nothing to unroll —
+and a place has a position rather than a name, so `'part'.name` would have
+nothing to hold. The two only look alike.
+
 ### Asking what kind of thing something is
 
 Walking a `struct 'line' [point 'from', point 'to']`, a field is itself a struct,
@@ -170,8 +175,6 @@ Every word added buys one thing more.
 
 ## Open
 
-- Whether `loop.parts` also walks a `many`, where every element is the same type
-  and an ordinary loop would do.
 - How a type parameter is spelled where it needs a name, and the collision that
   comes with it — `fn.loan.'life'.'held'` puts a loan name and a type name side
   by side, told apart by counting, which is a syntax nobody could read.
