@@ -831,11 +831,69 @@ impl<'a> Writer<'a> {
     }
 
     /// `var.int64 'v7' = [same['v3']];` — the floor of what a blank can do,
-    /// and the one shape where the answer's type is the blank as well.
+    /// and the one shape where what comes back is the blank as well.
     ///
-    /// Only what copies: handing text over would be a move, and what is being
-    /// asked about here is the blank rather than the transfer.
+    /// Sometimes text, which is the same shape with a transfer in it: handing a
+    /// `str` to a blank moves it in and moves it out again, so what the name
+    /// held is somewhere else afterwards and the copy that does it was written
+    /// for a type nobody named.
     fn same_call(&mut self) {
+        if self.rng.chance(30) {
+            // Only one this scope declared, the same rule the end of a scope
+            // follows. A name from further out, moved from inside a loop, is
+            // moved once per turn — which is refused where the move is written,
+            // and rightly.
+            let here: Vec<String> = self
+                .scopes
+                .last()
+                .map(|scope| {
+                    scope
+                        .iter()
+                        .filter(|v| {
+                            v.ty == Ty::Str
+                                && v.many.is_none()
+                                && v.group.is_none()
+                                && !v.moved
+                                && !v.lent
+                        })
+                        .map(|v| v.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let picked = if here.is_empty() {
+                None
+            } else {
+                let at = self.rng.below(here.len() as u32) as usize;
+                Some(here[at].clone())
+            };
+            if let Some(name) = picked {
+                let fresh = self.fresh();
+                self.pad();
+                self.out.push_str("var.str '");
+                self.out.push_str(&fresh);
+                self.out.push_str("' = [same[move '");
+                self.out.push_str(&name);
+                self.out.push_str("']];\n");
+                for scope in &mut self.scopes {
+                    for var in scope {
+                        if var.name == name {
+                            var.moved = true;
+                        }
+                    }
+                }
+                self.declare(Var {
+                    name: fresh,
+                    ty: Ty::Str,
+                    mutable: false,
+                    many: None,
+                    moved: false,
+                    lent: false,
+                    group: None,
+                    parts_moved: Vec::new(),
+                });
+                return;
+            }
+        }
         let ty = match self.whole_in_scope() {
             Some(ty) => ty,
             None => return self.print(),
@@ -1198,7 +1256,24 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.expr(ty, 2);
         self.out.push_str("];\n");
-        self.declare(Var { name, ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
+        self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new() });
+
+        // `mut` asks for something, and asking without doing it is the whole of
+        // what `W0003` is for. Most of the time it is done here, where the name
+        // is still the newest thing in scope — which also writes the path where
+        // text is set over the top of text and the old value has to go.
+        //
+        // Not always: a `mut` nothing changes is a real warning worth writing
+        // sometimes. Always was drowning every other diagnostic in a dumped
+        // case, at a hundred and eighty warnings to twelve programs.
+        if mutable && self.rng.chance(80) {
+            self.pad();
+            self.out.push_str("set '");
+            self.out.push_str(&name);
+            self.out.push_str("' = [");
+            self.expr(ty, 2);
+            self.out.push_str("];\n");
+        }
     }
 
     fn assignment(&mut self) {
