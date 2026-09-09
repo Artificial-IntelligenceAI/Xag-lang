@@ -514,9 +514,13 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   if (report(source, parsed.diagnostics) != 0)
     return false;
+  // Read, and read again after every round of writing generics out. Only what
+  // refuses is said as it happens; what is only *said* waits until the rounds
+  // have settled, because a warning about a name is the same warning every
+  // round and printing it each time said one thing five times.
   xag::CheckResult checked = xag::check(source, parsed.program);
-  if (report(source, checked.diagnostics) != 0)
-    return false;
+  if (xag::anyErrors(checked.diagnostics))
+    return report(source, checked.diagnostics), false;
 
   // A generic is written out once per type it was called with, and every call
   // pointed at the copy it meant. After this there are no blanks anywhere, so
@@ -570,15 +574,19 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
       // Nothing generic left, but an arm was chosen or a struct was walked — so
       // what stands there now has never been read.
       checked = xag::check(source, working);
-      if (report(source, checked.diagnostics) != 0)
-        return false;
+      if (xag::anyErrors(checked.diagnostics))
+        return report(source, checked.diagnostics), false;
       continue;
     }
     program = &next;
     checked = xag::check(source, next);
-    if (report(source, checked.diagnostics) != 0)
-      return false;
+    if (xag::anyErrors(checked.diagnostics))
+      return report(source, checked.diagnostics), false;
   }
+
+  // Now that nothing is going to be written out again, once.
+  if (report(source, checked.diagnostics) != 0)
+    return false;
 
   // Every `whichever` becomes the arm it chose. After this the word is gone
   // from the tree, so ownership and the middle layer read ordinary blocks and

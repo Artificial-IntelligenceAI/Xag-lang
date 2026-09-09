@@ -556,7 +556,7 @@ impl<'a> Writer<'a> {
         self.group_items(which);
         self.out.push_str("];\n");
         self.declare(Var {
-            name,
+            name: name.clone(),
             ty: Ty::Bool, // never asked for: everything picking by type looks past a group
             mutable,
             many: None,
@@ -565,6 +565,13 @@ impl<'a> Writer<'a> {
             group: Some(which),
             parts_moved: Vec::new(),
         });
+        // `mut` asks for something that then happens, most of the time. This
+        // was the largest source of `W0003` by a long way: thirty warnings to
+        // one program, every one of them right, and every one of them noise on
+        // top of whatever the case was actually written to find.
+        if mutable && self.rng.chance(80) {
+            self.set_a_field(&name, which);
+        }
     }
 
     /// One item for each of the things it holds, in order — and a group of
@@ -631,6 +638,15 @@ impl<'a> Writer<'a> {
             self.print();
             return;
         };
+        self.set_a_field(&name, which);
+    }
+
+    /// `set 'v3'.v4 = […]` — one of the things a struct holds, written. A field
+    /// the struct only borrows is not one of them: a borrow may be read
+    /// through and never written through, so reaching one would be a program
+    /// the compiler rightly refuses.
+    fn set_a_field(&mut self, name: &str, which: usize) {
+        let name = name.to_string();
         let Some((field, ty)) = self.pick_field(&name, which, None, true) else {
             self.print();
             return;
@@ -1191,7 +1207,11 @@ impl<'a> Writer<'a> {
             }
         }
         self.out.push_str("];\n");
-        self.declare(Var { name, ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new() });
+        self.declare(Var { name: name.clone(), ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new() });
+        // The same again: a `many` asked to be writable, and then written.
+        if mutable && length > 0 && self.rng.chance(80) {
+            self.set_a_place(&name, ty, length);
+        }
     }
 
     /// `set 'v'[*i*] = […];` — one place, and the index is written in range so
@@ -1201,6 +1221,12 @@ impl<'a> Writer<'a> {
             self.print();
             return;
         };
+        self.set_a_place(&name, ty, length);
+    }
+
+    /// `set 'v3'[*2*] = […]` — one place of a `many`, written.
+    fn set_a_place(&mut self, name: &str, ty: Ty, length: u32) {
+        let name = name.to_string();
         let at = self.rng.below(length);
         self.pad();
         self.out.push_str("set '");
