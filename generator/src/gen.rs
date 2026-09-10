@@ -76,6 +76,12 @@ struct Var {
     /// them. A `many` never stands where its element type would, so everything
     /// that picks a name by type has to look past these.
     many: Option<u32>,
+    /// Whether it may be grown. A `many-growing`, which is a second type: the
+    /// length recorded above is what it was *made* with and never falls, so an
+    /// index below it stays safe however much it grows. Nothing counts a growth
+    /// toward that, because a growth written inside an arm that does not run
+    /// never happens.
+    grows: bool,
     /// How many places each of *those* has, when this is a `many` of a `many`.
     /// Every row the same length, so that reaching into one is safe wherever it
     /// is reached from — the language allows rows of different lengths, and a
@@ -334,7 +340,7 @@ impl<'a> Writer<'a> {
             self.out.push_str("' = [");
             self.literal(ty);
             self.out.push_str("];\n");
-            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None });
+            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false });
         }
         if constants > 0 {
             self.out.push('\n');
@@ -611,6 +617,7 @@ impl<'a> Writer<'a> {
             group: Some(which),
             parts_moved: Vec::new(),
             inner: None,
+            grows: false,
         });
         // `mut` asks for something that then happens, most of the time. This
         // was the largest source of `W0003` by a long way: thirty warnings to
@@ -768,7 +775,7 @@ impl<'a> Writer<'a> {
             self.out.push_str(&param);
             self.out.push('\'');
             params.push(ty);
-            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None });
+            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false });
         }
         self.out.push_str("] {\n");
         self.indent = 1;
@@ -829,7 +836,7 @@ impl<'a> Writer<'a> {
     }
 
     fn statement(&mut self) {
-        match self.rng.below(24) {
+        match self.rng.below(25) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
             5..=6 => self.print(),
@@ -854,6 +861,7 @@ impl<'a> Writer<'a> {
             21 => self.parts_call(),
             22 => self.same_call(),
             23 => self.group_holds(),
+            24 => self.array_grow(),
             _ => self.print(),
         }
     }
@@ -965,6 +973,7 @@ impl<'a> Writer<'a> {
                     group: None,
                     parts_moved: Vec::new(),
                     inner: None,
+                    grows: false,
                 });
                 return;
             }
@@ -996,6 +1005,7 @@ impl<'a> Writer<'a> {
             group: None,
             parts_moved: Vec::new(),
             inner: None,
+            grows: false,
         });
     }
 
@@ -1234,18 +1244,27 @@ impl<'a> Writer<'a> {
             6..=7 => Ty::Bool,
             _ => Ty::Str,
         };
-        let mutable = self.rng.chance(60);
+        // One that grows is always writable, because growing is changing and a
+        // name that does not change cannot be grown.
+        let grows = self.rng.chance(22);
+        let mutable = grows || self.rng.chance(60);
         let length = self.rng.below(4) + 1;
         // A `many` of a `many`, sometimes. Every row the same length, so that
-        // reaching into one is safe wherever it is reached from.
-        let inner = if self.rng.chance(25) { Some(self.rng.below(3) + 1) } else { None };
+        // reaching into one is safe wherever it is reached from. Not both at
+        // once, so that what each of the two is doing stays readable in a case
+        // kept from a failing run.
+        let inner = if !grows && self.rng.chance(25) {
+            Some(self.rng.below(3) + 1)
+        } else {
+            None
+        };
         let name = self.fresh();
         self.pad();
         self.out.push_str("var.");
         if mutable {
             self.out.push_str("mut.");
         }
-        self.out.push_str("many.");
+        self.out.push_str(if grows { "many-growing." } else { "many." });
         if inner.is_some() {
             self.out.push_str("many.");
         }
@@ -1269,7 +1288,7 @@ impl<'a> Writer<'a> {
                 }
                 self.out.push(']');
             }
-        } else if ty != Ty::Str && self.rng.chance(30) {
+        } else if !grows && ty != Ty::Str && self.rng.chance(30) {
             self.out.push_str("fill[");
             self.expr(ty, 1);
             self.out.push_str(", *");
@@ -1289,10 +1308,17 @@ impl<'a> Writer<'a> {
             }
         }
         self.out.push_str("];\n");
-        self.declare(Var { name: name.clone(), ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new(), inner });
+        self.declare(Var { name: name.clone(), ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new(), inner, grows });
         // The same again: a `many` asked to be writable, and then written.
         if mutable && length > 0 && self.rng.chance(80) {
             self.set_a_place(&name, ty, length, inner);
+        }
+        // And one asked to grow is grown, so that the room it took to begin
+        // with runs out and every place moves.
+        if grows {
+            for _ in 0..self.rng.below(3) + 1 {
+                self.grow_it(&name, ty);
+            }
         }
     }
 
@@ -1350,6 +1376,45 @@ impl<'a> Writer<'a> {
         self.indent -= 1;
         self.pad();
         self.out.push_str("}\n");
+    }
+
+    /// `add 'v3' = […];` — one more place at the end. Nothing counts it toward
+    /// the length this file remembers: a growth written inside an arm that does
+    /// not run never happens, and the length it was made with is the one an
+    /// index can always rely on.
+    fn grow_it(&mut self, name: &str, ty: Ty) {
+        let name = name.to_string();
+        self.pad();
+        self.out.push_str("add '");
+        self.out.push_str(&name);
+        self.out.push_str("' = [");
+        self.expr(ty, if ty == Ty::Str { 0 } else { 1 });
+        self.out.push_str("];\n");
+    }
+
+    /// One that may be grown right now: writable, still here, and not lent —
+    /// what is lent stays where it is, and growing may move every place.
+    fn growable(&mut self) -> Option<(String, Ty)> {
+        let mut seen: Vec<(String, Ty)> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if var.grows && var.mutable && !var.moved && !var.lent {
+                    seen.push((var.name.clone(), var.ty));
+                }
+            }
+        }
+        if seen.is_empty() {
+            return None;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        Some(seen[at].clone())
+    }
+
+    fn array_grow(&mut self) {
+        match self.growable() {
+            Some((name, ty)) => self.grow_it(&name, ty),
+            None => self.print(),
+        }
     }
 
     /// `set 'v3'[*2*] = […]` — one place of a `many`, written.
@@ -1431,7 +1496,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.expr(ty, 2);
         self.out.push_str("];\n");
-        self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None });
+        self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false });
 
         // `mut` asks for something, and asking without doing it is the whole of
         // what `W0003` is for. Most of the time it is done here, where the name
@@ -1564,6 +1629,7 @@ impl<'a> Writer<'a> {
             group: None,
             parts_moved: Vec::new(),
             inner: None,
+            grows: false,
         });
 
         self.stepped.push(counter.clone());
@@ -1615,7 +1681,7 @@ impl<'a> Writer<'a> {
         // Stepped by the loop, the same as a `while`'s own counter: a borrow of
         // one held across a turn points at what the next turn changes.
         self.stepped.push(counter.clone());
-        let held = Var { name: counter.clone(), ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None };
+        let held = Var { name: counter.clone(), ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false };
         if keeps {
             self.declare(held.clone());
             self.scopes.push(Vec::new());

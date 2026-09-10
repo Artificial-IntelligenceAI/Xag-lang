@@ -1110,11 +1110,13 @@ private:
       out += "loanmut.";
     if (type.orNothing)
       out += "or-nothing.";
-    // One per level. Written once whatever the depth, a blank filled in with a
-    // `many many str` was written out as taking a `many.str`, and the call that
-    // asked for the copy was then refused by it.
+    // One per level, and the outermost says whether it grows. Written as plain
+    // `many.` whatever it was, a blank filled in with a `many many str` was
+    // written out as taking a `many.str`, and one filled in with a
+    // `many-growing` as taking a `many` — and the call that asked for the copy
+    // was then refused by it. Twice, in two features, for one reason.
     for (unsigned at = 0; at < type.deep; ++at)
-      out += "many.";
+      out += type.grows && at == 0 ? "many-growing." : "many.";
     const Type inner = type.holds() ? type.element : type.kind;
     out += inner == Type::Struct ? shapeName(type.named) : std::string(name(inner));
     return out;

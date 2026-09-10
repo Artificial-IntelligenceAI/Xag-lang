@@ -1076,6 +1076,25 @@ void aBlankMaySayWhatItTakes() {
     asked.insert(with);
   CHECK(asked == std::set<std::string>({"loan.many.many.str", "loan.many.str"}));
 
+  // And one filled in with a `many` that grows. The same fault as the nested
+  // one above and for the same reason: what a blank was filled in with is
+  // written out as the copy's own type, and that said plain `many` whatever it
+  // was — so a generic handed a `many-growing` was written out as taking a
+  // `many`, and refused the call that had asked for it.
+  const Checked growing = run(
+      "fn.int64 'echo' [loan.any 'v'] { give [*0*]; }\n"
+      "START {\n"
+      "    var.mut.many-growing.int64 'g' = [];\n"
+      "    add 'g' = [*1*];\n"
+      "    var.many.int64 'm' = [*1* *2*];\n"
+      "    print.stdout[echo[loan 'g'] echo[loan 'm'] \\n];\n"
+      "}\n");
+  CHECK(growing.checked.ok());
+  std::set<std::string> grown;
+  for (const auto &[what, with] : growing.checked.instantiations)
+    grown.insert(with);
+  CHECK(grown == std::set<std::string>({"loan.many-growing.int64", "loan.many.int64"}));
+
   // A blank filled in with a type that is more than one word. Filling wrote one
   // segment, which is every type a scalar and no type else: a `many` came out
   // spelled `unknown`, and an `or-nothing` came out spelled as the thing inside
