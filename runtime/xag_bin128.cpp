@@ -9,6 +9,7 @@
 #include "xag_wide.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -466,11 +467,27 @@ double xag_bin128_to_double(XagBin128 value) {
 }
 
 int32_t xag_bin128_reads(const char *text, uint64_t length, XagBin128 *out) {
-  char buffer[600];
-  if (length + 1 > sizeof(buffer))
-    return 0;
+  // What a print writes has to read back, and a print writes the whole of a
+  // value: the exact smallest `bin128` runs to sixteen thousand characters.
+  // Refusing anything longer than a fixed buffer refused the language's own
+  // spelling of its own numbers.
+  char room[600];
+  char *buffer = room;
+  if (length + 1 > sizeof(room)) {
+    buffer = static_cast<char *>(std::malloc(length + 1));
+    if (!buffer)
+      xag_stop("there was no memory left");
+  }
   std::memcpy(buffer, text, length);
   buffer[length] = 0;
+  struct Freeing {
+    char *what;
+    char *stack;
+    ~Freeing() {
+      if (what != stack)
+        std::free(what);
+    }
+  } freeing{buffer, room};
 
   auto answer = [&](XagBin128 value) {
     if (out)
@@ -510,7 +527,13 @@ int32_t xag_bin128_reads(const char *text, uint64_t length, XagBin128 *out) {
       significand = xag::add(xag::add(xag::shiftLeft(significand, 3),
                                       xag::shiftLeft(significand, 1)),
                              xag::wide(static_cast<unsigned>(*at - '0')));
-      ++digits;
+      // A zero in front of the first real digit says where the point is and
+      // nothing about the value, so it costs nothing from what is kept.
+      // Counted, forty-five of them used the whole budget before a value with
+      // three hundred of them had said anything at all, and the number read
+      // back as something else.
+      if (!xag::isZero(significand))
+        ++digits;
       if (sawPoint)
         --decimals;
     } else {
@@ -549,6 +572,9 @@ int32_t xag_bin128_reads(const char *text, uint64_t length, XagBin128 *out) {
   return answer(put(sign, significand, exponent, sticky));
 }
 
+// The exact value, all of it, the same way a narrower one is written: a
+// binary float is a whole number times a power of two, and `take` has already
+// said which whole number and which power. Nothing rounds.
 uint64_t xag_bin128_writes(char *out, uint64_t room, XagBin128 value) {
   const Taken x = take(value);
   if (x.kind == Kind::NotANumber)
@@ -556,130 +582,25 @@ uint64_t xag_bin128_writes(char *out, uint64_t room, XagBin128 value) {
   if (x.kind == Kind::Infinity)
     return x.sign ? xag_text_out(out, room, "-infinity", 9)
                   : xag_text_out(out, room, "infinity", 8);
-  if (x.kind == Kind::Zero)
-    return x.sign ? xag_text_out(out, room, "-0", 2)
-                  : xag_text_out(out, room, "0", 1);
-
-  // Thirty-six digits is what binary128 needs before a spelling is certain to
-  // read back; fewer are tried afterwards, and the shortest that survives wins.
-  constexpr int kMost = 36;
-  int32_t place = roughlyLog10(x);
-  char digits[64];
-  int32_t at = 0;
-
-  for (int attempt = 0; attempt < 3; ++attempt) {
-    U256 significand = xag::wide(x.significand);
-    int32_t exponent = x.exponent;
-    bool sticky = false;
-    byPowerOfTen(significand, exponent, sticky, kMost - 1 - place);
-    if (exponent > 0) {
-      significand = xag::shiftLeft(significand, static_cast<unsigned>(exponent));
-    } else if (exponent < 0) {
-      const unsigned drop = static_cast<unsigned>(-exponent);
-      const bool half = drop > 0 && drop <= 256 && xag::bitAt(significand, drop - 1);
-      const bool below = drop > 1 && xag::anyBelow(significand, drop - 1);
-      significand = drop >= 256 ? U256{} : xag::shiftRight(significand, drop);
-      if (half && (below || sticky || xag::bitAt(significand, 0)))
-        significand = xag::add(significand, xag::wide(1));
-    }
-
-    at = 0;
-    U256 left = significand;
-    while (!xag::isZero(left) && at < static_cast<int32_t>(sizeof(digits))) {
-      uint64_t remainder = 0;
-      left = xag::divideSmall(left, 10, remainder);
-      digits[at++] = static_cast<char>('0' + static_cast<unsigned>(remainder));
-    }
-    if (at == kMost)
-      break;
-    place += at - kMost; // the estimate was a digit out; say so and try again
-  }
-  // digits[] runs backwards; put it the way round a reader expects.
-  for (int32_t i = 0; i < at / 2; ++i) {
-    const char keep = digits[i];
-    digits[i] = digits[at - 1 - i];
-    digits[at - 1 - i] = keep;
-  }
-
-  // The shortest spelling that reads back as this very value.
-  char written[80];
-  for (int32_t keep = 1; keep <= at; ++keep) {
-    char rounded[64];
-    std::memcpy(rounded, digits, static_cast<size_t>(at));
-    int32_t shown = keep, exponent = place;
-    if (keep < at && rounded[keep] >= '5') {
-      int32_t i = keep - 1;
-      while (i >= 0 && rounded[i] == '9')
-        rounded[i--] = '0';
-      if (i < 0) {
-        std::memmove(rounded + 1, rounded, static_cast<size_t>(at));
-        rounded[0] = '1';
-        ++exponent;
-      } else {
-        ++rounded[i];
-      }
-    }
-    while (shown > 1 && rounded[shown - 1] == '0')
-      --shown;
-
-    char *put = written;
-    if (x.sign)
-      *put++ = '-';
-    if (exponent >= -5 && exponent < 21) {
-      if (exponent >= 0) {
-        for (int32_t i = 0; i <= exponent; ++i)
-          *put++ = i < shown ? rounded[i] : '0';
-        if (shown > exponent + 1) {
-          *put++ = '.';
-          for (int32_t i = exponent + 1; i < shown; ++i)
-            *put++ = rounded[i];
-        }
-      } else {
-        *put++ = '0';
-        *put++ = '.';
-        for (int32_t i = 0; i < -exponent - 1; ++i)
-          *put++ = '0';
-        for (int32_t i = 0; i < shown; ++i)
-          *put++ = rounded[i];
-      }
-    } else {
-      *put++ = rounded[0];
-      if (shown > 1) {
-        *put++ = '.';
-        for (int32_t i = 1; i < shown; ++i)
-          *put++ = rounded[i];
-      }
-      *put++ = 'e';
-      int32_t e = exponent;
-      if (e < 0) {
-        *put++ = '-';
-        e = -e;
-      } else {
-        *put++ = '+';
-      }
-      char order[8];
-      int32_t n = 0;
-      do {
-        order[n++] = static_cast<char>('0' + e % 10);
-        e /= 10;
-      } while (e);
-      while (n)
-        *put++ = order[--n];
-    }
-    *put = 0;
-
-    XagBin128 back = 0;
-    if (xag_bin128_reads(written, static_cast<uint64_t>(put - written), &back) &&
-        back == value)
-      return xag_text_out(out, room, written, std::strlen(written));
-  }
-  return xag_text_out(out, room, written, std::strlen(written));
+  return xag_bin_exactly(out, room, x.sign != 0, x.significand, x.exponent);
 }
 
+// Said in whatever room it takes. The exact value of the smallest `bin128`
+// there is runs to sixteen thousand characters, and every one of them is the
+// number.
 void xag_print_bin128(XagBin128 value) {
   char written[XAG_NUMBER_ROOM];
-  (void)xag_bin128_writes(written, sizeof(written), value);
-  std::fputs(written, output());
+  const uint64_t needs = xag_bin128_writes(written, sizeof(written), value);
+  if (needs < sizeof(written)) {
+    std::fputs(written, output());
+    return;
+  }
+  char *room = static_cast<char *>(std::malloc(needs + 1));
+  if (!room)
+    xag_stop("there was no memory left");
+  (void)xag_bin128_writes(room, needs + 1, value);
+  std::fputs(room, output());
+  std::free(room);
 }
 
 } // extern "C"

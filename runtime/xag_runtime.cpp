@@ -335,36 +335,159 @@ double xag_bin_pow(double base, double exponent, uint32_t width) {
   return xag_bin_fit(std::pow(base, exponent), width);
 }
 
-// The shortest spelling that reads back as the same value. Both engines call
-// this, so what a number looks like cannot depend on which of them said it.
+// The exact value of a binary float, all of it.
+//
+// Every binary float is a whole number times a power of two, and every such
+// number has a decimal that ends: `m · 2^-k` is `m · 5^k` with the point k
+// places in. So this multiplies it out and puts the point where it goes.
+// Nothing is rounded and nothing is left off.
+//
+// What this wrote before was the shortest spelling that reads back to the same
+// bits, which is what most languages write — and it could not tell three
+// different numbers apart. A `bin16`, a `bin32` and a `bin64` each holding the
+// nearest thing they have to a tenth all said `0.1`, and none of them held a
+// tenth. They say `0.0999755859375`, `0.10000000149011612` and
+// `0.1000000000000000055511151231257827021181583404541015625` now, which is
+// what they have.
+//
+// It is long exactly where the value was never representable, which is where it
+// is worth seeing. A half, a quarter and every whole number stay short.
+//
+// Answers how many characters the whole of it needs, and writes what fits —
+// so a caller with too small a buffer asks once, makes room, and asks again.
+uint64_t xag_bin_exactly(char *out, uint64_t room, int32_t negative,
+                         unsigned __int128 significand, int32_t exponent) {
+  if (significand == 0)
+    return xag_text_out(out, room, negative ? "-0" : "0", negative ? 2u : 1u);
+  // Enough for either direction: multiplying by five adds fewer than one digit
+  // a time and so does multiplying by two, so the answer is never longer than
+  // the number of steps plus what it started with.
+  const int32_t steps = exponent < 0 ? -exponent : exponent;
+  const int32_t most = steps + 64;
+  unsigned char *digit = static_cast<unsigned char *>(std::malloc(most));
+  if (!digit)
+    xag_stop("there was no memory left");
+  int length = 0;
+  for (unsigned __int128 left = significand; left; left /= 10)
+    digit[length++] = static_cast<unsigned char>(left % 10);
+
+  // Ones place first, so a carry runs upward.
+  const auto times = [&](unsigned by) {
+    uint64_t carry = 0;
+    for (int i = 0; i < length; ++i) {
+      const uint64_t made = static_cast<uint64_t>(digit[i]) * by + carry;
+      digit[i] = static_cast<unsigned char>(made % 10);
+      carry = made / 10;
+    }
+    while (carry) {
+      digit[length++] = static_cast<unsigned char>(carry % 10);
+      carry /= 10;
+    }
+  };
+  // Eleven fives and twenty-six twos at a time, which are the most that fit in
+  // a step without the carry outgrowing what holds it.
+  for (int32_t left = steps; left > 0;) {
+    const int32_t now = left > (exponent < 0 ? 11 : 26) ? (exponent < 0 ? 11 : 26) : left;
+    unsigned by = 1;
+    for (int i = 0; i < now; ++i)
+      by *= exponent < 0 ? 5u : 2u;
+    times(by);
+    left -= now;
+  }
+
+  const int32_t point = exponent < 0 ? -exponent : 0; // digits after the point
+  int32_t lowest = 0;                                 // the last one worth writing
+  while (lowest < point && digit[lowest] == 0)
+    ++lowest;
+
+  uint64_t needs = negative ? 1 : 0;
+  needs += length > point ? static_cast<uint64_t>(length - point) : 1;
+  if (lowest < point)
+    needs += 1 + static_cast<uint64_t>(point - lowest);
+
+  uint64_t at = 0;
+  const auto put = [&](char c) {
+    if (at + 1 < room)
+      out[at] = c;
+    ++at;
+  };
+  if (negative)
+    put('-');
+  if (length > point)
+    for (int i = length - 1; i >= point; --i)
+      put(static_cast<char>('0' + digit[i]));
+  else
+    put('0');
+  if (lowest < point) {
+    put('.');
+    for (int i = point - 1; i >= lowest; --i)
+      put(static_cast<char>('0' + digit[i]));
+  }
+  if (room)
+    out[at < room ? at : room - 1] = 0;
+  std::free(digit);
+  return needs;
+}
+
 uint64_t xag_bin_writes(char *out, uint64_t room, double value, uint32_t width) {
+  (void)width; // the value is already the one that width holds
   if (std::isnan(value))
     return xag_text_out(out, room, "not-a-number", 12);
   if (std::isinf(value))
     return value < 0 ? xag_text_out(out, room, "-infinity", 9)
                      : xag_text_out(out, room, "infinity", 8);
-  const unsigned most = width == 16 ? 5u : width == 32 ? 9u : 17u;
-  char written[64];
-  for (unsigned digits = 1; digits <= most; ++digits) {
-    std::snprintf(written, sizeof(written), "%.*g", static_cast<int>(digits), value);
-    if (xag_bin_fit(std::strtod(written, nullptr), width) == value)
-      break;
-  }
-  return xag_text_out(out, room, written, std::strlen(written));
+  uint64_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  const bool negative = (bits >> 63) != 0;
+  const uint64_t raised = (bits >> 52) & 0x7ff;
+  const uint64_t fraction = bits & 0xfffffffffffffull;
+  // A subnormal has no hidden one and sits at the smallest exponent there is.
+  const unsigned __int128 significand =
+      raised == 0 ? fraction : fraction | (1ull << 52);
+  const int32_t exponent =
+      raised == 0 ? -1074 : static_cast<int32_t>(raised) - 1075;
+  return xag_bin_exactly(out, room, negative, significand, exponent);
 }
 
+// Said in whatever room it takes. The exact value of a subnormal `bin64` is a
+// thousand characters, and every one of them is the number.
 void xag_print_bin(double value, uint32_t width) {
   char written[XAG_NUMBER_ROOM];
-  (void)xag_bin_writes(written, sizeof(written), value, width);
-  std::fputs(written, output());
+  const uint64_t needs = xag_bin_writes(written, sizeof(written), value, width);
+  if (needs < sizeof(written)) {
+    std::fputs(written, output());
+    return;
+  }
+  char *room = static_cast<char *>(std::malloc(needs + 1));
+  if (!room)
+    xag_stop("there was no memory left");
+  (void)xag_bin_writes(room, needs + 1, value, width);
+  std::fputs(room, output());
+  std::free(room);
 }
 
 int32_t xag_bin_reads(const char *text, uint64_t length, uint32_t width, double *out) {
-  char buffer[512];
-  if (length + 1 > sizeof(buffer))
-    return 0;
+  // What a print writes has to read back, and a print writes the whole of a
+  // value: the exact smallest `bin64` runs to a thousand characters. Refusing
+  // anything longer than a fixed buffer refused the language's own spelling of
+  // its own numbers.
+  char room[512];
+  char *buffer = room;
+  if (length + 1 > sizeof(room)) {
+    buffer = static_cast<char *>(std::malloc(length + 1));
+    if (!buffer)
+      xag_stop("there was no memory left");
+  }
   std::memcpy(buffer, text, length);
   buffer[length] = 0;
+  struct Freeing {
+    char *what;
+    char *stack;
+    ~Freeing() {
+      if (what != stack)
+        std::free(what);
+    }
+  } freeing{buffer, room};
 
   // The spellings a print produces are the spellings a program may write, so
   // what comes out can go back in.
@@ -437,12 +560,32 @@ void xag_str_of_int(XagStr *out, XagInt value, uint32_t width, int32_t is_signed
 
 void xag_str_of_bin(XagStr *out, double value, uint32_t width) {
   char written[XAG_NUMBER_ROOM];
-  xag_str_from(out, written, xag_bin_writes(written, sizeof(written), value, width));
+  const uint64_t needs = xag_bin_writes(written, sizeof(written), value, width);
+  if (needs < sizeof(written)) {
+    xag_str_from(out, written, needs);
+    return;
+  }
+  char *room = static_cast<char *>(std::malloc(needs + 1));
+  if (!room)
+    xag_stop("there was no memory left");
+  (void)xag_bin_writes(room, needs + 1, value, width);
+  xag_str_from(out, room, needs);
+  std::free(room);
 }
 
 void xag_str_of_bin128(XagStr *out, XagBin128 value) {
   char written[XAG_NUMBER_ROOM];
-  xag_str_from(out, written, xag_bin128_writes(written, sizeof(written), value));
+  const uint64_t needs = xag_bin128_writes(written, sizeof(written), value);
+  if (needs < sizeof(written)) {
+    xag_str_from(out, written, needs);
+    return;
+  }
+  char *room = static_cast<char *>(std::malloc(needs + 1));
+  if (!room)
+    xag_stop("there was no memory left");
+  (void)xag_bin128_writes(room, needs + 1, value);
+  xag_str_from(out, room, needs);
+  std::free(room);
 }
 
 void xag_str_of_deci(XagStr *out, uint32_t width, XagDeci value) {

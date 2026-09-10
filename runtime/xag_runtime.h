@@ -226,7 +226,14 @@ static inline uint64_t xag_text_out(char *out, uint64_t room, const char *text,
 uint64_t xag_bool_writes(char *out, uint64_t room, int truth);
 uint64_t xag_int_writes(char *out, uint64_t room, XagInt value, uint32_t width,
                         int32_t is_signed);
+// The exact value, all of it. Answers how many characters the whole of it
+// needs and writes what fits, so a caller with too small a buffer asks once,
+// makes room, and asks again.
 uint64_t xag_bin_writes(char *out, uint64_t room, double value, uint32_t width);
+// `negative` is a truth written as a number, because this header is read as C
+// too and C had no word for one.
+uint64_t xag_bin_exactly(char *out, uint64_t room, int32_t negative,
+                         unsigned __int128 significand, int32_t exponent);
 uint64_t xag_bin128_writes(char *out, uint64_t room, XagBin128 value);
 uint64_t xag_deci_writes(char *out, uint64_t room, uint32_t width, XagDeci value);
 

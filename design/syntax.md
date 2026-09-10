@@ -189,13 +189,40 @@ A narrower `bin` is cut back to its width after **every** step, not only when it
 is stored, which is what makes a `bin32` sum a `bin32` sum:
 
 ```
-var.bin32 'a' = [*0.1*];  print.stdout[('a' x bin32:*3*) \n];   # 0.3
-var.bin64 'b' = [*0.1*];  print.stdout[('b' x bin64:*3*) \n];   # 0.30000000000000004
+var.bin32 'a' = [*0.1*];   ('a' x bin32:*3*)   # 0.300000011920928955078125
+var.bin64 'b' = [*0.1*];   ('b' x bin64:*3*)   # 0.3000000000000000444089209850062616169452667236328125
 ```
 
-A number is printed as the shortest spelling that reads back as the same value,
-and those spellings — `infinity`, `-infinity`, `not-a-number` — may be written
-as well as printed.
+### A `bin` is printed exactly
+
+Every digit of it. A binary float is a whole number times a power of two, so
+its decimal always ends, and what is written is that decimal and nothing else:
+
+```
+print.stdout[bin16:*0.1* \n];   # 0.0999755859375
+print.stdout[bin32:*0.1* \n];   # 0.100000001490116119384765625
+print.stdout[bin64:*0.1* \n];   # 0.1000000000000000055511151231257827021181583404541015625
+```
+
+**None of those is a tenth**, because no binary float is, and each is a
+different number. Printed as the shortest spelling that reads back — which is
+what most languages write and what this wrote until 2026-09-10 — all three said
+`0.1`, and a print that cannot tell three different numbers apart is not showing
+the value.
+
+It is long exactly where the value was never representable, which is where it is
+worth seeing. A half, a quarter, `2.5` and every whole number are as short as
+they always were, and `1e30` says the `1000000000000000019884624838656` it is
+rather than the `1e30` it is not.
+
+The long ones are long. The smallest `bin64` there is runs to a thousand
+characters and the smallest `bin128` to sixteen thousand, and every one of them
+is the number. Printing takes whatever room it takes.
+
+`infinity`, `-infinity` and `not-a-number` are spellings too, and may be written
+as well as printed. Everything printed can be read back, which is a rule rather
+than a courtesy — the exact spelling of a small `bin128` is eleven hundred
+characters, and the reader had to learn to take them.
 
 `bin128` is written out in software, because this machine's compiler has no
 binary128 type at all — no `__float128`, no `mode(TF)`, and `long double` is a
@@ -210,7 +237,8 @@ var.bin128 'b' = [*1e30*];  ('b' + bin128:*1* - bin128:*1e30*)   # 1
 
 ```
 var.deci64 'a' = [*0.1*];  var.deci64 'b' = [*0.2*];   ('a' + 'b')   # 0.3
-var.bin64  'x' = [*0.1*];  var.bin64  'y' = [*0.2*];   ('x' + 'y')   # 0.30000000000000004
+var.bin64  'x' = [*0.1*];  var.bin64  'y' = [*0.2*];   ('x' + 'y')
+                              # 0.3000000000000000444089209850062616169452667236328125
 ```
 
 A decimal number is a whole-number coefficient and a power of ten, so `1.10` is

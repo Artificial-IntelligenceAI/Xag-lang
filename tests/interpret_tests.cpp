@@ -189,7 +189,8 @@ void itCountsPastSixtyFourBits() {
 
 void itDoesIEEEBinary() {
   SAYS("START { var.bin64 'a' = [*1.5*]; var.bin64 'b' = [*0.1*];"
-       " print.stdout[('a' + 'b') \\n]; }\n", "1.6\n");
+       " print.stdout[('a' + 'b') \\n]; }\n",
+       "1.600000000000000088817841970012523233890533447265625\n");
   // Nothing stops: infinity and not-a-number are values of the type.
   SAYS("START { var.bin64 'z' = [*0*]; print.stdout[(bin64:*1* / 'z') \\n]; }\n",
        "infinity\n");
@@ -204,22 +205,23 @@ void itDoesIEEEBinary() {
        "not equal\n");
   // A narrower `bin` is cut back after every step, not only when stored.
   SAYS("START { var.bin32 'a' = [*0.1*]; print.stdout[('a' x bin32:*3*) \\n]; }\n",
-       "0.3\n");
+       "0.300000011920928955078125\n");
   SAYS("START { var.bin64 'a' = [*0.1*]; print.stdout[('a' x bin64:*3*) \\n]; }\n",
-       "0.30000000000000004\n");
+       "0.3000000000000000444089209850062616169452667236328125\n");
 }
 
 void itHoldsWhatABin64Cannot() {
   SAYS("START { var.bin128 'a' = [*1e30*];"
        " print.stdout[('a' + bin128:*1*) \\n]; }\n",
-       "1.000000000000000000000000000001e+30\n");
+       "1000000000000000000000000000001\n");
   // The same sum in a bin64 loses the one, and says so.
   SAYS("START { var.bin64 'a' = [*1e30*];"
        " print.stdout[('a' + bin64:*1* - bin64:*1e30*) \\n]; }\n", "0\n");
   SAYS("START { var.bin128 'a' = [*1e30*];"
        " print.stdout[('a' + bin128:*1* - bin128:*1e30*) \\n]; }\n", "1\n");
   SAYS("START { print.stdout[(bin128:*1* / bin128:*3*) \\n]; }\n",
-       "0.3333333333333333333333333333333333\n");
+       "0.33333333333333333333333333333333331728391713010636789120018381179227"
+       "2345515819598205098373000510036945343017578125\n");
   SAYS("START { print.stdout[(bin128:*1* / bin128:*0*) \\n]; }\n", "infinity\n");
 }
 
@@ -227,7 +229,8 @@ void itCountsInTensWhenAsked() {
   SAYS("START { var.deci64 'a' = [*0.1*]; var.deci64 'b' = [*0.2*];"
        " print.stdout[('a' + 'b') \\n]; }\n", "0.3\n");
   SAYS("START { var.bin64 'a' = [*0.1*]; var.bin64 'b' = [*0.2*];"
-       " print.stdout[('a' + 'b') \\n]; }\n", "0.30000000000000004\n");
+       " print.stdout[('a' + 'b') \\n]; }\n",
+       "0.3000000000000000444089209850062616169452667236328125\n");
   // A price keeps its places through a sum.
   SAYS("START { var.deci64 'p' = [*1.10*];"
        " print.stdout[('p' + deci64:*2.00*) \\n]; }\n", "3.10\n");
@@ -665,7 +668,7 @@ void itWritesANumberIntoText() {
 
   // Every family, and each one exactly as `print` writes it.
   SAYS("START { var.bin64 'a' = [*0.1*];\n  print.stdout[convert-to-str['a'] \\n]; }\n",
-       "0.1\n");
+       "0.1000000000000000055511151231257827021181583404541015625\n");
   SAYS("START { var.deci64 'b' = [*1.10*];\n  print.stdout[convert-to-str['b'] \\n]; }\n",
        "1.10\n");
   SAYS("START { var.int8 'c' = [*-5*];\n  print.stdout[convert-to-str['c'] \\n]; }\n",

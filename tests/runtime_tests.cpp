@@ -171,7 +171,9 @@ std::string spelled(XagBin128 value) {
   xag_set_output(nullptr);
   std::fflush(sink);
   std::rewind(sink);
-  char buffer[256];
+  // Big enough for the whole of one: a print writes every digit a value has,
+  // and the smallest `bin128` there is has sixteen thousand of them.
+  static char buffer[20000];
   const size_t got = std::fread(buffer, 1, sizeof(buffer), sink);
   std::fclose(sink);
   return std::string(buffer, got);
@@ -191,14 +193,19 @@ void binary128IsWrittenOutInSoftware() {
   // cannot, and the difference is visible rather than theoretical.
   const XagBin128 big = read128("1e30");
   const XagBin128 more = xag_bin128_add(big, read128("1"));
-  CHECK(spelled(more) == "1.000000000000000000000000000001e+30");
+  // Exactly, and a whole number is a whole number however wide it is written.
+  CHECK(spelled(more) == "1000000000000000000000000000001");
   CHECK(spelled(xag_bin128_sub(more, big)) == "1");
   CHECK(1e30 + 1.0 == 1e30); // which a double cannot do
 
   CHECK(spelled(xag_bin128_add(read128("1.5"), read128("2.25"))) == "3.75");
   CHECK(spelled(xag_bin128_mul(xag_bin128_div(read128("2"), read128("3")),
                                read128("3"))) == "2");
-  CHECK(spelled(read128("0.1")) == "0.1");
+  // A tenth is not a thing a binary float holds, and this says what it holds
+  // instead — all of it, which is what `print` promises.
+  CHECK(spelled(read128("0.1")) ==
+        "0.100000000000000000000000000000000004814824860968089632639944856462318"
+        "2963452541205384704880998469889163970947265625");
 
   // Nothing stops, here as in every other `bin`.
   CHECK(spelled(xag_bin128_div(read128("1"), read128("0"))) == "infinity");
@@ -218,7 +225,11 @@ void binary128IsWrittenOutInSoftware() {
   for (double one : tries)
     CHECK(xag_bin128_to_double(xag_bin128_from_double(one)) == one);
 
-  // And what is printed can be read back, which is what shortest means here.
+  // And what is printed can be read back. That is the whole rule, and writing
+  // every digit is what made it worth checking: the exact spelling of `1e-300`
+  // is eleven hundred characters, which the reader refused outright and then,
+  // once it took them, read as a different number — forty-five leading zeros
+  // had used up everything it was willing to keep.
   for (const char *text : {"0.1", "1", "-2.5", "1e300", "1e-300", "12345.678",
                            "1.000000000000000000000000000001e+30"}) {
     const XagBin128 value = read128(text);
