@@ -246,38 +246,6 @@ bool fitsWithin(std::string_view text, Type type) {
   return magnitude < (static_cast<__uint128_t>(1) << width);
 }
 
-// The most a whole type can hold, written out, so that the one past it can be
-// asked about without a second way of reading numbers.
-std::string oneMoreThan(std::string_view text) {
-  std::string digits(text);
-  if (!digits.empty() && digits[0] == '-') {
-    // Toward zero: a negative one less in magnitude.
-    std::string body = digits.substr(1);
-    int at = static_cast<int>(body.size()) - 1;
-    while (at >= 0 && body[at] == '0') {
-      body[at] = '9';
-      --at;
-    }
-    if (at < 0)
-      return "0";
-    body[at] -= 1;
-    unsigned lead = 0;
-    while (lead + 1 < body.size() && body[lead] == '0')
-      ++lead;
-    body = body.substr(lead);
-    return body == "0" ? "0" : "-" + body;
-  }
-  int at = static_cast<int>(digits.size()) - 1;
-  while (at >= 0 && digits[at] == '9') {
-    digits[at] = '0';
-    --at;
-  }
-  if (at < 0)
-    return "1" + digits;
-  digits[at] += 1;
-  return digits;
-}
-
 struct Symbol {
   Ty type;
   bool changeable = false;
@@ -2322,24 +2290,15 @@ private:
       if (s.value.values.size() != 2)
         complain(s.value.span, "E0505", "a counted loop runs between two values.",
                  {"`[first, last]` says where a count starts and stops"});
-      // A counted loop has to add one past where it stops to know it is done.
-      // When the last value is the most the counter can hold, that one more
-      // does not fit — so the loop cannot finish, and the compiler knows it for
-      // certain rather than suspecting it.
-      if (s.value.values.size() == 2 && isWhole(type)) {
-        const Value &last = s.value.values[1];
-        if (last.items.size() == 1 && last.items[0]->kind == ExprKind::Written &&
-            looksLikeWholeNumber(last.items[0]->text) &&
-            fitsWithin(last.items[0]->text, type.kind) &&
-            !fitsWithin(oneMoreThan(last.items[0]->text), type.kind))
-          complain(last.span, "E0531",
-                   "a `" + std::string(name(type)) + "` counter cannot pass `*" +
-                       last.items[0]->text + "*`, so this loop cannot finish.",
-                   {"a counted loop counts one past where it stops, to know that it "
-                    "has"},
-                   {"the count would have to leave the type to end, so it never ends: "
-                    "a wider counter, or one less to count to."});
-      }
+      // `E0531` stood here and is gone. It refused a loop counting to the most
+      // its counter could hold, because the loop stepped the counter and then
+      // asked whether it had gone too far — and that one more step came round,
+      // so the loop never finished. The loop asks before it steps now, so it
+      // finishes like any other and there is nothing to refuse.
+      //
+      // It was only ever half a guard anyway: it could see an end written down
+      // and not one worked out while the program runs, and the second never
+      // finished either. Both end now.
 
       // Where a count starts and stops is counted in, so both are the
       // counter's own type. Asking and throwing the answer away let a `bin64`

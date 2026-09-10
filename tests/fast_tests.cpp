@@ -107,6 +107,11 @@ void onTheOrdinaryThings() {
         " print.stdout['i' \\n]; }\n");
   AGREE("START { loop.range.int64 'i' = [*1*, *100*] {"
         " if 'i' > *3* { break; } print.stdout['i' str:* *]; } }\n");
+  // Counting to the most the counter holds. Stepping first and asking after,
+  // that last step came round and the loop never finished.
+  AGREE("START { var.mut.wrapping.int64 't' = [*0*];\n"
+        "  loop.range.uint8 'i' = [*0*, *255*] { set 't' = ['t' + *1*]; }\n"
+        "  print.stdout['t' \\n]; }\n");
 }
 
 void onEverySizeAndFamily() {

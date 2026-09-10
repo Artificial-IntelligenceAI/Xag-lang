@@ -323,10 +323,13 @@ void whatIsWrittenDownIsWorkedOut() {
               "    at[loan 'ns', *1*];\n}\n") == "");
 }
 
-void aLoopThatCannotFinishIsRefused() {
-  CHECK(inStart("loop.range.int8 'i' = [*0*, *127*] { }").code(0) == "E0531");
-  CHECK(inStart("loop.range.uint8 'i' = [*0*, *255*] { }").code(0) == "E0531");
-  CHECK(inStart("loop.range.int16 'i' = [*0*, *32767*] { }").code(0) == "E0531");
+// Counting to the most a counter can hold used to be refused (`E0531`): the
+// loop stepped and then asked, so that last step came round and it never
+// finished. It asks before it steps now, so these are ordinary loops.
+void aLoopMayCountToTheMostItsCounterHolds() {
+  CHECK(inStart("loop.range.int8 'i' = [*0*, *127*] { }").ok());
+  CHECK(inStart("loop.range.uint8 'i' = [*0*, *255*] { }").ok());
+  CHECK(inStart("loop.range.int16 'i' = [*0*, *32767*] { }").ok());
   CHECK(inStart("loop.range.int8 'i' = [*0*, *126*] { }").ok());
   CHECK(inStart("loop.range.int64 'i' = [*0*, *10*] { }").ok());
 }
@@ -1501,7 +1504,7 @@ int main() {
   conditionsAskABool();
   aCountedLoopCountsInItsOwnType();
   whatIsWrittenDownIsWorkedOut();
-  aLoopThatCannotFinishIsRefused();
+  aLoopMayCountToTheMostItsCounterHolds();
   aNameMaySayItWraps();
   aNumberIsAskedToBecomeText();
   aCountedLoopSaysHowFarItGets();

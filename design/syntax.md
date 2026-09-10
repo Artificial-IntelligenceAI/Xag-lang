@@ -384,8 +384,13 @@ outside it for anything to be visible to. A word that cannot change the answer i
 not written.
 
 `perm` keeps the counter, and what it holds afterwards is what it last took: the
-value a `break` left behind, or one past the last when the loop simply ran out.
+value a `break` left behind, or the last one when the loop simply ran out.
 Wanting it after a `break` is the only reason to keep one at all.
+
+It was one *past* the last until 2026-09-10, because the loop stepped the
+counter and then asked whether it had gone too far. Asking first and stepping
+after makes the counter never pass the end — which is what the rest of this
+page already said about it, and what the bounds are built on.
 
 ```
 loop.perm.range.int64 'i' = [*1*, *100*] {

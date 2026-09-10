@@ -262,14 +262,30 @@ void itLoops() {
        "1 2 3 ");
 }
 
+// A loop counting to the most its counter holds finishes. It used to be asked
+// whether the counter had gone too far only *after* stepping it, so that last
+// step came round and the test passed again — forever. An end written down as
+// the largest was refused for it (`E0531`); an end worked out while the program
+// ran was not, and never finished.
+void aLoopCountingToTheMostItsCounterHoldsFinishes() {
+  SAYS("START { var.mut.wrapping.int64 't' = [*0*];\n"
+       "  loop.range.uint8 'i' = [*0*, *255*] { set 't' = ['t' + *1*]; }\n"
+       "  print.stdout['t' \\n]; }\n", "256\n");
+  SAYS("START { var.int8 'n' = [*127*];\n"
+       "  var.mut.wrapping.int64 't' = [*0*];\n"
+       "  loop.range.int8 'i' = [*1*, 'n'] { set 't' = ['t' + *1*]; }\n"
+       "  print.stdout['t' \\n]; }\n", "127\n");
+}
+
 void aPermCounterKeepsWhatItHad() {
   // What a `break` left behind, which is the only reason to keep a counter.
   SAYS("START { loop.perm.range.int64 'i' = [*1*, *100*] {"
        " if 'i' x 'i' > *10* { break; } }\n"
        "  print.stdout['i' \\n]; }\n", "4\n");
-  // And one past the last, when it simply ran out.
+  // And the last one, when it simply ran out. Not one past it: the counter is
+  // asked before it is stepped, so it never passes the end.
   SAYS("START { loop.perm.range.int64 'i' = [*1*, *3*] { }"
-       " print.stdout['i' \\n]; }\n", "4\n");
+       " print.stdout['i' \\n]; }\n", "3\n");
 }
 
 void itCalls() {
@@ -701,6 +717,7 @@ int main() {
   itCountsInTensWhenAsked();
   itDecides();
   itLoops();
+  aLoopCountingToTheMostItsCounterHoldsFinishes();
   aPermCounterKeepsWhatItHad();
   itCalls();
   itKnowsItsConstants();

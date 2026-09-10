@@ -1008,8 +1008,26 @@ private:
         assignOne(last, s.value.values[1], s.span);
       }
 
+      // Four blocks, not three: the counter is tested *before* it is stepped,
+      // so the step only ever happens below the end.
+      //
+      // Stepping first and testing after, a counter whose end was the largest
+      // number its type holds came round and the test passed again, and the
+      // loop never finished. `E0531` refused an end *written down* as the
+      // largest and could see nothing else, so an end worked out while the
+      // program runs walked straight past it. Now there is nothing to refuse:
+      // the step cannot come round because it never happens at the end, and
+      // `E0531` is gone.
+      //
+      // The way back still goes through the header. Sending it straight to the
+      // body left the header outside the loop, and the header is where the
+      // counter is read — so the counter looked like something the loop leaves
+      // behind, and a loop with real work in it was replaced by its effect on
+      // the counter alone. The header's question is answered twice per turn on
+      // paper; LLVM asks it once.
       const unsigned header = addBlock();
       const unsigned inside = addBlock();
+      const unsigned step = addBlock();
       const unsigned after = addBlock();
       markIfToldNotToRun(s.chain, header);
       finish(Terminator{TerminatorKind::Goto, s.span, {}, {}, {header}, false, {}});
@@ -1026,7 +1044,7 @@ private:
                         {"true"}, {inside, after}, false, {}});
 
       current_ = inside;
-      loops_.push_back(Loop{header, after});
+      loops_.push_back(Loop{step, after});
       openScope();
       if (!keeps)
         names_.back()[s.name] = counter;
@@ -1034,6 +1052,19 @@ private:
         statement(*inner);
       closeScope();
       loops_.pop_back();
+      // The header has already said the counter is at or before the end, so
+      // being at it means this was the last turn.
+      const unsigned done = temporary(typeRef("bool"), true);
+      emit(Statement{StatementKind::Assign, s.span, done, {}, {},
+                     RValue{RValueKind::Binary, ">==", {}, 0,
+                            {Operand{OperandKind::Copy, counter, {}, body_.locals[counter].type},
+                             Operand{OperandKind::Copy, last, {}, body_.locals[last].type}},
+                            typeRef("bool")}});
+      finish(Terminator{TerminatorKind::Switch, s.span,
+                        Operand{OperandKind::Copy, done, {}, typeRef("bool")},
+                        {"true"}, {after, step}, false, {}});
+
+      current_ = step;
       emit(Statement{StatementKind::Assign, s.span, counter, {}, {},
                      RValue{RValueKind::Binary, "+", {}, 0,
                             {Operand{OperandKind::Copy, counter, {}, body_.locals[counter].type},
