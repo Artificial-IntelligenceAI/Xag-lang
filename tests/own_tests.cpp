@@ -318,6 +318,27 @@ void whatGoesIntoAFieldIsTheFieldsQuestion() {
 // into one of the things a struct holds. Read as an ordinary read, the case and
 // the name it came from both thought they had it, and both let go of it — which
 // the built program said with an abort and the interpreters did not say at all.
+// A `many-growing` owns its places the same way a `many` does, so a second name
+// taking one is a hand-over. Asked of the word one segment before the type, it
+// was not several at all — nothing asked for `move`, both names thought they
+// held the places, and the built program aborted where the interpreters, which
+// end a value once however many names think they have it, said nothing.
+void aGrowingManyIsHandedOverTheSameWay() {
+  CHECK(run("START {\n    var.mut.many-growing.int64 'g' = [*1* *2*];\n"
+            "    add 'g' = [*3*];\n"
+            "    var.many-growing.int64 'h' = ['g'];\n"
+            "    print.stdout[(count[loan 'h']) \\n];\n}\n")
+            .reports("E0406"));
+  CHECK(run("START {\n    var.mut.many-growing.int64 'g' = [*1* *2*];\n"
+            "    add 'g' = [*3*];\n"
+            "    var.many-growing.int64 'h' = [move 'g'];\n"
+            "    print.stdout[(count[loan 'h']) \\n];\n}\n").ok());
+  // And a `many` of a `many` is several however many levels it is.
+  CHECK(run("START {\n    var.many.many.int64 'g' = [[*1*] [*2*]];\n"
+            "    var.many.many.int64 'h' = ['g'];\n}\n")
+            .reports("E0406"));
+}
+
 void aCaseIsHandedWhatItHolds() {
   CHECK(run("one-of 'thing' [str 'text', int64 'n']\n"
             "START {\n    var.str 's' = [*hello*];\n"
@@ -376,6 +397,7 @@ int main() {
   lendingAnElementLendsTheWholeArray();
   whatHoldsLendsIsNotYoursToGiveAway();
   oneOfWhatAStructHoldsGoesOnItsOwn();
+  aGrowingManyIsHandedOverTheSameWay();
   aCaseIsHandedWhatItHolds();
   aStructIsFilledRatherThanJoined();
   whatGoesIntoAFieldIsTheFieldsQuestion();

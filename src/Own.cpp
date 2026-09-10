@@ -26,9 +26,20 @@ bool copyType(std::string_view type) {
 
 // A `many` owns the places it holds, whatever sits in them, so it is handed
 // over rather than copied even when every element would be.
+//
+// Every word that says several, and anywhere before the type rather than only
+// one segment back. Written as `segments[n - 2].text == "many"`, a
+// `many-growing.int64` was not several at all: nothing asked for it to be
+// handed over, so a second name took it without a word and both let go of the
+// places. The built program aborted; the interpreters, which end a value once
+// however many names think they hold it, said nothing.
 bool holdsMany(const Chain &chain) {
-  const std::size_t n = chain.segments.size();
-  return n >= 2 && !chain.segments[n - 2].isName && chain.segments[n - 2].text == "many";
+  for (std::size_t at = 0; at + 1 < chain.segments.size(); ++at) {
+    const ChainSegment &seg = chain.segments[at];
+    if (!seg.isName && (seg.text == "many" || seg.text == "many-growing"))
+      return true;
+  }
+  return false;
 }
 
 bool copyChain(const Chain &chain) {
