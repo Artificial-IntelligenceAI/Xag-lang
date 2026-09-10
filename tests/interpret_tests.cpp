@@ -587,6 +587,43 @@ void aCaseMayHoldSomethingWithAnOwner() {
        "round\nround\nround\n");
 }
 
+// Where one case holds something that leaves a byte with room in it, the empty
+// cases are written into the values that byte cannot hold, and a `one-of` costs
+// what the case that holds something costs. What the program says must not
+// change for it, which is the whole of what this asks.
+void aOneOfWrittenIntoASpareByteAnswersTheSame() {
+  SAYS("one-of 'inner' [bool 'a', nothing 'b', nothing 'c']\n"
+       "one-of 'outer' [inner 'i', nothing 'none']\n"
+       "START { var.outer 'o' = [i:a:*true*];\n"
+       "  when 'o' { is i 'x' {\n"
+       "               when 'x' { is a 'y' { print.stdout['y' \\n]; }\n"
+       "                          is b { print.stdout[str:*b* \\n]; }\n"
+       "                          is c { print.stdout[str:*c* \\n]; } } }\n"
+       "             is none { print.stdout[str:*none* \\n]; } } }\n",
+       "true\n");
+  SAYS("one-of 'inner' [bool 'a', nothing 'b', nothing 'c']\n"
+       "one-of 'outer' [inner 'i', nothing 'none']\n"
+       "START { var.outer 'o' = [none];\n"
+       "  when 'o' { is i 'x' { print.stdout[str:*inner* \\n]; }\n"
+       "             is none { print.stdout[str:*none* \\n]; } } }\n",
+       "none\n");
+  // A struct leaves room wherever one of the things it holds does, and the
+  // case that holds it is still let go of properly.
+  SAYS("struct 'flagged' [bool 'on', int64 'n']\n"
+       "one-of 'boxed' [flagged 'f', nothing 'empty', nothing 'other']\n"
+       "START { var.boxed 'b' = [other];\n"
+       "  when 'b' { is f 'g' { print.stdout['g'.n \\n]; }\n"
+       "             is empty { print.stdout[str:*empty* \\n]; }\n"
+       "             is other { print.stdout[str:*other* \\n]; } } }\n",
+       "other\n");
+  SAYS("struct 'flagged' [bool 'on', int64 'n']\n"
+       "one-of 'boxed' [flagged 'f', nothing 'empty', nothing 'other']\n"
+       "START { var.boxed 'b' = [f:flagged[*false* *7*]];\n"
+       "  when 'b' { is f 'g' { print.stdout['g'.on str:* * 'g'.n \\n]; }\n"
+       "             is empty { } is other { } } }\n",
+       "false 7\n");
+}
+
 void itShowsWhatSeveralThingsHold() {
   SAYS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
        "  print.stdout['xs' \\n]; }\n", "123\n");
@@ -855,6 +892,7 @@ int main() {
   itHoldsAGroupOfNamedThings();
   itHoldsOneOfSeveralThings();
   aCaseMayHoldSomethingWithAnOwner();
+  aOneOfWrittenIntoASpareByteAnswersTheSame();
   itShowsWhatSeveralThingsHold();
   itWritesANumberIntoText();
   itLooksBehindALoan();

@@ -306,11 +306,25 @@ void aOneOfIsTheRoomAndTheNumberPastIt() {
         "START { var.mixed 'c' = [text:*hi*];\n"
         "  when 'c' { is text 'x' { print.stdout['x' \\n]; } is d 'y' { } } }\n",
         "%xag.mixed = type { [2 x i128] }");
-  // Two small cases are two bytes, not a word and a word.
+  // And where one case holds something that leaves a byte with room in it,
+  // there is no number of its own at all: a `bool` uses two of its byte's 256,
+  // so `no` is written as a value it cannot hold.
   EMITS("one-of 'small' [bool 'yes', nothing 'no']\n"
         "START { var.small 'a' = [yes:*true*];\n"
         "  when 'a' { is yes 'x' { print.stdout['x' \\n]; } is no { } } }\n",
-        "%xag.small = type { [2 x i8] }");
+        "%xag.small = type { [1 x i8] }");
+  // A `one-of` inside a `one-of` leaves room the same way: its own number uses
+  // as many values as it has cases, and the rest are free.
+  EMITS("one-of 'inner' [bool 'a', nothing 'b', nothing 'c']\n"
+        "one-of 'outer' [inner 'i', nothing 'none']\n"
+        "START { var.outer 'o' = [none];\n"
+        "  when 'o' { is i 'x' { } is none { print.stdout[str:*none* \\n]; } } }\n",
+        "%xag.outer = type { [1 x i8] }");
+  // Two cases that both hold something keep a number of their own.
+  EMITS("one-of 'two' [bool 'a', int8 'b']\n"
+        "START { var.two 't' = [a:*true*];\n"
+        "  when 't' { is a 'x' { print.stdout['x' \\n]; } is b 'y' { } } }\n",
+        "%xag.two = type { [2 x i8] }");
 }
 
 void aSettledPlaceIsNotAskedAgain() {

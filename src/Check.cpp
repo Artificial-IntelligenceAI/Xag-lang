@@ -1248,8 +1248,11 @@ private:
         Signature signature;
         signature.result = typeOfChain(item.chain);
         signature.span = item.nameSpan;
-        for (const Param &param : item.params)
-          signature.params.push_back(typeOfChain(param.chain));
+        for (const Param &param : item.params) {
+          const Ty held = typeOfChain(param.chain);
+          signature.params.push_back(held);
+          result_.parameters[&param] = held;
+        }
         if (functions_.count(item.name))
           complain(item.nameSpan, "E0502", "`" + item.name + "` is already a function.",
                    {"a word names one function for the whole file"});

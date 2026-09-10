@@ -2,6 +2,7 @@
 #include "xag/Loops.h"
 #include "xag/Ahead.h"
 #include "xag/Check.h"
+#include "xag/Typed.h"
 #include "xag/Expand.h"
 #include "xag/Fold.h"
 #include "xag/Fast.h"
@@ -43,6 +44,8 @@ void usage() {
                "    xagc lex <file>     read it and print the tokens\n"
                "    xagc parse <file>   read it and print the tree\n"
                "    xagc check <file>   read it, check it, and stop\n"
+               "    xagc typed <file>   print the tree with its questions\n"
+               "                        answered\n"
                "    xagc mir <file>     check it and print the mid-level IR\n"
                "    xagc run <file>     check it and run it\n"
                "    xagc fast <file>    check it and run it on the fast engine\n"
@@ -260,8 +263,13 @@ std::string runtimeLibrary() {
   return XAG_RUNTIME_LIB;
 }
 
+// `tree` is filled in with the checker's answers as a tree, once nothing more
+// is going to be written out. Built here rather than handed back as a program
+// and a `CheckResult`, because both of those live only as long as this call and
+// what is keyed by their nodes lives exactly as long as they do.
 bool ready(const std::string &path, std::string &text, xag::MirResult &built,
-           int &status, xag::Rewriting rewriting = xag::Rewriting::No);
+           int &status, xag::Rewriting rewriting = xag::Rewriting::No,
+           xag::TypedResult *tree = nullptr);
 
 // Set by `--anyway`: build even where the two ways of running a program did not
 // agree about it. Nothing is folded away then, because a rewrite worked out from
@@ -317,6 +325,23 @@ int parseFile(const std::string &path) {
   if (parsed.ok())
     xag::print(parsed.program, std::cout);
   return report(source, parsed.diagnostics);
+}
+
+// The tree with the questions answered, printed. There is no pipeline of its
+// own here: it is the same road up to the checker, and then the same tree the
+// passes below the checker are given.
+int typedFile(const std::string &path) {
+  // The same road every other command takes, so that what this prints is the
+  // tree the passes below the checker are actually given — blanks filled in,
+  // arms chosen, walks written out.
+  std::string text;
+  xag::MirResult built;
+  int status = 0;
+  xag::TypedResult tree;
+  if (!ready(path, text, built, status, xag::Rewriting::No, &tree))
+    return status;
+  std::cout << xag::printed(tree.program);
+  return 0;
 }
 
 int checkFile(const std::string &path) {
@@ -493,7 +518,7 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
 }
 
 bool ready(const std::string &path, std::string &text, xag::MirResult &built, int &status,
-           xag::Rewriting rewriting) {
+           xag::Rewriting rewriting, xag::TypedResult *tree) {
   status = 1;
   if (!readSource(path, text))
     return false;
@@ -583,6 +608,11 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // Now that nothing is going to be written out again, once.
   if (report(source, checked.diagnostics) != 0)
     return false;
+  if (tree) {
+    *tree = xag::typedTree(source, *program, checked);
+    if (report(source, tree->diagnostics) != 0)
+      return false;
+  }
 
   // Every `whichever` becomes the arm it chose. After this the word is gone
   // from the tree, so ownership and the middle layer read ordinary blocks and
@@ -812,6 +842,8 @@ int main(int argc, char **argv) {
     return parseFile(argv[2]);
   if (command == "check" && argc > 2)
     return checkFile(argv[2]);
+  if (command == "typed" && argc > 2)
+    return typedFile(argv[2]);
   if (command == "mir" && argc > 2)
     return mirFile(argv[2]);
   if (command == "run" && argc > 2)

@@ -15,6 +15,7 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Host.h>
 
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -151,9 +152,6 @@ private:
   llvm::StructType *many_ = nullptr;
   llvm::StructType *growing_ = nullptr;
   std::unordered_map<std::string, llvm::StructType *> shapes_;
-  std::unordered_map<std::string, llvm::StructType *> sums_;
-  std::unordered_map<std::string, uint64_t> tagAt_;
-  std::unordered_map<std::string, llvm::IntegerType *> tagIs_;
 
   std::unordered_map<std::string, llvm::Function *> functions_;
   std::unordered_map<std::string, llvm::FunctionCallee> runtime_;
@@ -270,21 +268,35 @@ private:
     // of the value's life and nowhere else: the same shape an `or-nothing`
     // already pays, with as many arms as the type has cases that own something.
     if (bare.held == Type::OneOf) {
+      const Room &room = roomOf(bare.named);
       llvm::Function *function = builder_.GetInsertBlock()->getParent();
       auto *after = llvm::BasicBlock::Create(context_, "letgone", function);
-      auto *saying = whichCaseIs(bare);
-      auto *tag = builder_.CreateLoad(saying, whichCaseAt(bare, at));
-      auto *room = at; // the room starts where the value does
       const auto &cases = mir_.caseTypes[bare.named];
+      // Written into a byte a case already owns, only that case holds anything,
+      // and it is the one every value below the mark is in.
+      if (room.spare) {
+        if (!ownsAnything(cases[room.holder]))
+          return;
+        auto *mine = llvm::BasicBlock::Create(context_, "letgocase", function);
+        auto *saw = builder_.CreateLoad(builder_.getInt8Ty(), whichCaseAt(bare, at));
+        builder_.CreateCondBr(
+            builder_.CreateICmpULT(saw, builder_.getInt8(room.used)), mine, after);
+        builder_.SetInsertPoint(mine);
+        letGo(cases[room.holder], at);
+        builder_.CreateBr(after);
+        builder_.SetInsertPoint(after);
+        return;
+      }
+      auto *tag = builder_.CreateLoad(room.is, whichCaseAt(bare, at));
       for (unsigned i = 0; i < cases.size(); ++i) {
         if (!ownsAnything(cases[i]))
           continue;
         auto *mine = llvm::BasicBlock::Create(context_, "letgocase", function);
         auto *next = llvm::BasicBlock::Create(context_, "orelse", function);
         builder_.CreateCondBr(
-            builder_.CreateICmpEQ(tag, llvm::ConstantInt::get(saying, i)), mine, next);
+            builder_.CreateICmpEQ(tag, llvm::ConstantInt::get(room.is, i)), mine, next);
         builder_.SetInsertPoint(mine);
-        letGo(cases[i], room);
+        letGo(cases[i], at); // the room starts where the value does
         builder_.CreateBr(after);
         builder_.SetInsertPoint(next);
       }
@@ -363,56 +375,129 @@ private:
                             : builder_.getInt32Ty();
   }
 
-  // Which of the things it may be, and room for whichever that is.
+  // A byte a type never fills every value of. `at` is where it sits from the
+  // start of the value and `used` how many of its 256 are spoken for, so
+  // everything from `used` up is free for somebody else to mean something with.
   //
-  // One run of memory rather than two fields: the room from the front, and the
-  // number saying which case it is in just past the widest case can reach. A
-  // field of its own costs a whole alignment unit, because the room behind it
-  // has to start aligned — so a `one-of` of a `str` (twenty-four bytes, wanting
-  // eight) and a `deci128` (sixteen, wanting sixteen) was forty-eight bytes to
-  // hold thirty-two bytes' worth. Past the end of the widest case is space the
-  // alignment was going to round up to anyway.
+  // A `bool` is the plain case: it lives in a byte and uses two of it. A
+  // `one-of` is the other: the number saying which case it is in uses as many
+  // as it has cases. Text and a `many` have none — an empty one keeps a null
+  // pointer, so even that is a value they hold.
+  struct Spare {
+    bool any = false;
+    uint64_t at = 0;
+    uint64_t used = 0;
+  };
+
+  Spare spareIn(const MirType &type) {
+    if (type.isLoan() || type.orNothing || type.many)
+      return {};
+    if (type.held == Type::Bool)
+      return {true, 0, 2};
+    if (type.held == Type::OneOf) {
+      const Room &room = roomOf(type.named);
+      return {true, room.at, room.used};
+    }
+    if (type.held == Type::Struct && type.named < mir_.shapes.size()) {
+      auto *shell = llvm::cast<llvm::StructType>(structFor(type.named));
+      const llvm::StructLayout *laid = module_.getDataLayout().getStructLayout(shell);
+      const Shape &shape = mir_.shapes[type.named];
+      for (unsigned i = 0; i < shape.fields.size(); ++i) {
+        Spare inside = spareIn(asMirType(shape.fields[i].type));
+        if (inside.any)
+          return {true, laid->getElementOffset(i) + inside.at, inside.used};
+      }
+    }
+    return {};
+  }
+
+  // How a `one-of` is kept: one run of memory, with the number saying which
+  // case it is in somewhere in it.
   //
-  // Nothing writes there but this: a case's value goes in at the front and is
-  // at most as wide as the widest, so it never reaches the number.
-  llvm::Type *sumFor(unsigned which) {
-    const Shape &sum = mir_.sums[which];
-    auto found = sums_.find(sum.name);
-    if (found != sums_.end())
+  // Ordinarily that is just past where the widest case can reach — space the
+  // alignment was going to round up to anyway, and nowhere a case's value can
+  // touch, since a value goes in at the front and is at most that wide. A
+  // number in a field of its own cost a whole alignment unit instead, because
+  // the room behind it had to start aligned.
+  //
+  // Where exactly one case holds something and that something leaves a byte
+  // with room in it, there is no number of its own at all: the empty cases are
+  // written into the values that byte cannot hold. `one-of [bool 'yes',
+  // nothing 'no']` is then one byte, holding 0, 1, or a 2 that means `no`.
+  struct Room {
+    llvm::Type *shell = nullptr;
+    uint64_t at = 0;            // where the number sits
+    uint64_t used = 0;          // below this means the case that holds something
+    llvm::IntegerType *is = nullptr; // what the number is kept as
+    bool spare = false;         // written into a byte something else owns
+    unsigned holder = 0;        // the case that holds something, when spare
+    std::vector<unsigned> empty; // the others, in the order they are written
+  };
+
+  const Room &roomOf(unsigned which) {
+    auto found = rooms_.find(which);
+    if (found != rooms_.end())
       return found->second;
-    auto *made = llvm::StructType::create(context_, "xag." + sum.name);
-    sums_[sum.name] = made;
+    // A `one-of` cannot be itself (`E0526`), so this cannot come round — but a
+    // half-built table would, and answering with a plain one is safer than not
+    // answering.
+    if (!laying_.insert(which).second)
+      return rooms_[which];
+
+    const Shape &sum = mir_.sums[which];
+    const auto &cases = mir_.caseTypes[which];
     uint64_t widest = 0;
     uint64_t strictest = 1;
-    for (const MirType &one : mir_.caseTypes[which]) {
-      if (one.held == Type::Nothing)
+    unsigned holding = 0;
+    unsigned holder = 0;
+    for (unsigned i = 0; i < cases.size(); ++i) {
+      if (cases[i].held == Type::Nothing)
         continue;
-      auto *held = typeFor(one);
+      ++holding;
+      holder = i;
+      auto *held = typeFor(cases[i]);
       const uint64_t size = module_.getDataLayout().getTypeAllocSize(held);
       const uint64_t align = module_.getDataLayout().getABITypeAlign(held).value();
       widest = size > widest ? size : widest;
       strictest = align > strictest ? align : strictest;
     }
-    auto *tag = tagFor(static_cast<unsigned>(sum.fields.size()));
-    const uint64_t saying = module_.getDataLayout().getTypeAllocSize(tag);
-    const uint64_t whole =
-        ((widest + saying + strictest - 1) / strictest) * strictest;
+
+    Room room;
+    const unsigned empties = static_cast<unsigned>(cases.size()) - holding;
+    const Spare spare = holding == 1 ? spareIn(cases[holder]) : Spare{};
+    if (holding == 1 && spare.any && spare.used + empties <= 256) {
+      room.spare = true;
+      room.at = spare.at;
+      room.used = spare.used;
+      room.holder = holder;
+      for (unsigned i = 0; i < cases.size(); ++i)
+        if (i != holder)
+          room.empty.push_back(i);
+    } else {
+      auto *tag = tagFor(static_cast<unsigned>(sum.fields.size()));
+      room.at = widest;
+      room.used = sum.fields.size();
+      room.is = tag;
+      widest += module_.getDataLayout().getTypeAllocSize(tag);
+    }
+    const uint64_t whole = ((widest + strictest - 1) / strictest) * strictest;
+    auto *made = llvm::StructType::create(context_, "xag." + sum.name);
     auto *each = builder_.getIntNTy(static_cast<unsigned>(strictest) * 8);
     made->setBody({llvm::ArrayType::get(each, whole / strictest)});
-    tagAt_[sum.name] = widest;
-    tagIs_[sum.name] = tag;
-    return made;
+    room.shell = made;
+    laying_.erase(which);
+    return rooms_[which] = room;
   }
 
-  // Where the number saying which case sits, and what it is kept as.
+  std::unordered_map<unsigned, Room> rooms_;
+  std::set<unsigned> laying_;
+
+  llvm::Type *sumFor(unsigned which) { return roomOf(which).shell; }
+
+  // Where the number saying which case sits.
   llvm::Value *whichCaseAt(const MirType &of, llvm::Value *where) {
     return builder_.CreateConstInBoundsGEP1_64(builder_.getInt8Ty(), where,
-                                               tagAt_[mir_.sums[of.named].name]);
-  }
-
-  llvm::IntegerType *whichCaseIs(const MirType &of) {
-    typeFor(of); // laid out on first sight, and this may be the first
-    return tagIs_[mir_.sums[of.named].name];
+                                               roomOf(of.named).at);
   }
 
   llvm::Type *structFor(unsigned which) {
@@ -1294,22 +1379,50 @@ private:
                                                     slots_[value.operands[0].local])
                                : slots_[value.operands[0].local];
       const MirType bare = withoutLoan(of);
-      auto *tag = builder_.CreateLoad(whichCaseIs(bare), whichCaseAt(bare, where));
-      // Answered as an `int64` whatever it is kept as, because that is what the
-      // asks the `when` lowers to are written in.
-      return builder_.CreateZExt(tag, builder_.getInt64Ty());
+      const Room &room = roomOf(bare.named);
+      auto *wide = builder_.getInt64Ty();
+      if (!room.spare)
+        // Answered as an `int64` whatever it is kept as, because that is what
+        // the asks a `when` lowers to are written in.
+        return builder_.CreateZExt(
+            builder_.CreateLoad(room.is, whichCaseAt(bare, where)), wide);
+      // Written into a byte something else owns: everything below the mark is
+      // the case that holds something, and what is above it counts off the
+      // others in the order the type declares them.
+      auto *saw = builder_.CreateLoad(builder_.getInt8Ty(), whichCaseAt(bare, where));
+      auto *holds = builder_.CreateICmpULT(saw, builder_.getInt8(room.used));
+      auto *rank = builder_.CreateZExt(
+          builder_.CreateSub(saw, builder_.getInt8(room.used)), wide);
+      llvm::Value *which = llvm::ConstantInt::get(wide, room.empty.back());
+      for (unsigned i = static_cast<unsigned>(room.empty.size()) - 1; i-- > 0;)
+        which = builder_.CreateSelect(
+            builder_.CreateICmpEQ(rank, llvm::ConstantInt::get(wide, i)),
+            llvm::ConstantInt::get(wide, room.empty[i]), which);
+      return builder_.CreateSelect(
+          holds, llvm::ConstantInt::get(wide, room.holder), which);
     }
 
     case RValueKind::Case: {
       // Built through memory rather than as a value, because what goes in the
       // room is a different type each time and a value has one shape.
       const MirType whole = typing(value.type);
+      const Room &room = roomOf(whole.named);
       auto *shell = typeFor(whole);
       auto *made = scratch(shell, "made");
       builder_.CreateStore(llvm::Constant::getNullValue(shell), made);
-      builder_.CreateStore(
-          llvm::ConstantInt::get(whichCaseIs(whole), value.local),
-          whichCaseAt(whole, made));
+      if (!room.spare) {
+        builder_.CreateStore(llvm::ConstantInt::get(room.is, value.local),
+                             whichCaseAt(whole, made));
+      } else if (value.local != room.holder) {
+        // One of the ones that hold nothing, said in a value the case that does
+        // hold something cannot have.
+        unsigned rank = 0;
+        for (unsigned i = 0; i < room.empty.size(); ++i)
+          if (room.empty[i] == value.local)
+            rank = i;
+        builder_.CreateStore(builder_.getInt8(room.used + rank),
+                             whichCaseAt(whole, made));
+      }
       // The value goes in at the front, where every case's does.
       if (!value.operands.empty())
         builder_.CreateStore(read(value.operands[0]), made);

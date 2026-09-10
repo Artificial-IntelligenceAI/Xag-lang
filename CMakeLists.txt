@@ -88,6 +88,7 @@ add_library(xagfront STATIC
   src/AstClone.cpp
   src/AstPrinter.cpp
   src/Check.cpp
+  src/Typed.cpp
   src/Own.cpp
   src/MirBuild.cpp
   src/MirPrinter.cpp
@@ -124,7 +125,7 @@ target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
-foreach(suite lexer parser check own mir runtime interpret native regions fast ahead)
+foreach(suite lexer parser check typed own mir runtime interpret native regions fast ahead)
   add_executable(${suite}_tests tests/${suite}_tests.cpp)
   if(${suite} STREQUAL native)
     target_link_libraries(${suite}_tests PRIVATE xagnative xagrt)

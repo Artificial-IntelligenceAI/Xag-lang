@@ -942,11 +942,39 @@ alignment unit, because what follows it has to start aligned, so `mixed` above
 was forty-eight bytes to hold thirty-two bytes' worth. Past the end of the
 widest case is space the alignment was going to round up to anyway.
 
-**Where Rust is still smaller.** It puts the tag inside a case's *own* padding,
-which needs the payload written field by field rather than in one go — writing
-it whole may clobber the padding the tag is living in. And it can lose the tag
-altogether where one case has a value no other case can have: `Option<&T>` is a
-pointer, with null for the absence. Neither is done here.
+### Sometimes there is no number at all
+
+Where exactly one case holds something, and that something leaves a byte with
+room in it, the empty cases are written into the values that byte cannot hold:
+
+```llvm
+%xag.inner = type { [1 x i8] }   ; [bool 'a', nothing 'b', nothing 'c'] — 1 byte
+%xag.outer = type { [1 x i8] }   ; [inner 'i', nothing 'none'] — 1 byte
+%xag.boxed = type { [2 x i64] }  ; [flagged 'f', nothing …] — 16, not 24
+```
+
+A `bool` lives in a byte and uses two of its two hundred and fifty-six, so `b`
+is written as 2 and `c` as 3. Reading which case it is in is then a look at that
+byte: anything below the mark is the case that holds something, and anything
+above it counts off the others in the order the type declares them.
+
+**What leaves room, and what does not.** A `bool` does, and so does a `one-of`'s
+own number — which is why `outer` above costs what `inner` costs, and why this
+compounds as they nest. A struct leaves room wherever one of the things it holds
+does. Text and a `many` leave none: an empty one keeps a null pointer, so even
+that is a value they hold.
+
+**What this costs to get wrong** is worth saying out loud, because it is not how
+anything else here fails. A type that was thought to leave a byte spare, and
+does not, is a value read as the wrong case — quietly, with no refusal
+anywhere. So the list above is short on purpose, and everything not on it keeps
+a number of its own.
+
+**Where Rust is still smaller.** It puts the tag inside a case's *own* padding
+even when two cases hold something, which needs the payload written field by
+field rather than in one go — written whole, the store may clobber the padding
+the tag is living in. `Option<String>` is twenty-four bytes there and thirty-two
+here.
 
 `or-nothing` stays its own thing rather than becoming a two-case `one-of`. It is
 in the type chain rather than declared, it needs no name for its cases, and
@@ -1387,12 +1415,12 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **A tag inside a case's own padding, or gone.** A `one-of` keeps the number
-  saying which case just past the widest case. Rust puts it inside a case's own
-  padding, which wants the payload written field by field — written whole, it
-  would clobber the padding the number is in — and loses it altogether where one
-  case has a value no other can have, the way `Option<&T>` is a pointer with
-  null for the absence.
+- **A number inside a case's own padding.** A `one-of` writes into a spare byte
+  where exactly one case holds something, and otherwise keeps its number just
+  past the widest case. Rust goes further: it puts the tag inside a case's own
+  padding even where two cases hold something, which wants the payload written
+  field by field — written whole, the store would clobber the padding the tag is
+  in. `Option<String>` is twenty-four bytes there and thirty-two here.
 - **Visibility.** `export` and `program` wait on there being more than one file.
 - **`wrapping` on a sum with no name.** The word is written where a name is
   declared, and a sum happens between values. `('n' x *4*)` inside a comparison
@@ -1484,6 +1512,45 @@ uses, and a second thing to remember is worse than a rule with one edge.
 Errors: `E0111` when one of the three is missing, and it says which; `E0110` for
 anything standing outside all three; `E0104` when a `var` is written in `PREP`,
 which is the one mistake the split invites.
+
+## The tree with the questions answered
+
+Between the checker and everything below it there is one more tree. It is the
+program still — statements and expressions, no basic blocks and no drops — with
+every question the checker answered written into it rather than into a table
+beside it.
+
+```
+declare 't' : thing
+  case both #0 : thing
+    made pair : pair
+      written p : str
+      written 9 : int64
+when
+  name t : thing
+  arm both #0 'p' : pair
+```
+
+Every expression carries its type. A field is a number, a `when` arm is a case
+number, a word before a bracket has already been told apart — a call, or a
+struct made where it stands — and `str:*hi*` and `text:'s'` are different nodes
+rather than one node and a lookup. Brackets that only group are gone, because
+grouping is the shape of the tree.
+
+**Why there is one at all.** Everything below the checker used to work the type
+of a thing out again. The ownership pass kept a model of its own built from
+chains as text; the middle layer wrote types out with one function and read them
+back with another. Two answers to one question, and the two bugs that cost most
+on 2026-09-10 were the two disagreeing: a case the checker knew about and the
+ownership pass did not, which let a value be let go of twice; and a type written
+to text and parsed back against the wrong table, which gave a thirty-two byte
+struct eight bytes to live in.
+
+`xagc typed <file>` prints it.
+
+**What it is not.** It is not where anything is decided. Where building it looks
+something up rather than working it out, that is the point — a second opinion is
+the thing it exists to remove.
 
 ## Capitals
 

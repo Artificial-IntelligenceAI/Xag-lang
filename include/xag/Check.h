@@ -353,6 +353,10 @@ struct CheckResult {
   std::unordered_map<const Expr *, Ty> expressions;
   std::unordered_map<const Stmt *, Ty> declarations;
   std::unordered_map<const Item *, Ty> items;
+  // What each parameter holds. A signature says it too, but a signature is
+  // looked up by name and a parameter is a place in the tree — and the tree is
+  // what everything after this walks.
+  std::unordered_map<const Param *, Ty> parameters;
   // The structs a file declared, so nothing after the checker has to read them
   // out of the tree again. A `Ty` naming one is an index into this.
   std::vector<Shape> shapes;
