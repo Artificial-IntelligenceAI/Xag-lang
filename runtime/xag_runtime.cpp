@@ -470,18 +470,28 @@ void xag_many_out_of_range(int64_t index, uint64_t length) {
   if (length == 0)
     xag_stop("a place was asked for in a `many` that holds none");
   char why[128];
-  std::snprintf(why, sizeof(why), "place %lld was asked for, and the `many` has %llu",
-                static_cast<long long>(index),
-                static_cast<unsigned long long>(length));
+  // Below the first place and past the last are different mistakes, and the one
+  // worth spelling out is the first: a reader who wrote `*0*` was counting from
+  // somewhere this language does not count from.
+  if (index < 1)
+    std::snprintf(why, sizeof(why),
+                  "place %lld was asked for, and the first place is 1",
+                  static_cast<long long>(index));
+  else
+    std::snprintf(why, sizeof(why), "place %lld was asked for, and the `many` has %llu",
+                  static_cast<long long>(index),
+                  static_cast<unsigned long long>(length));
   xag_stop(why);
 }
 
 uint64_t xag_many_place(int64_t index, uint64_t length) {
   if (length == 0)
     xag_stop("a place was asked for in a `many` that holds none");
-  if (index < 0 || static_cast<uint64_t>(index) >= length)
+  // Places are counted from one, so the last is `count[…]` and the offset is
+  // one less than the place.
+  if (index < 1 || static_cast<uint64_t>(index) > length)
     xag_many_out_of_range(index, length);
-  return static_cast<uint64_t>(index);
+  return static_cast<uint64_t>(index) - 1;
 }
 
 void xag_many_new(XagMany *out, uint64_t length, uint64_t stride) {

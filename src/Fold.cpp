@@ -163,18 +163,24 @@ private:
         const auto found = lengths_.find(s.place);
         if (found != lengths_.end()) {
           const XagInt at = wholeFrom(s.at.written, Type::Int64);
-          if (at >= 0 && at < found->second) {
+          if (at >= 1 && at <= found->second) {
             if (rewriting_ == Rewriting::No)
               return false;
             s.value.settled = true;
             return true;
           }
           complain(s.span, "E0532",
-                   "place " + spelledOut(at) + " was written to, and this `many` has " +
-                       std::to_string(found->second) + ".",
+                   at < 1 ? "place " + spelledOut(at) + " was written to, and the "
+                                                        "first place is 1."
+                          : "place " + spelledOut(at) +
+                                " was written to, and this `many` has " +
+                                std::to_string(found->second) + ".",
                    {"a `many` holds the number of places it was made with"},
-                   {"both the place and the length are written down, so this stops "
-                    "every time it is reached rather than only sometimes."});
+                   at < 1 ? std::vector<std::string>{"places are counted from one, so the first is `*1*` "
+                                  "and the last is `count[…]`."}
+                          : std::vector<std::string>{"both the place and the length are written down, so "
+                                  "this stops every time it is reached rather than "
+                                  "only sometimes."});
         }
       }
       return false;
@@ -281,7 +287,7 @@ private:
     if (!asked || found == lengths_.end() || !looksWhole(*asked))
       return false;
     const XagInt at = wholeFrom(*asked, Type::Int64);
-    if (at >= 0 && at < found->second) {
+    if (at >= 1 && at <= found->second) {
       // Asked and answered here, so nothing has to ask again while it runs.
       if (rewriting_ == Rewriting::No)
         return false;
@@ -290,11 +296,16 @@ private:
       return !already;
     }
     complain(s.span, "E0532",
-             "place " + spelledOut(at) + " was asked for, and this `many` has " +
-                 std::to_string(found->second) + ".",
+             at < 1 ? "place " + spelledOut(at) + " was asked for, and the first "
+                                                  "place is 1."
+                    : "place " + spelledOut(at) + " was asked for, and this `many` has " +
+                          std::to_string(found->second) + ".",
              {"a `many` holds the number of places it was made with"},
-             {"both the place and the length are written down, so this stops every "
-              "time it is reached rather than only sometimes."});
+             at < 1 ? std::vector<std::string>{"places are counted from one, so the first is `*1*` and "
+                            "the last is `count[…]`."}
+                    : std::vector<std::string>{"both the place and the length are written down, so this "
+                            "stops every time it is reached rather than only "
+                            "sometimes."});
     return false;
   }
 

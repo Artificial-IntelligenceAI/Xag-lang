@@ -340,13 +340,13 @@ void aRunawayProgramIsStopped() {
 
 void itHoldsSeveralValues() {
   SAYS("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
-       "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[loan 'xs']) \\n]; }\n",
+       "  print.stdout['xs'[*1*] str:* * 'xs'[*3*] str:* of * (count[loan 'xs']) \\n]; }\n",
        "10 30 of 3\n");
   SAYS("START { var.mut.many.int64 'xs' = [*1* *2*];\n"
-       "  set 'xs'[*1*] = [*9*];\n"
-       "  print.stdout['xs'[*1*] \\n]; }\n", "9\n");
+       "  set 'xs'[*2*] = [*9*];\n"
+       "  print.stdout['xs'[*2*] \\n]; }\n", "9\n");
   SAYS("START { var.many.int64 'xs' = [fill[*7*, *4*]];\n"
-       "  print.stdout['xs'[*3*] str:* of * (count[loan 'xs']) \\n]; }\n", "7 of 4\n");
+       "  print.stdout['xs'[*4*] str:* of * (count[loan 'xs']) \\n]; }\n", "7 of 4\n");
   SAYS("START { var.many.int64 'none' = [];\n"
        "  print.stdout[(count[loan 'none']) \\n]; }\n", "0\n");
 }
@@ -355,18 +355,18 @@ void itEndsEveryPlaceItHeld() {
   // The balance is checked after every one of these, so a `many` of text that
   // let go of only its buffer would be caught here.
   SAYS("START { var.many.str 'ws' = [*one* *two* *three*];\n"
-       "  print.stdout['ws'[*1*] \\n]; }\n", "two\n");
+       "  print.stdout['ws'[*2*] \\n]; }\n", "two\n");
   SAYS("START { var.mut.many.str 'ws' = [*one* *two*];\n"
-       "  set 'ws'[*0*] = [*ONE*];\n"
-       "  print.stdout['ws'[*0*] str:* * 'ws'[*1*] \\n]; }\n", "ONE two\n");
+       "  set 'ws'[*1*] = [*ONE*];\n"
+       "  print.stdout['ws'[*1*] str:* * 'ws'[*2*] \\n]; }\n", "ONE two\n");
   SAYS("START { var.str 's' = [*taken*];\n"
        "  var.many.str 'ws' = [*a* move 's'];\n"
-       "  print.stdout['ws'[*1*] \\n]; }\n", "taken\n");
+       "  print.stdout['ws'[*2*] \\n]; }\n", "taken\n");
 }
 
 void itCountsWhatEachPlaceHolds() {
   SAYS("START { var.many.str 'ws' = [*café* *🧑‍🧑‍🧒‍🧒*];\n"
-       "  print.stdout[(count['ws'[*0*]]) str:* * (count['ws'[*1*]]) \\n]; }\n",
+       "  print.stdout[(count['ws'[*1*]]) str:* * (count['ws'[*2*]]) \\n]; }\n",
        "4 1\n");
 }
 
@@ -424,7 +424,7 @@ void itHoldsAGroupOfNamedThings() {
   SAYS("struct 'tag' [str 'name']\n"
        "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
        "  var.many.tag 'ts' = [move 'a' move 'b'];\n"
-       "  print.stdout['ts'[*1*].name \\n]; }\n", "bob\n");
+       "  print.stdout['ts'[*2*].name \\n]; }\n", "bob\n");
   SAYS("struct 'tag' [str 'name']\n"
        "START { var.or-nothing.tag 't' = [*ada*];\n"
        "  when 't' {\n"
@@ -434,7 +434,7 @@ void itHoldsAGroupOfNamedThings() {
   SAYS("struct 'point' [int64 'x', int64 'y']\nstruct 'tag' [str 'name']\n"
        "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
        "  var.many.tag 'ts' = [move 'a' move 'b'];\n"
-       "  print.stdout['ts'[*1*].name \\n]; }\n", "bob\n");
+       "  print.stdout['ts'[*2*].name \\n]; }\n", "bob\n");
 
   // A struct that holds a struct that holds text.
   SAYS("struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', int64 'n']\n"
@@ -456,7 +456,7 @@ void itHoldsAGroupOfNamedThings() {
        "  print.stdout['l'.to.y \\n]; }\n", "2\n");
   SAYS("struct 'point' [int64 'x', int64 'y']\n"
        "START { var.many.point 'ps' = [point[*1* *2*] point[*3* *4*]];\n"
-       "  print.stdout['ps'[*1*].x \\n]; }\n", "3\n");
+       "  print.stdout['ps'[*2*].x \\n]; }\n", "3\n");
   SAYS("struct 'tag' [str 'name', int64 'runs']\n"
        "struct 'pair' [tag 'one', tag 'two']\n"
        "START { var.str 's' = [*taken*];\n"
@@ -467,7 +467,7 @@ void itHoldsAGroupOfNamedThings() {
   SAYS("struct 'point' [int64 'x', int64 'y']\n"
        "START { var.point 'a' = [*1* *2*];\n  var.point 'b' = [*3* *4*];\n"
        "  var.many.point 'ps' = [move 'a' move 'b'];\n"
-       "  print.stdout['ps'[*1*].x \\n]; }\n", "3\n");
+       "  print.stdout['ps'[*2*].x \\n]; }\n", "3\n");
   SAYS("struct 'tag' [str 'name']\n"
        "START { var.or-nothing.tag 't' = [nothing];\n"
        "  when 't' {\n"
@@ -588,7 +588,7 @@ void itKnowsWhatItWasGiven() {
   char *passed[] = {first, second};
   xag_set_arguments(2, passed);
   SAYS("START { var.many.str 'a' = [arguments[]];\n"
-       "  print.stdout[(count[loan 'a']) str:* * 'a'[*0*] str:* * 'a'[*1*] \\n]; }\n",
+       "  print.stdout[(count[loan 'a']) str:* * 'a'[*1*] str:* * 'a'[*2*] \\n]; }\n",
        "2 alpha beta\n");
   xag_set_arguments(0, nullptr);
 }

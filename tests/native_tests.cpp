@@ -152,9 +152,9 @@ void itEmitsAMany() {
         "  print.stdout[(count[loan 'xs']) \\n]; }\n", "xag_many_new");
   // A `many` of text lets go of what sits in every place, not only the buffer.
   EMITS("START { var.many.str 'ws' = [*a* *b*];\n"
-        "  print.stdout['ws'[*1*] \\n]; }\n", "xag_many_drop_str");
+        "  print.stdout['ws'[*2*] \\n]; }\n", "xag_many_drop_str");
   EMITS("START { var.many.int64 'xs' = [fill[*0*, *4*]];\n"
-        "  print.stdout['xs'[*3*] \\n]; }\n", "xag_many_fill");
+        "  print.stdout['xs'[*4*] \\n]; }\n", "xag_many_fill");
 }
 
 void itEmitsSomethingOrNothing() {
@@ -204,7 +204,7 @@ void itEmitsAGroupOfNamedThings() {
   EMITS("struct 'point' [int64 'x', int64 'y']\n"
         "START { var.point 'a' = [*1* *2*];\n  var.point 'b' = [*3* *4*];\n"
         "  var.many.point 'ps' = [move 'a' move 'b'];\n"
-        "  print.stdout['ps'[*1*].x \\n]; }\n",
+        "  print.stdout['ps'[*2*].x \\n]; }\n",
         "xag_many_new");
   EMITS("struct 'point' [int64 'x', int64 'y']\n"
         "fn.int64 'across' [loan.point 'p'] { give ['p'.x + 'p'.y]; }\n"
@@ -216,7 +216,7 @@ void itEmitsAGroupOfNamedThings() {
   EMITS("struct 'tag' [str 'name']\n"
         "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
         "  var.many.tag 'ts' = [move 'a' move 'b'];\n"
-        "  print.stdout['ts'[*1*].name \\n]; }\n",
+        "  print.stdout['ts'[*2*].name \\n]; }\n",
         "xag_str_drop");
   EMITS("struct 'tag' [str 'name']\n"
         "START { var.or-nothing.tag 't' = [*ada*];\n"
@@ -296,11 +296,11 @@ void dividingIsAnInstruction() {
 // runs. Asking costs a compare and a branch in the middle of every loop.
 void aSettledPlaceIsNotAskedAgain() {
   REJECTS("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
-          "  print.stdout['xs'[*1*] \\n]; }\n",
+          "  print.stdout['xs'[*2*] \\n]; }\n",
           "call void @xag_many_out_of_range");
   REJECTS("START { var.mut.many.int64 'xs' = [*1* *2* *3*];\n"
-          "  set 'xs'[*1*] = [*9*];\n"
-          "  print.stdout['xs'[*1*] \\n]; }\n",
+          "  set 'xs'[*2*] = [*9*];\n"
+          "  print.stdout['xs'[*2*] \\n]; }\n",
           "call void @xag_many_out_of_range");
 
   // A place that is not known until it runs is still asked about.
@@ -312,22 +312,33 @@ void aSettledPlaceIsNotAskedAgain() {
 
   // A loop counting the places a `many` has reaches one it has every time
   // round, because a `many` is a fixed length once it is made. This is the
-  // shape every program that walks an array writes.
-  REJECTS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
-          "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
-          "    print.stdout['xs'['i'] \\n]; } }\n",
-          "call void @xag_many_out_of_range");
+  // shape every program that walks an array writes, and the check used to come
+  // out of it entirely.
+  //
+  // It does not today, and this test says so rather than pretending otherwise.
+  // Counting from one made the difference: LLVM will only bound a counter it
+  // knows cannot come round, and Xag's `+` comes round like every other, so the
+  // step carries no `nsw`. Counting from zero it got there anyway, through the
+  // `nuw` it could infer for itself; counting from one, that is not enough.
+  // What is left is one compare and a branch per element — measured at about a
+  // fifth on a loop that does nothing else. Giving the step the flag needs a
+  // proof that the counter cannot reach its type's largest, which is a separate
+  // piece of work.
+  EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+        "  loop.range.int64 'i' = [*1*, count[loan 'xs']] {\n"
+        "    print.stdout['xs'['i'] \\n]; } }\n",
+        "call void @xag_many_out_of_range");
 
   // Counting one and reaching into another says nothing about the other.
   EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
         "  var.many.int64 'ys' = [*1* *2*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*1*, count[loan 'xs']] {\n"
         "    print.stdout['ys'['i'] \\n]; } }\n",
         "call void @xag_many_out_of_range");
 
   // Nor does reaching with anything but the counter.
   EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*1*, count[loan 'xs']] {\n"
         "    var.int64 'j' = ['i' + *5*];\n"
         "    print.stdout['xs'['j'] \\n]; } }\n",
         "call void @xag_many_out_of_range");
@@ -335,7 +346,7 @@ void aSettledPlaceIsNotAskedAgain() {
   // A `many` never changes length, but a name can be given a different one —
   // and then how many places it has is no longer what was counted.
   EMITS("START { var.mut.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[loan 'xs'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*1*, count[loan 'xs']] {\n"
         "    set 'xs' = [*9*];\n"
         "    print.stdout['xs'['i'] \\n]; } }\n",
         "call void @xag_many_out_of_range");

@@ -218,7 +218,7 @@ void aProgramThatReadsIsRunUpToTheRead() {
 void aProgramThatLooksAtWhatItWasGivenIsRunUpToThat() {
   const std::string first = "START {\n"
                             "    var.many.str 'given' = [arguments[]];\n"
-                            "    print.stdout['given'[*0*] \\n];\n}\n";
+                            "    print.stdout['given'[*1*] \\n];\n}\n";
   const Settled s = settle(first, agrees());
   CHECK(s.ran);
   CHECK(s.said.empty());
@@ -311,15 +311,15 @@ void aProgramThatStopsIsSaidSo() {
   // Reaching past the end of a `many`, which is a stop today and knowable now.
   const std::string past = "START {\n"
                            "    var.many.int64 'xs' = [*5* *9* *2*];\n"
-                           "    var.mut.int64 'best' = ['xs'[*0*]];\n"
-                           "    loop.range.int64 'i' = [*1*, *3*] {\n"
+                           "    var.mut.int64 'best' = ['xs'[*1*]];\n"
+                           "    loop.range.int64 'i' = [*1*, *4*] {\n"
                            "        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }\n"
                            "    }\n}\n";
   CHECK(settle(past, agrees()).code(0) == "E0538");
   // The same program that stays inside is left alone.
   CHECK(settle("START {\n"
                "    var.many.int64 'xs' = [*5* *9* *2*];\n"
-               "    var.mut.int64 'best' = ['xs'[*0*]];\n"
+               "    var.mut.int64 'best' = ['xs'[*1*]];\n"
                "    loop.range.int64 'i' = [*1*, *2*] {\n"
                "        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }\n"
                "    }\n}\n",
@@ -427,7 +427,7 @@ void aLoopOverAWrittenManyStandsAlone() {
       "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n"
       "    var.many.int8 'xs' = [*10* *20* *30* *40*];\n"
       "    var.mut.int8 'sum' = [*0*];\n"
-      "    loop.range.int64 'i' = [*0*, *3*] {\n"
+      "    loop.range.int64 'i' = [*1*, *4*] {\n"
       "        set 'sum' = ['sum' + 'xs'['i']];\n"
       "    }\n}\n";
   // The bounds cannot follow `'xs'['i']`, and the loop is past a read, so
@@ -443,7 +443,7 @@ void aLoopOverAWrittenManyStandsAlone() {
       "    loop.while read.stdin[] holds 'line' { print.stdout['line' \\n]; }\n"
       "    var.many.int8 'xs' = [fill[*10*, *4*]];\n"
       "    var.mut.int8 'sum' = [*0*];\n"
-      "    loop.range.int64 'i' = [*0*, *3*] {\n"
+      "    loop.range.int64 'i' = [*1*, *4*] {\n"
       "        set 'sum' = ['sum' + 'xs'['i']];\n"
       "    }\n}\n";
   CHECK(settle(filled, agrees()).said.empty()); // `fill` is written down too
@@ -456,10 +456,10 @@ void aLoopThatFillsAnArrayIsNotWrittenAway() {
   const std::string filling =
       "START {\n"
       "    var.mut.many.int64 'xs' = [*0* *0* *0* *0*];\n"
-      "    loop.range.int64 'i' = [*0*, *3*] {\n"
+      "    loop.range.int64 'i' = [*1*, *4*] {\n"
       "        set 'xs'['i'] = ['i' x *11*];\n"
       "    }\n"
-      "    print.stdout[str:*b = * 'xs'[*3*] \\n];\n}\n";
+      "    print.stdout[str:*b = * 'xs'[*4*] \\n];\n}\n";
   const xag::Source source("test.xag", xag::asFile(filling));
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
@@ -482,10 +482,10 @@ void aNameIsChangedByMoreThanBeingAssignedTo() {
   const std::string stored =
       "START {\n"
       "    var.mut.many.int64 'xs' = [*0* *0* *0*];\n"
-      "    set 'xs'[*0*] = [*7*];\n"
-      "    set 'xs'[*1*] = [*8*];\n"
+      "    set 'xs'[*1*] = [*7*];\n"
+      "    set 'xs'[*2*] = [*8*];\n"
       "    var.mut.int64 'sum' = [*0*];\n"
-      "    loop.range.int64 'i' = [*0*, *2*] {\n"
+      "    loop.range.int64 'i' = [*1*, *3*] {\n"
       "        set 'sum' = ['sum' + 'xs'['i']];\n"
       "    }\n}\n";
   const auto mirOf = [](const std::string &text) {

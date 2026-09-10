@@ -158,17 +158,17 @@ void onCallsAndBorrows() {
 
 void onHoldingSeveralValues() {
   AGREE("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
-        "  print.stdout['xs'[*0*] str:* * 'xs'[*2*] str:* of * (count[loan 'xs']) \\n]; }\n");
+        "  print.stdout['xs'[*1*] str:* * 'xs'[*3*] str:* of * (count[loan 'xs']) \\n]; }\n");
   AGREE("START { var.mut.many.int64 'xs' = [fill[*3*, *5*]];\n"
-        "  set 'xs'[*4*] = [*9*];\n"
-        "  loop.range.int64 'i' = [*0*, *4*] { print.stdout['xs'['i'] \\n]; } }\n");
+        "  set 'xs'[*5*] = [*9*];\n"
+        "  loop.range.int64 'i' = [*1*, *5*] { print.stdout['xs'['i'] \\n]; } }\n");
   AGREE("START { var.mut.many.str 'ws' = [*one* *two* *three*];\n"
-        "  set 'ws'[*1*] = [*TWO*];\n"
-        "  loop.range.int64 'i' = [*0*, (count[loan 'ws'] - *1*)] {\n"
+        "  set 'ws'[*2*] = [*TWO*];\n"
+        "  loop.range.int64 'i' = [*1*, count[loan 'ws']] {\n"
         "    print.stdout['ws'['i'] str:* * (count['ws'['i']]) \\n]; } }\n");
   AGREE("fn.int64 'total' [loan.many.int64 'xs'] {\n"
         "  var.mut.int64 't' = [*0*];\n"
-        "  loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*1*, count['xs']] {\n"
         "    set 't' = ['t' + 'xs'['i']]; }\n"
         "  give ['t']; }\n"
         "START { var.many.int64 'xs' = [*1* *2* *3* *4*];\n"
@@ -236,8 +236,8 @@ void onGroupingNamedThings() {
         "START { var.tag 'a' = [*ada*];\n  var.tag 'b' = [*bob*];\n"
         "  var.mut.many.tag 'ts' = [move 'a' move 'b'];\n"
         "  var.tag 'c' = [*cy*];\n"
-        "  set 'ts'[*0*] = [move 'c'];\n"
-        "  print.stdout['ts'[*0*].name str:* * 'ts'[*1*].name \\n]; }\n");
+        "  set 'ts'[*1*] = [move 'c'];\n"
+        "  print.stdout['ts'[*1*].name str:* * 'ts'[*2*].name \\n]; }\n");
   // A struct behind a loan, through a function.
   AGREE("struct 'point' [int64 'x', int64 'y']\n"
         "fn.int64 'across' [loan.point 'p'] { give ['p'.x + 'p'.y]; }\n"
@@ -308,7 +308,7 @@ void onTurningNumbersIntoText() {
         "  print.stdout[(count[loan 'g']) \\n]; }\n");
   AGREE("START { var.mut.many-growing.str 'w' = [];\n"
         "  loop.range.int64 'i' = [*1*, *4*] { add 'w' = [*x*]; }\n"
-        "  print.stdout[(count[loan 'w']) str:*|* 'w'[*3*] \\n]; }\n");
+        "  print.stdout[(count[loan 'w']) str:*|* 'w'[*4*] \\n]; }\n");
 
   // A `many` that grows. A second type, because growing may move every place it
   // has — so it keeps room it is not using yet, and the room is the last field,
@@ -316,21 +316,21 @@ void onTurningNumbersIntoText() {
   // exactly as they read a `many`.
   AGREE("START { var.mut.many-growing.int64 'xs' = [];\n"
         "  loop.range.int64 'i' = [*1*, *5*] { add 'xs' = ['i' x 'i']; }\n"
-        "  print.stdout[(count[loan 'xs']) str:*|* 'xs'[*4*] \\n]; }\n");
+        "  print.stdout[(count[loan 'xs']) str:*|* 'xs'[*5*] \\n]; }\n");
   // Text, so that every place owns something and growing has to hand it over.
   AGREE("START { var.mut.many-growing.str 'w' = [];\n"
         "  var.str 't' = [*hello*];\n"
         "  add 'w' = [move 't'];\n  add 'w' = [*there*];\n"
-        "  print.stdout[(count[loan 'w']) str:*|* 'w'[*0*] str:*|* 'w'[*1*] \\n]; }\n");
+        "  print.stdout[(count[loan 'w']) str:*|* 'w'[*1*] str:*|* 'w'[*2*] \\n]; }\n");
   // Made with places already, and grown past them: the room it took to begin
   // with runs out, and everything moves.
   AGREE("START { var.mut.many-growing.int64 'xs' = [*1* *2*];\n"
         "  loop.range.int64 'i' = [*1*, *9*] { add 'xs' = ['i']; }\n"
-        "  print.stdout[(count[loan 'xs']) str:*|* 'xs'[*10*] \\n]; }\n");
+        "  print.stdout[(count[loan 'xs']) str:*|* 'xs'[*11*] \\n]; }\n");
   // And through a borrow, where reading one is reading a `many`.
   AGREE("fn.int64 'total' [loan.many-growing.int64 'g'] {\n"
         "  var.mut.int64 'sum' = [*0*];\n"
-        "  loop.range.int64 'i' = [*0*, (count['g'] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*1*, count['g']] {\n"
         "    set 'sum' = ['sum' + 'g'['i']];\n  }\n  give ['sum'];\n}\n"
         "START { var.mut.many-growing.int64 'xs' = [];\n"
         "  add 'xs' = [*3*]; add 'xs' = [*4*];\n"
@@ -338,44 +338,44 @@ void onTurningNumbersIntoText() {
 
   // A `many` of a `many`, which was `E0210` until there was something to build
   // it as. Brackets where an item goes make one; a name in front of them is
-  // still an index, and `'g'[*0*][*1*]` reaches into what was just reached.
+  // still an index, and `'g'[*1*][*2*]` reaches into what was just reached.
   AGREE("START { var.many.many.int64 'g' = [[*1* *2* *3*] [*4* *5*]];\n"
-        "  print.stdout[(count[loan 'g']) str:*|* (count[loan 'g'[*0*]]) \\n];\n"
-        "  print.stdout['g'[*0*][*2*] str:*|* 'g'[*1*][*0*] \\n]; }\n");
+        "  print.stdout[(count[loan 'g']) str:*|* (count[loan 'g'[*1*]]) \\n];\n"
+        "  print.stdout['g'[*1*][*3*] str:*|* 'g'[*2*][*1*] \\n]; }\n");
   // One row. A lone item that is already the whole array is the whole array —
   // and one row of a `many` of a `many` is a `many` too, so asking only whether
   // the item was *a* `many` put the row itself where the array goes. Letting go
   // of it then walked one `str` as though it were an array of them.
   AGREE("START { var.many.many.str 'w' = [[*ab*]];\n"
-        "  print.stdout['w'[*0*][*0*] str:*|* (count[loan 'w']) \\n]; }\n");
-  AGREE("START { var.many.many.int64 'g' = [[*7*]]; print.stdout['g'[*0*][*0*] \\n]; }\n");
+        "  print.stdout['w'[*1*][*1*] str:*|* (count[loan 'w']) \\n]; }\n");
+  AGREE("START { var.many.many.int64 'g' = [[*7*]]; print.stdout['g'[*1*][*1*] \\n]; }\n");
   // And a lone item that really is the whole array still is one.
   AGREE("START { var.many.str 'a' = [*x* *y*]; var.many.str 'b' = [move 'a'];\n"
-        "  print.stdout['b'[*1*] \\n]; }\n");
+        "  print.stdout['b'[*2*] \\n]; }\n");
 
   // Text in one, so that every place owns something and the whole of it has to
   // be let go of a level at a time.
   AGREE("START { var.many.many.str 'w' = [[*ab* *cd*] [*ef*]];\n"
-        "  print.stdout['w'[*0*][*1*] str:*|* 'w'[*1*][*0*] \\n]; }\n");
+        "  print.stdout['w'[*1*][*2*] str:*|* 'w'[*2*][*1*] \\n]; }\n");
   // Writing a whole place. What goes in one may itself be several, and reading
   // it as a lone value joined two pieces of text into one and put that where a
   // `many str` goes.
   AGREE("START { var.mut.many.many.str 'w' = [[*ab*] [*ef*]];\n"
-        "  set 'w'[*1*] = [*x* *y* *z*];\n"
-        "  print.stdout[(count[loan 'w'[*1*]]) str:*|* 'w'[*1*][*2*] \\n]; }\n");
+        "  set 'w'[*2*] = [*x* *y* *z*];\n"
+        "  print.stdout[(count[loan 'w'[*2*]]) str:*|* 'w'[*2*][*3*] \\n]; }\n");
   // Walked both ways round, through a borrow, in a function that never sees
   // where it came from.
   AGREE("fn.int64 'total' [loan.many.many.int64 'g'] {\n"
         "  var.mut.int64 'sum' = [*0*];\n"
-        "  loop.range.int64 'i' = [*0*, (count['g'] - *1*)] {\n"
-        "    loop.range.int64 'j' = [*0*, (count['g'['i']] - *1*)] {\n"
+        "  loop.range.int64 'i' = [*1*, count['g']] {\n"
+        "    loop.range.int64 'j' = [*1*, count['g'['i']]] {\n"
         "      set 'sum' = ['sum' + 'g'['i']['j']];\n"
         "    }\n  }\n  give ['sum'];\n}\n"
         "START { var.many.many.int64 'g' = [[*1* *2* *3*] [*4* *5*] [*6*]];\n"
         "  print.stdout[(total[loan 'g']) \\n]; }\n");
   // Three deep, because nothing says two.
   AGREE("START { var.many.many.many.int64 'g' = [[[*1*] [*2* *3*]] [[*4*]]];\n"
-        "  print.stdout['g'[*0*][*1*][*1*] \\n]; }\n");
+        "  print.stdout['g'[*1*][*2*][*2*] \\n]; }\n");
 
   // A sum going into a field that may hold nothing. What goes into one of these
   // is asked for as the thing itself — an `or-nothing bin64` is not a number,

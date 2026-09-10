@@ -788,8 +788,9 @@ private:
   // The rule lives in the runtime, and every engine asks it — but the half of
   // it that says yes is written out here as a compare and a branch, because a
   // call the optimiser cannot see into is a call it cannot remove, and this one
-  // sits in the middle of every loop over a `many`. An unsigned compare covers
-  // a negative index and an empty array at once: both are outside.
+  // sits in the middle of every loop over a `many`.
+  //
+  // Places are counted from one, so the offset is one less than the place.
   llvm::Value *placePointer(llvm::Value *array, llvm::Value *index,
                             const MirType &element, bool settled = false) {
     auto *whole = builder_.CreateLoad(many_, array);
@@ -799,12 +800,38 @@ private:
     // were both written down, and the place is one this `many` has. Asking a
     // second time costs a compare and a branch in the middle of every loop, and
     // the answer cannot have changed.
+    auto *one = llvm::ConstantInt::get(index->getType(), 1);
     if (settled)
-      return builder_.CreateGEP(typeFor(element), base, index);
+      return builder_.CreateGEP(typeFor(element), base,
+                                builder_.CreateSub(index, one));
     llvm::Function *function = builder_.GetInsertBlock()->getParent();
     auto *inside = llvm::BasicBlock::Create(context_, "inside", function);
     auto *outside = llvm::BasicBlock::Create(context_, "outside", function);
-    builder_.CreateCondBr(builder_.CreateICmpULT(index, length), inside, outside);
+    // Each end on its own branch rather than both under one `and`, so that each
+    // is a lone compare against something the loop around it may already have
+    // said. LLVM folds the first away by itself, down to the one case where
+    // taking one off would come round.
+    //
+    // It does not fold the second, and counting from one is why. To bound the
+    // offset it has to bound the counter, and it will only bound a counter it
+    // knows cannot come round — which needs `nsw` on the step, which Xag cannot
+    // hand it, because `+` comes round here like everywhere else. Counting from
+    // zero it got there through the `nuw` it could work out for itself; from
+    // one, that is not enough. Every shape was tried: the offset compared
+    // unsigned, the place compared signed and unsigned, both ends joined and
+    // both apart. The same compare stays in each.
+    //
+    // So a loop walking a `many` pays one compare and a branch per element —
+    // about a fifth, measured on a loop that does nothing else. Getting it back
+    // means proving the counter cannot reach its type's largest, which is a
+    // piece of work of its own and not this one.
+    auto *within = llvm::BasicBlock::Create(context_, "within", function);
+    builder_.CreateCondBr(builder_.CreateICmpSGE(index, one), within, outside);
+    // Past that branch the place is one or more, so taking one off it cannot go
+    // below zero and `nuw` says so.
+    builder_.SetInsertPoint(within);
+    auto *at = builder_.CreateSub(index, one, "", true, false);
+    builder_.CreateCondBr(builder_.CreateICmpULT(at, length), inside, outside);
 
     // Out of range does not come back, which is what lets the optimiser lift
     // the compare out of a loop or drop it altogether: a check whose failure
@@ -815,7 +842,7 @@ private:
     builder_.CreateUnreachable();
 
     builder_.SetInsertPoint(inside);
-    return builder_.CreateGEP(typeFor(element), base, index);
+    return builder_.CreateGEP(typeFor(element), base, at);
   }
 
   // An index arrives as whatever width it was written at; the runtime asks in

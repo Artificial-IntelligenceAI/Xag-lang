@@ -304,8 +304,10 @@ void aPlaceIsFoundOrItStops() {
   // Only the answers that come back are checked here. The ones that stop are
   // checked where a program can be run and its exit read, because stopping is
   // the whole process and not a value.
-  for (int64_t i = 0; i < 4; ++i)
-    CHECK(xag_many_place(i, 4) == static_cast<uint64_t>(i));
+  // Places are counted from one, so place 1 is the first offset and place 4 is
+  // the last of four.
+  for (int64_t i = 1; i <= 4; ++i)
+    CHECK(xag_many_place(i, 4) == static_cast<uint64_t>(i - 1));
 }
 
 void aManyTakesAndGivesBackItsPlaces() {

@@ -293,11 +293,11 @@ void whatIsWrittenDownIsWorkedOut() {
   CHECK(built("START {\n    var.int64 'n' = [*5* mod *0*];\n"
               "    print.stdout['n' \\n];\n}\n") == "E0533");
   CHECK(built("START {\n    var.many.int64 'xs' = [*10* *20* *30*];\n"
-              "    print.stdout['xs'[*7*] \\n];\n}\n") == "E0532");
+              "    print.stdout['xs'[*8*] \\n];\n}\n") == "E0532");
 
   // A place that is there, and a divisor that is not zero, are left alone.
   CHECK(built("START {\n    var.many.int64 'xs' = [*10* *20* *30*];\n"
-              "    print.stdout['xs'[*2*] \\n];\n}\n") == "");
+              "    print.stdout['xs'[*3*] \\n];\n}\n") == "");
   CHECK(built("START {\n    var.int64 'n' = [*5* / *2*];\n"
               "    print.stdout['n' \\n];\n}\n") == "");
 
@@ -308,9 +308,9 @@ void whatIsWrittenDownIsWorkedOut() {
 
   // Writing one asks the same question reading one does.
   CHECK(built("START {\n    var.mut.many.int64 'xs' = [*1* *2*];\n"
-              "    set 'xs'[*5*] = [*9*];\n}\n") == "E0532");
+              "    set 'xs'[*6*] = [*9*];\n}\n") == "E0532");
   CHECK(built("START {\n    var.mut.many.int64 'xs' = [*1* *2*];\n"
-              "    set 'xs'[*1*] = [*9*];\n}\n") == "");
+              "    set 'xs'[*2*] = [*9*];\n}\n") == "");
 
   // Pieces side by side, all written down, are one written thing.
   CHECK(built("START {\n    var.str 's' = [*a* *b* *c*];\n"
@@ -449,15 +449,15 @@ void aManyHoldsSeveralOfOneType() {
 
 void anElementIsOneOfWhatItHolds() {
   CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
-                "    var.int64 'n' = ['xs'[*0*]];").ok());
+                "    var.int64 'n' = ['xs'[*1*]];").ok());
   CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
-                "    var.str 's' = ['xs'[*0*]];").code(0) == "E0506");
+                "    var.str 's' = ['xs'[*1*]];").code(0) == "E0506");
 
   // A name holding one value is that value, and there is no first of it.
   CHECK(inStart("var.int64 'n' = [*1*];\n"
-                "    print.stdout['n'[*0*] \\n];").code(0) == "E0514");
+                "    print.stdout['n'[*1*] \\n];").code(0) == "E0514");
   CHECK(inStart("var.mut.int64 'n' = [*1*];\n"
-                "    set 'n'[*0*] = [*2*];").code(0) == "E0514");
+                "    set 'n'[*1*] = [*2*];").code(0) == "E0514");
 
   // An index is an `int64`, because that is what `count` answers with.
   CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
@@ -515,7 +515,7 @@ void aManyTravelsWhole() {
   CHECK(run("fn.many.int64 'f' [] {\n"
             "    var.many.int64 'xs' = [*1* *2*];\n"
             "    give ['xs'];\n}\n").ok());
-  CHECK(run("fn.int64 'g' [loan.many.int64 'xs'] { give ['xs'[*0*]]; }\n").ok());
+  CHECK(run("fn.int64 'g' [loan.many.int64 'xs'] { give ['xs'[*1*]]; }\n").ok());
 }
 
 void nothingNeedsSomewhereToBe() {
@@ -629,11 +629,11 @@ void aStructIsAGroupOfNamedThings() {
   CHECK(run("struct 'point' [int64 'x', int64 'y']\nstruct 'tag' [str 'name']\n"
             "START {\n    var.tag 'a' = [*ada*];\n    var.tag 'b' = [*bob*];\n"
             "    var.many.tag 'ts' = [move 'a' move 'b'];\n"
-            "    print.stdout['ts'[*1*].name \\n];\n}\n").ok());
+            "    print.stdout['ts'[*2*].name \\n];\n}\n").ok());
   CHECK(run("struct 'tag' [str 'name']\nstruct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.point 'a' = [*1* *2*];\n    var.point 'b' = [*3* *4*];\n"
             "    var.many.point 'ps' = [move 'a' move 'b'];\n"
-            "    print.stdout['ps'[*0*].y \\n];\n}\n").ok());
+            "    print.stdout['ps'[*1*].y \\n];\n}\n").ok());
   // And the wrong one is still refused, rather than quietly allowed.
   CHECK(run("struct 'point' [int64 'x', int64 'y']\nstruct 'tag' [str 'name']\n"
             "START {\n    var.point 'p' = [*1* *2*];\n"
@@ -655,7 +655,7 @@ void aStructIsNamedWhereItIsMade() {
             "    print.stdout['l'.to.y \\n];\n}\n").ok());
   CHECK(run(std::string(kShapes) + "START {\n"
             "    var.many.point 'ps' = [point[*1* *2*] point[*3* *4*]];\n"
-            "    print.stdout['ps'[*1*].x \\n];\n}\n").ok());
+            "    print.stdout['ps'[*2*].x \\n];\n}\n").ok());
 
   // The count is still one for each, one level down as well.
   CHECK(run(std::string(kShapes) + "START {\n"
@@ -736,7 +736,7 @@ void aMutThatWasNotNeededIsSaidSo() {
   // Changed by any of the three ways a name changes, and nothing is said.
   CHECK(saidIn("var.mut.int64 'n' = [*3*];\n    set 'n' = [*4*];") == "");
   CHECK(saidIn("var.mut.many.int64 'xs' = [*1* *2*];\n"
-               "    set 'xs'[*0*] = [*9*];") == "");
+               "    set 'xs'[*1*] = [*9*];") == "");
   CHECK(saidIn("var.mut.int64 'n' = [*3*];\n"
                "    var.loanmut.int64 'p' = [loanmut 'n'];\n"
                "    set 'p' = [*4*];") == "");
@@ -751,7 +751,7 @@ void aMutThatWasNotNeededIsSaidSo() {
 void aGenericBodyIsNotReadWithTheBlankInIt() {
   const std::string generic =
       "fn.any 'largest' [loan.many.any 'xs'] {\n"
-      "    var.mut.any 'best' = ['xs'[*0*]];\n"
+      "    var.mut.any 'best' = ['xs'[*1*]];\n"
       "    loop.range.int64 'i' = [*1*, *2*] {\n"
       "        if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }\n"
       "    }\n"
@@ -1370,7 +1370,7 @@ void howAThingIsHeldIsItsOwnQuestion() {
   // `loan.int64`, so the body declared a borrow and then wrote through it.
   const Checked inside = run(
       "fn.any 'largest' [loan.many.any 'xs'] {\n"
-      "    var.mut.any 'best' = ['xs'[*0*]];\n"
+      "    var.mut.any 'best' = ['xs'[*1*]];\n"
       "    give ['best'];\n"
       "}\n"
       "START {\n"

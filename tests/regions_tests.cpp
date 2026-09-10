@@ -165,7 +165,7 @@ void aLoanOfAManyIsALoanOfEveryPlaceInIt() {
   // of the array covers all of them and writing one goes round the loan.
   REFUSES("var.mut.many.int64 'xs' = [*1* *2*];\n"
           "    var.loan.many.int64 'w' = [loan 'xs'];\n"
-          "    set 'xs'[*0*] = [*9*];\n"
+          "    set 'xs'[*1*] = [*9*];\n"
           "    print.stdout[(count['w']) \n];",
           "E0409");
   REFUSES("var.mut.many.str 'ws' = [*a* *b*];\n"

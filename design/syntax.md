@@ -517,7 +517,7 @@ nothing for `fill` to put in each place, and it says so (`E0515`).
 
 ```
 var.many.many.int64 'grid' = [[*1* *2* *3*] [*4* *5*]];
-print.stdout['grid'[*0*][*2*] \n];
+print.stdout['grid'[*1*][*3*] \n];
 ```
 
 **Brackets where an item goes make one.** Nothing new is written: `[…]` already
@@ -526,7 +526,7 @@ cannot be an index. `many[…]` was considered — it is how a struct inside a s
 is written — but that naming exists because `point[…]` had to be told apart from
 an index, and here there is nothing to tell apart.
 
-**Reaching in is the same brackets again.** `'grid'[*0*][*1*]` reaches into what
+**Reaching in is the same brackets again.** `'grid'[*1*][*2*]` reaches into what
 was just reached.
 
 A written value is one value, so `[*1* *2*]` into a `many.many.int64` is refused:
@@ -546,7 +546,7 @@ would is `many.or-nothing.T`, which is refused for its own reasons.
 ```
 var.mut.many-growing.str 'lines' = [];
 add 'lines' = [move 'line'];
-print.stdout[(count[loan 'lines']) str:*|* 'lines'[*0*] \n];
+print.stdout[(count[loan 'lines']) str:*|* 'lines'[*1*] \n];
 ```
 
 **A second type, not a mode of `many`.** A `many` holds the places it was made
@@ -571,7 +571,7 @@ second type:
 
   7 |     add 'w' = [*b*];
     |     ^^^^^^^^^^^^^^^^ grown here
-  6 |     var.loan.str 'r' = [loan 'w'[*0*]];
+  6 |     var.loan.str 'r' = [loan 'w'[*1*]];
     |                              ^^^^^^^^ and lent here, still in use after this
 
 Rule(s) broken: what is lent stays where it is
@@ -594,8 +594,8 @@ separate question — going from cannot to can breaks nothing written before it.
 ### An element is reached with the name's own brackets
 
 ```
-print.stdout['xs'[*0*] \n];
-set 'xs'[*2*] = [*99*];
+print.stdout['xs'[*1*] \n];
+set 'xs'[*3*] = [*99*];
 var.int64 'n' = [count['xs']];
 ```
 
@@ -609,18 +609,39 @@ holds one value for its first is `E0514`: a name holding one value **is** that
 value, and there is no first of it.
 
 An index is an `int64`, because that is what `count` answers with and two sizes
-never meet on their own. A negative index is simply out of range.
+never meet on their own.
+
+**Places are counted from one.** The first is `*1*` and the last is
+`count[…]`, so walking a `many` is written with the ends the language uses
+everywhere else:
+
+```
+loop.range.int64 'i' = [*1*, count[loan 'xs']] { … }
+```
+
+`range` is inclusive at both ends and every other loop in the language starts at
+`*1*`; counting places from zero was the one construct that disagreed, and it
+showed up written down in every walk over an array as `[*0*, (count[…] - *1*)]`.
+That `- *1*` was two decisions failing to line up. `*0*` and every negative are
+out of range and say so by name — *place 0 was asked for, and the first place is
+1* — rather than being one off and quiet about it.
+
+It changed on 2026-09-10, and it changed what existing programs mean rather than
+refusing them, which is why it was worth being sure about. Most of it is loud:
+an index written down against a length written down is refused at build
+(`E0532`), so a program that indexed from zero stops building rather than
+reading the wrong place.
 
 ### An element is a place, not a value
 
-`'xs'[*2*]` says *where* a value is, and what happens there depends on what is
+`'xs'[*3*]` says *where* a value is, and what happens there depends on what is
 asked of it:
 
 ```
-print.stdout['xs'[*0*] \n];        # read it, and leave it where it is
-set 'xs'[*0*] = [*99*];            # write it, ending what was there
-size[loan 'xs'[*0*]];               # lend it
-move 'xs'[*0*]                     # refused — E0412
+print.stdout['xs'[*1*] \n];        # read it, and leave it where it is
+set 'xs'[*1*] = [*99*];            # write it, ending what was there
+size[loan 'xs'[*1*]];               # lend it
+move 'xs'[*1*]                     # refused — E0412
 ```
 
 Taking a value out would leave a hole in the middle of the array, and nothing
@@ -637,8 +658,10 @@ nothing new to learn.
 ### Out of range
 
 Reaching past either end stops: which index, how long the array was, and where,
-the same in every engine. An empty `many` stops whatever is asked of it, because
-it has no places at all.
+the same in every engine. Below the first place it says so in its own words —
+*the first place is 1* — because somebody who wrote `*0*` was counting from
+somewhere this language does not count from, and the length is no help to them.
+An empty `many` stops whatever is asked of it, because it has no places at all.
 
 Most of the time nothing gets that far. An index written down against a length
 written down is `E0532` and never builds, and one a counted loop walks off the
@@ -669,20 +692,21 @@ the half of it that says *yes* as a compare and a branch, because a call the
 optimiser cannot see into is a call it cannot remove — and this one sits in the
 middle of every loop over a `many`.
 
-What that buys, in a loop counting to `count['xs']`, is that LLVM proves the
-index always fits and lifts the check out of the loop entirely. This is the
-whole body of `total` at `-O3`:
+In a loop counting to `count['xs']` that used to buy the whole check: LLVM
+proved the index always fits and lifted it out, leaving a load, an add, an
+increment and the loop's own test.
 
-```llvm
-%1 = getelementptr [8 x i8], ptr %places, i64 %i
-%2 = load i64, ptr %1, align 8
-%3 = add i64 %2, %sum
-%4 = add nuw i64 %i, 1
-%5 = icmp sgt i64 %4, %last
-```
+**Counting from one costs that, for now.** LLVM will only bound a counter it
+knows cannot come round, and Xag's `+` comes round like every other, so the
+loop's step carries no `nsw`. Counting from zero it got there anyway, through
+the `nuw` it could work out for itself; counting from one, that is not enough,
+and one compare and a branch stay in the loop — about a fifth, measured on a
+loop that does nothing but walk an array and add.
 
-A load, an add, an increment and the loop's own test. Nothing of the check is
-left in it.
+Getting it back means proving the counter cannot reach its type's largest.
+`E0531` already refuses a range written down as ending there; a range ending in
+`count[…]` needs the same said about a length, and neither proof is written
+down yet.
 
 ## A type may say it holds nothing
 

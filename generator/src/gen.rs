@@ -1420,7 +1420,9 @@ impl<'a> Writer<'a> {
     /// `set 'v3'[*2*] = […]` — one place of a `many`, written.
     fn set_a_place(&mut self, name: &str, ty: Ty, length: u32, inner: Option<u32>) {
         let name = name.to_string();
-        let at = self.rng.below(length);
+        // Places are counted from one, so the first is 1 and the last is the
+        // length. `below` counts from zero, which is a place no `many` has.
+        let at = self.rng.below(length) + 1;
         self.pad();
         self.out.push_str("set '");
         self.out.push_str(&name);
@@ -1450,7 +1452,7 @@ impl<'a> Writer<'a> {
             self.print();
             return;
         };
-        let at = self.rng.below(length);
+        let at = self.rng.below(length) + 1;
         self.pad();
         self.out.push_str("print.stdout['");
         self.out.push_str(&name);
@@ -1461,7 +1463,7 @@ impl<'a> Writer<'a> {
         // refused — so this reaches the rest of the way in.
         if let Some(across) = inner {
             self.out.push_str("[*");
-            self.out.push_str(&self.rng.below(across).to_string());
+            self.out.push_str(&(self.rng.below(across) + 1).to_string());
             self.out.push_str("*]");
         }
         self.out.push_str(" str:* of * (count[loan '");

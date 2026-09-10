@@ -294,11 +294,11 @@ void aLoopSaysWhichKindItIs() {
 }
 
 void anElementIsReadAndWritten() {
-  const Parsed r = inStart("print.stdout['xs'[*0*] \\n];");
+  const Parsed r = inStart("print.stdout['xs'[*1*] \\n];");
   CHECK(r.ok());
   CHECK(r.has("element of 'xs'"));
 
-  const Parsed w = inStart("set 'xs'[*2*] = [*99*];");
+  const Parsed w = inStart("set 'xs'[*3*] = [*99*];");
   CHECK(w.ok());
   CHECK(w.has("at\n"));
 
@@ -316,7 +316,7 @@ void manyStandsWithTheType() {
   // Brackets where an item goes make one; a name in front of them is still an
   // index, and a condition still takes none.
   CHECK(inStart("var.many.int64 'xs' = [*1*];\n    "
-                "print.stdout['xs'[*0*] \\n];").ok());
+                "print.stdout['xs'[*1*] \\n];").ok());
   CHECK(!inStart("if ['a' >== 'b'] { }").parsed.ok());
   CHECK(inStart("var.many.mut.int64 'xs' = [*1*];").code(0) == "E0209");
 }
@@ -392,8 +392,8 @@ void aStructIsNamedWhereItIsMade() {
 
   // A word before a bracket is a call and can never be an index, which is why
   // the struct is named rather than the brackets standing alone: `'ns' [*0*]`
-  // would be read as `'ns'[*0*]` and mean something else in silence.
-  CHECK(inStart("var.two 't' = ['ns'[*0*] one[*3*]];").ok());
+  // would be read as `'ns'[*1*]` and mean something else in silence.
+  CHECK(inStart("var.two 't' = ['ns'[*1*] one[*3*]];").ok());
 }
 
 // A name may say that a sum which does not fit is meant to come round. The word
@@ -471,7 +471,7 @@ void aCloneIsIndistinguishable() {
       "}\n"
       "START {\n"
       "    var.mut.many.int64 'xs' = [*1* *2* *3*];\n"
-      "    set 'xs'[*0*] = [*9*];\n"
+      "    set 'xs'[*1*] = [*9*];\n"
       "    var.point 'p' = [*1* *2*];\n"
       "    set 'p'.y = [*7*];\n"
       "    loop.perm.range.int64 'i' = [*1*, 'LIMIT'] {\n"
@@ -517,7 +517,7 @@ void theBlankIsFilledEverywhereAChainIs() {
   const std::string generic =
       "fn.any 'largest' [loan.many.any 'xs', any 'first'] {\n"
       "    var.mut.any 'best' = ['first'];\n"
-      "    loop.range.int64 'i' = [*0*, *1*] {\n"
+      "    loop.range.int64 'i' = [*1*, *2*] {\n"
       "        var.any 'here' = ['xs'['i']];\n"
       "    }\n"
       "    give ['best'];\n"

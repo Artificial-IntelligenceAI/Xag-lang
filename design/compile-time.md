@@ -259,7 +259,7 @@ assignments made both invisible, in both directions:
 
 ```
 var.mut.many.int64 'xs' = [*0* *0* *0*];
-set 'xs'[*0*] = [*7*];                      # invisible
+set 'xs'[*1*] = [*7*];                      # invisible
 loop … { set 'sum' = ['sum' + 'xs'['i']]; }
 ```
 

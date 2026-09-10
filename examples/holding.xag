@@ -6,7 +6,7 @@ when it is made, and every place has something in it from then on.
 PREP {
     fn.int64 'total' [loan.many.int64 'xs'] {
         var.mut.int64 'sum' = [*0*];
-        loop.range.int64 'i' = [*0*, (count['xs'] - *1*)] {
+        loop.range.int64 'i' = [*1*, count['xs']] {
             set 'sum' = ['sum' + 'xs'['i']];
         }
         give ['sum'];
@@ -17,7 +17,7 @@ START {
     # Items side by side, kept as several rather than joined into one. Which of
     # the two happens is the type's answer, and the only one it gives.
     var.mut.many.int64 'scores' = [*10* *20* *30* *40*];
-    set 'scores'[*2*] = [*99*];
+    set 'scores'[*3*] = [*99*];
 
     print.stdout[str:*there are * (count[loan 'scores']) str:*, adding to *
                  (total[loan 'scores']) \n];
@@ -25,7 +25,7 @@ START {
     # An element is a place: read it, write it, lend it — never take it out,
     # because that would leave a hole and nothing in Xag holds one.
     var.many.str 'names' = [*ada* *grace* *alan*];
-    loop.range.int64 'i' = [*0*, (count[loan 'names'] - *1*)] {
+    loop.range.int64 'i' = [*1*, count[loan 'names']] {
         print.stdout['names'['i'] str:* is * (count['names'['i']]) str:* long* \n];
     }
 

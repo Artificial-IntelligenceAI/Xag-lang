@@ -59,8 +59,8 @@ PREP {
     # points would be told about a line inside `largest` that they did not write;
     # with it, the refusal lands on their own line.
     fn.any.number 'largest' [loan.many.any.number 'xs'] {
-        var.mut.any.number 'best' = ['xs'[*0*]];
-        loop.range.int64 'i' = [*1*, (count['xs'] - *1*)] {
+        var.mut.any.number 'best' = ['xs'[*1*]];
+        loop.range.int64 'i' = [*2*, count['xs']] {
             if 'xs'['i'] > 'best' { set 'best' = ['xs'['i']]; }
         }
         give ['best'];
