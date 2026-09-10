@@ -64,6 +64,10 @@ enum class Op : uint8_t {
   // Argument is data laid out as code, never a step of its own.
   Argument,
   Call, PrintWhole, PrintReal, PrintWide, PrintDeci, PrintText, PrintBool,
+  // A `many` or a struct, a value at a time. How many places there are is not
+  // known until it runs, so this is one op that walks rather than a print per
+  // place worked out here. `TextOfAll` is the same walk into a `str`.
+  ShowAll, TextOfAll,
   Jump, JumpUnless, Return, ReturnValue,
   // A struct is a fixed run of places, held exactly as a `many` is; only the
   // type tells them apart, and the type was settled before anything ran. What
@@ -97,6 +101,8 @@ struct Routine {
   unsigned parameters = 0;
   std::vector<Code> code;
   std::vector<Constant> pool;
+  // What each `ShowAll` is walking. `aux` says which.
+  std::vector<MirType> shown;
   bool answers = false;
 };
 
@@ -220,6 +226,11 @@ private:
   uint32_t hold(Constant value) {
     out_->pool.push_back(std::move(value));
     return static_cast<uint32_t>(out_->pool.size() - 1);
+  }
+
+  uint32_t holdShown(MirType type) {
+    out_->shown.push_back(type);
+    return static_cast<uint32_t>(out_->shown.size() - 1);
   }
 
   static std::string unescape(const std::string &written) {
@@ -769,6 +780,11 @@ private:
         const MirType type = typing(operand.type).lent();
         const Type named = plainly(type);
         const uint32_t from = into(operand, scratch);
+        // Several values rather than one, and how many is not settled here.
+        if (type.many > 0 || type.held == Type::Struct) {
+          emit(Code{Op::ShowAll, 0, from, 0, holdShown(type)});
+          continue;
+        }
         Op how = Op::PrintText;
         if (named == Type::Bool)
           how = Op::PrintBool;
@@ -801,6 +817,10 @@ private:
       const MirType type = value.operands.empty()
                                ? MirType{}
                                : typing(value.operands[0].type).lent();
+      if (type.many > 0 || type.held == Type::Struct) {
+        emit(Code{Op::TextOfAll, s.place, from, 0, holdShown(type)});
+        return;
+      }
       const Type given = plainly(type);
       const uint32_t family = given == Type::Bool ? 3u
                               : isDecimal(given)  ? 2u
@@ -839,8 +859,8 @@ private:
 
 class Machine {
 public:
-  explicit Machine(std::vector<Routine> routines)
-      : routines_(std::move(routines)) {
+  Machine(std::vector<Routine> routines, std::vector<std::vector<MirType>> fields)
+      : routines_(std::move(routines)), fields_(std::move(fields)) {
     stack_.resize(kStack);
   }
 
@@ -866,6 +886,7 @@ private:
   static constexpr uint64_t kBudget = 200u * 1000u * 1000u;
 
   std::vector<Routine> routines_;
+  std::vector<std::vector<MirType>> fields_;
   std::vector<Slot> stack_;
   std::vector<XagStr> pieces_; // the texts a join is putting side by side
   std::string trouble_;
@@ -965,6 +986,64 @@ private:
     to.places = held;
     to.owns = true;
     xag_note_taken();
+  }
+
+  // One value, written out. A `many` writes every place it holds and a struct
+  // every field, one after another with nothing between them, which is the same
+  // as writing those values side by side in the print — because that is what it
+  // is. Anything between them is something the program writes.
+  // `into` is where the characters go: nothing, and they are written out; a
+  // text, and they are added to the end of it. One walk either way, because
+  // `convert-to-str` promises exactly the characters a print would write.
+  void show(Slot &given, const MirType &type, XagStr *into = nullptr) {
+    Slot &at = behind(given);
+    if (type.many > 0) {
+      if (at.places)
+        for (Slot &one : *at.places)
+          show(one, type.element(), into);
+      return;
+    }
+    if (type.held == Type::Struct) {
+      if (!at.places || type.named >= fields_.size())
+        return;
+      const std::vector<MirType> &held = fields_[type.named];
+      for (unsigned i = 0; i < at.places->size() && i < held.size(); ++i)
+        show((*at.places)[i], held[i], into);
+      return;
+    }
+    const uint32_t width = widthOf(type.held);
+    if (!into) {
+      if (type.held == Type::Str)
+        xag_print(&at.text);
+      else if (type.held == Type::Bool)
+        xag_print_bool(at.whole != 0);
+      else if (isWhole(type.held))
+        xag_print_int(at.whole, width, isSigned(type.held) ? 1 : 0);
+      else if (isDecimal(type.held))
+        xag_print_deci(width, at.whole);
+      else if (type.held == Type::Bin128)
+        xag_print_bin128(at.whole);
+      else if (isBinary(type.held))
+        xag_print_bin(at.real, width);
+      return;
+    }
+    if (type.held == Type::Str) {
+      xag_str_push(into, &at.text);
+      return;
+    }
+    XagStr one{nullptr, 0, 0};
+    if (type.held == Type::Bool)
+      xag_str_of_bool(&one, at.whole != 0);
+    else if (isWhole(type.held))
+      xag_str_of_int(&one, at.whole, width, isSigned(type.held) ? 1 : 0);
+    else if (isDecimal(type.held))
+      xag_str_of_deci(&one, width, at.whole);
+    else if (type.held == Type::Bin128)
+      xag_str_of_bin128(&one, at.whole);
+    else if (isBinary(type.held))
+      xag_str_of_bin(&one, at.real, width);
+    xag_str_push(into, &one);
+    xag_str_drop(&one);
   }
 
   [[gnu::noinline]] void elementAt(Slot &to, const Slot &of, XagInt index) {
@@ -1558,6 +1637,15 @@ private:
       case Op::PrintDeci: xag_print_deci(one.aux >> 1, read(one.a).whole); break;
       case Op::PrintText: xag_print(&read(one.a).text); break;
       case Op::PrintBool: xag_print_bool(read(one.a).whole != 0); break;
+      case Op::ShowAll: show(read(one.a), routine.shown[one.aux]); break;
+      [[unlikely]] case Op::TextOfAll: {
+        end(to);
+        to = Slot{};
+        to.owns = true;
+        xag_str_from(&to.text, "", 0);
+        show(read(one.a), routine.shown[one.aux], &to.text);
+        break;
+      }
 
       case Op::Jump: at = one.to; continue;
       case Op::JumpUnless:
@@ -1591,7 +1679,7 @@ private:
 
 FastResult runFast(const Mir &mir) {
   Builder builder(mir);
-  return Machine(builder.run()).run();
+  return Machine(builder.run(), mir.fieldTypes).run();
 }
 
 } // namespace xag

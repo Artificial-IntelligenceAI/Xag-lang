@@ -1541,7 +1541,14 @@ private:
                     "this was not checked as something with a way of being written.",
                     "a value is written out the way it is shown, and what this is could "
                     "not be worked out");
-      if (got != Ty{} && !isNumber(got) && got != Ty{Type::Bool})
+      // Whatever a print can write, this can write into a `str`, because it is
+      // the same walk: a `many` and a struct write what they hold, one value
+      // after another. What is left is text, which is already text, and an
+      // absence, which is not a value to write.
+      Ty absent;
+      std::string where;
+      const bool several = got.holds() || got.isStruct();
+      if (got != Ty{} && !isNumber(got) && got != Ty{Type::Bool} && !several)
         complain(e.args.values[0].span, "E0535",
                  got == Ty{Type::Str}
                      ? std::string("this is already text.")
@@ -1551,9 +1558,13 @@ private:
                      ? std::vector<std::string>{"a `str` is text, so there is nothing "
                                                 "here to convert."}
                      : std::vector<std::string>{
-                           "what would stand between two of the things it holds is a "
-                           "decision nobody has made — the same reason showing one is "
-                           "refused. `holds` and `when` open what may be missing."});
+                           "`holds` and `when` open what may be missing."});
+      else if (several && holdsNothingSomewhere(got, absent, where))
+        complain(e.args.values[0].span, "E0535",
+                 "`" + where + "` inside this may hold nothing, and there is no "
+                               "writing an absence.",
+                 {"a value is written out the way it is shown"},
+                 {"`holds` and `when` open what may be missing."});
       return Type::Str;
     }
 
@@ -1715,30 +1726,45 @@ private:
     couldNotCheck(got, item.span, "this was not checked as something showable.",
                   "showing writes one piece after another, and what this is could not "
                   "be worked out");
-    // Asked first, because an `or-nothing.many.int64` is both and this is the
-    // sharper reason: the absence, not the several.
-    if (got.mayBeNothing()) {
+    Ty absent;
+    std::string where;
+    if (holdsNothingSomewhere(got, absent, where))
       complain(item.span, "E0536",
-               "this may hold nothing, and showing it would not say which.",
+               where.empty()
+                   ? std::string("this may hold nothing, and showing it would not "
+                                 "say which.")
+                   : "`" + where + "` inside this may hold nothing, and showing it "
+                                   "would not say which.",
                {"there is no way to reach what is inside without asking first"},
                {"`holds` and `when` are the asking. Written straight out, an "
                 "absent `str` and an empty one would look the same, and what "
                 "else an absence should look like is a decision nobody has made."});
-      return;
+  }
+
+  // Whether anything inside this, however deep, may hold nothing. A `many` of
+  // them and a struct with one among its fields are the same question: showing
+  // writes what is there, and an absence is not there to be written.
+  bool holdsNothingSomewhere(Ty got, Ty &absent, std::string &where,
+                             unsigned depth = 0) const {
+    if (depth > 32) // a struct cannot hold itself (`E0526`), so this is a guard
+      return false; // against a shape table that never finished being built
+    if (got.mayBeNothing()) {
+      absent = got;
+      return true;
     }
     if (got.holds())
-      complain(item.span, "E0516",
-               "a `" + name(got) + "` holds several values, and this shows one thing.",
-               {"showing writes one piece after another"},
-               {"what would stand between two of them is a decision nobody has "
-                "made, so nothing here makes it for you."});
-    else if (got.isStruct())
-      complain(item.span, "E0516",
-               "a `" + name(got) + "` is several named things, and this shows one thing.",
-               {"showing writes one piece after another"},
-               {"a field at a time is written by naming it — `'p'.x` — and what "
-                "would stand between two of them, or whether their names should "
-                "be written too, is a decision nobody has made."});
+      return holdsNothingSomewhere(elementOf(got), absent, where, depth + 1);
+    if (!got.isStruct() || got.named >= result_.shapes.size())
+      return false;
+    for (const Field &field : result_.shapes[got.named].fields) {
+      std::string deeper;
+      if (!holdsNothingSomewhere(field.type, absent, deeper, depth + 1))
+        continue;
+      // Named from the outside in, so the reader can follow it down.
+      where = deeper.empty() ? field.name : field.name + "." + deeper;
+      return true;
+    }
+    return false;
   }
 
   // A value is one item, or several joined. Joining builds text, so joined items

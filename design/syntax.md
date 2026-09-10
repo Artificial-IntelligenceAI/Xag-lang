@@ -969,10 +969,54 @@ cannot drift apart.
 
 ### What has no one way of being written
 
-A `many`, a struct, and a value that may hold nothing are all refused
-(`E0535`) — what would stand between two of the things they hold is a decision
-nobody has made, which is the same reason showing one is refused, and there is
-no text of nothing. Text itself is refused too: it is already text.
+Text is refused (`E0535`): it is already text. A value that may hold nothing is
+refused too, wherever the absence sits — inside a struct or under a `many`, the
+message says which field it found — because an absence is not a value and there
+is nothing to write for it.
+
+A `many` and a struct are not refused. They are written the way a print writes
+them, which is the next section.
+
+## Showing what holds several things
+
+A print writes one piece after another. A `many` and a struct hold several
+values, so showing one writes each of them, in order, with nothing between:
+
+```
+var.many.int64 'xs' = [*1* *2* *3*];
+print.stdout['xs' \n];                 # 123
+```
+
+**Nothing stands between two of them, and that is not a decision dodged.**
+Writing a `many` out is the same as writing its places side by side in the
+print — `print.stdout['xs'[*1*] 'xs'[*2*] 'xs'[*3*]]` — and nothing stands
+between two pieces of a print anywhere else either. A comma, a bracket or a
+space would be characters the program never asked for. What goes between them
+is what the program writes:
+
+```
+loop.range.int64 'i' = [*1*, count[loan 'xs']] {
+    print.stdout['xs'['i'] str:*, *];
+}
+```
+
+It goes all the way down. A `many` of a `many` writes every place of every row,
+a struct writes every field, and a struct holding either writes what those
+hold. Nothing is skipped and nothing is summarised. A borrowed field writes what
+it borrows — the value, not where it lives.
+
+It always ends: a struct that holds itself is `E0526`, so the depth is fixed by
+the type before the program runs, and the only part not bounded by the type is
+how long a `many` is — which is exactly as long as you asked for.
+
+**An absence is still refused** (`E0536`), wherever it sits. A `str` that may
+hold nothing and an empty one would write the same characters, and nothing
+reaches inside one without asking — `holds` and `when` are the asking. A struct
+with such a field is refused for that field, and the message names it.
+
+They wrote nothing at all until 2026-09-07 and were refused until 2026-09-10 —
+and nothing at all in all three engines is three engines agreeing, which is why
+the oracle never saw the hole.
 
 ## A sum that does not fit
 
@@ -1220,15 +1264,6 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   be, and today a value can be two things. A type that could be several — with
   its own names and its own contents — is what would make the construct earn
   itself, and the middle layer is already shaped for it.
-- **Showing something that is not one piece.** A print writes one piece after
-  another, and three things are not one piece. A `many` and a struct are several
-  (`E0516`): what stands between two of them, and whether a struct's field names
-  should be written too, is a decision nobody has made. An `or-nothing` is the
-  other case (`E0536`) — written straight out, an absent `str` and an empty one
-  would look the same, and nothing reaches inside one without asking first.
-
-  A struct and an `or-nothing` wrote nothing at all until 2026-09-07, in all
-  three engines alike — so the oracle saw agreement and not a hole.
 - **Visibility.** `export` and `program` wait on there being more than one file.
 - **`wrapping` on a sum with no name.** The word is written where a name is
   declared, and a sum happens between values. `('n' x *4*)` inside a comparison

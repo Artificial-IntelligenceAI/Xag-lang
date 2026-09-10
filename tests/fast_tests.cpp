@@ -180,6 +180,17 @@ void onHoldingSeveralValues() {
         "  print.stdout[total[loan 'xs'] \\n]; }\n");
   AGREE("START { var.many.int64 'none' = [];\n"
         "  print.stdout[(count[loan 'none']) \\n]; }\n");
+  // Showing the whole of one: every place, one value after another.
+  AGREE("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+        "  print.stdout['xs' \\n]; }\n");
+  AGREE("START { var.many.many.int64 'g' = [[*1* *2*] [*3*]];\n"
+        "  print.stdout['g' \\n]; }\n");
+  AGREE("START { var.many.str 'ws' = [*one* *two*];\n"
+        "  print.stdout['ws' str:*|* (convert-to-str[loan 'ws']) \\n]; }\n");
+  AGREE("START { var.many.deci64 'ds' = [*1.10* *0.1*];\n"
+        "  print.stdout['ds' \\n]; }\n");
+  AGREE("START { var.mut.many-growing.int64 'g' = [*1* *2*];\n"
+        "  add 'g' = [*3*];\n  print.stdout['g' \\n]; }\n");
 }
 
 void onHoldingNothing() {
@@ -207,6 +218,19 @@ void onChoosingBetweenCases() {
         "  when 's' {\n"
         "    is nothing { print.stdout[str:*none* \\n]; }\n"
         "    is 't'     { print.stdout['t' str:* * (count['t']) \\n]; } } }\n");
+}
+
+void onShowingWhatSeveralThingsHold() {
+  AGREE("struct 'point' [int64 'x', int64 'y']\n"
+        "START { var.point 'p' = [*1* *2*];\n"
+        "  print.stdout['p' str:*|* (convert-to-str[loan 'p']) \\n]; }\n");
+  AGREE("struct 'bag' [many.int64 'ns', str 'label']\n"
+        "START { var.bag 'b' = [[*7* *8*] *tag*];\n"
+        "  print.stdout['b' \\n]; }\n");
+  AGREE("struct 'held' [loan.str 'what', deci64 'much']\n"
+        "START { var.str 'name' = [*ada*];\n"
+        "  var.held 'h' = [loan 'name' *1.25*];\n"
+        "  print.stdout['h' \\n]; }\n");
 }
 
 void onGroupingNamedThings() {
@@ -503,6 +527,7 @@ int main() {
   onHoldingSeveralValues();
   onHoldingNothing();
   onChoosingBetweenCases();
+  onShowingWhatSeveralThingsHold();
   onGroupingNamedThings();
   onTurningNumbersIntoText();
 

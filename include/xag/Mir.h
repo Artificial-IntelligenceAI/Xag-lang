@@ -215,6 +215,10 @@ struct Mir {
   // What each struct is made of, carried through so that nothing after the
   // checker has to read it out of the tree again.
   std::vector<Shape> shapes;
+  // The same fields, said the way the middle layer says types. A `Shape` holds
+  // what the checker worked out, which the engines cannot read; showing a
+  // struct walks its fields and has to know what each one is.
+  std::vector<std::vector<MirType>> fieldTypes;
 };
 
 struct MirResult {

@@ -404,15 +404,20 @@ void aNumberIsAskedToBecomeText() {
   CHECK(inStart("var.str 't' = [*hi*];\n"
                 "    var.str 's' = [convert-to-str[loan 't']];").code(0) == "E0535");
 
-  // What holds several things has no one way of being written out — the same
-  // reason showing one is refused — and there is no text of nothing.
+  // What holds several things is written the way a print writes it: what it
+  // holds, one value after another.
   CHECK(inStart("var.many.int64 'xs' = [*1* *2*];\n"
-                "    var.str 's' = [convert-to-str[loan 'xs']];").code(0) == "E0535");
+                "    var.str 's' = [convert-to-str[loan 'xs']];").ok());
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
             "START {\n    var.point 'p' = [*1* *2*];\n"
-            "    var.str 's' = [convert-to-str[loan 'p']];\n}\n").code(0) == "E0535");
+            "    var.str 's' = [convert-to-str[loan 'p']];\n}\n").ok());
+  // There is no writing an absence, wherever it sits.
   CHECK(inStart("var.or-nothing.int64 'n' = [*1*];\n"
                 "    var.str 's' = [convert-to-str['n']];").code(0) == "E0535");
+  CHECK(run("struct 'maybe' [int64 'n', or-nothing.str 's']\n"
+            "START {\n    var.maybe 'm' = [*1* *hi*];\n"
+            "    var.str 't' = [convert-to-str[loan 'm']];\n}\n")
+            .code(0) == "E0535");
 
   // One value, one answer.
   CHECK(inStart("var.int64 'n' = [*1*];\n"
@@ -483,22 +488,37 @@ void fillNeedsAValueThatCopies() {
   CHECK(inStart("var.int64 'n' = [fill[*0*, *4*]];").code(0) == "E0507");
 }
 
-void showingAManyIsRefused() {
+// A `many` and a struct write what they hold, one value after another with
+// nothing between them. `E0516` refused both until 2026-09-10, for a decision
+// about separators that turned out not to need making: a print writes its
+// pieces side by side, and these are pieces.
+void showingSeveralThingsWritesEachOfThem() {
   CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
-                "    print.stdout['xs' \\n];").code(0) == "E0516");
-  // A struct is several named things, and wrote nothing at all until it was
-  // refused — the same silence in all three engines, so the oracle agreed.
+                "    print.stdout['xs' \\n];").ok());
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
               "START {\n"
               "    var.point 'p' = [*1* *2*];\n"
               "    print.stdout['p' \\n];\n}\n")
-            .code(0) == "E0516");
-  // A field at a time is what there is.
+            .ok());
+  // A field at a time is still a field at a time.
   CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
               "START {\n"
               "    var.point 'p' = [*1* *2*];\n"
               "    print.stdout['p'.x \\n];\n}\n")
             .ok());
+  // An absence anywhere inside is still refused, and says where it is.
+  CHECK(run("struct 'maybe' [int64 'n', or-nothing.str 's']\n"
+              "START {\n"
+              "    var.maybe 'm' = [*1* *hi*];\n"
+              "    print.stdout['m' \\n];\n}\n")
+            .code(0) == "E0536");
+  CHECK(run("struct 'maybe' [int64 'n', or-nothing.str 's']\n"
+              "struct 'holder' [many.maybe 'ms']\n"
+              "START {\n"
+              "    var.maybe 'm' = [*1* *hi*];\n"
+              "    var.holder 'h' = [[move 'm']];\n"
+              "    print.stdout['h' \\n];\n}\n")
+            .code(0) == "E0536");
 }
 
 void showingAMaybeIsRefused() {
@@ -1514,7 +1534,7 @@ int main() {
   anElementIsOneOfWhatItHolds();
   countAsksHowManyOfEither();
   fillNeedsAValueThatCopies();
-  showingAManyIsRefused();
+  showingSeveralThingsWritesEachOfThem();
   askingToSkipNeedsSayingSo();
   aMutThatWasNotNeededIsSaidSo();
   showingAMaybeIsRefused();

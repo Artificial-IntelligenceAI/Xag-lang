@@ -497,6 +497,44 @@ void itHoldsAGroupOfNamedThings() {
 
 // A number written into text is written by the very code that prints it, so the
 // screen and the string can never come out differently.
+// A `many` and a struct write what they hold, one value after another with
+// nothing between them. They wrote nothing at all until they were refused, and
+// nothing at all in all three engines is agreement, which is why the oracle
+// never saw it.
+void itShowsWhatSeveralThingsHold() {
+  SAYS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+       "  print.stdout['xs' \\n]; }\n", "123\n");
+  SAYS("START { var.many.int64 'none' = [];\n"
+       "  print.stdout[str:*<* 'none' str:*>* \\n]; }\n", "<>\n");
+  SAYS("START { var.many.many.int64 'g' = [[*1* *2*] [*3*]];\n"
+       "  print.stdout['g' \\n]; }\n", "123\n");
+  SAYS("START { var.many.str 'ws' = [*one* *two*];\n"
+       "  print.stdout['ws' \\n]; }\n", "onetwo\n");
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
+       "START { var.point 'p' = [*1* *2*];\n"
+       "  print.stdout['p' \\n]; }\n", "12\n");
+  // A struct inside a struct, and a `many` inside one.
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
+       "struct 'line' [point 'from', point 'to']\n"
+       "START { var.line 'l' = [point[*1* *2*] point[*3* *4*]];\n"
+       "  print.stdout['l' \\n]; }\n", "1234\n");
+  SAYS("struct 'bag' [many.int64 'ns', str 'label']\n"
+       "START { var.bag 'b' = [[*7* *8*] *tag*];\n"
+       "  print.stdout['b' \\n]; }\n", "78tag\n");
+  // One that grows, written after it has grown.
+  SAYS("START { var.mut.many-growing.int64 'g' = [*1* *2*];\n"
+       "  add 'g' = [*3*];\n"
+       "  print.stdout['g' \\n]; }\n", "123\n");
+  // The same characters into a `str`, because it is the same walk.
+  SAYS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+       "  print.stdout[str:*<* (convert-to-str[loan 'xs']) str:*>* \\n]; }\n",
+       "<123>\n");
+  SAYS("struct 'point' [int64 'x', int64 'y']\n"
+       "START { var.point 'p' = [*4* *5*];\n"
+       "  print.stdout[str:*<* (convert-to-str[loan 'p']) str:*>* \\n]; }\n",
+       "<45>\n");
+}
+
 void itWritesANumberIntoText() {
   SAYS("START { var.int64 'n' = [*42*];\n"
        "  var.str 's' = [str:*x = * convert-to-str['n']];\n"
@@ -729,6 +767,7 @@ int main() {
   itCountsWhatEachPlaceHolds();
   itHoldsSomethingOrNothing();
   itHoldsAGroupOfNamedThings();
+  itShowsWhatSeveralThingsHold();
   itWritesANumberIntoText();
   itLooksBehindALoan();
   itWritesThroughALoan();

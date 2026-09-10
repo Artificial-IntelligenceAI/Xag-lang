@@ -381,6 +381,7 @@ private:
     add("xag_str_count", i64, {ptr});
     add("xag_str_compare", i64, {ptr, ptr});
     add("xag_str_drop", voidTy, {ptr});
+    add("xag_str_push", voidTy, {ptr, ptr});
     add("xag_print", voidTy, {ptr});
     add("xag_print_bool", voidTy, {i32});
     auto *i128 = builder_.getInt128Ty();
@@ -773,7 +774,122 @@ private:
     builder_.CreateStore(value, slots_[s.place]);
   }
 
-  // Where a `many` sits, whether the local holds one or a loan of one.
+  // One value, written out, however deep it goes.
+  //
+  // A `many` writes every place it holds and a struct every field, one after
+  // another with nothing between them — the same as writing those values side
+  // by side in the print, because that is what it is. Anything between them is
+  // something the program writes.
+  //
+  // How many places there are is not known until it runs, so a `many` is a real
+  // loop here rather than a print per place worked out at build. A struct is
+  // written down, so its fields are.
+  // `into` is where the characters go: nothing, and they are written out; a
+  // `str`, and they are added to the end of it. One walk either way, because
+  // `convert-to-str` promises exactly the characters a print would write and
+  // two walks are two chances to drift.
+  void showAll(llvm::Value *where, const MirType &type, llvm::Value *into = nullptr) {
+    if (type.isLoan()) {
+      showAll(builder_.CreateLoad(builder_.getPtrTy(), where), type.lent(), into);
+      return;
+    }
+    if (type.many > 0) {
+      auto *whole = builder_.CreateLoad(many_, where);
+      auto *base = builder_.CreateExtractValue(whole, 0);
+      auto *length = builder_.CreateExtractValue(whole, 1);
+      const MirType inner = type.element();
+      auto *held = typeFor(inner);
+      llvm::Function *function = builder_.GetInsertBlock()->getParent();
+      auto *asking = llvm::BasicBlock::Create(context_, "showing", function);
+      auto *shows = llvm::BasicBlock::Create(context_, "shows", function);
+      auto *shown = llvm::BasicBlock::Create(context_, "shown", function);
+      auto *counter = scratch(builder_.getInt64Ty(), "showing");
+      builder_.CreateStore(builder_.getInt64(0), counter);
+      builder_.CreateBr(asking);
+
+      builder_.SetInsertPoint(asking);
+      auto *at = builder_.CreateLoad(builder_.getInt64Ty(), counter);
+      builder_.CreateCondBr(builder_.CreateICmpULT(at, length), shows, shown);
+
+      builder_.SetInsertPoint(shows);
+      showAll(builder_.CreateGEP(held, base, at), inner, into);
+      // Read again rather than reused: showing one place may itself have been a
+      // loop, and the block this ends in is not the block it began in.
+      auto *now = builder_.CreateLoad(builder_.getInt64Ty(), counter);
+      builder_.CreateStore(builder_.CreateAdd(now, builder_.getInt64(1)), counter);
+      builder_.CreateBr(asking);
+
+      builder_.SetInsertPoint(shown);
+      return;
+    }
+    if (type.held == Type::Struct) {
+      if (type.named >= mir_.shapes.size())
+        return;
+      auto *shell = typeFor(type);
+      const Shape &shape = mir_.shapes[type.named];
+      for (unsigned i = 0; i < shape.fields.size(); ++i)
+        showAll(builder_.CreateStructGEP(shell, where, i),
+                asMirType(shape.fields[i].type), into);
+      return;
+    }
+    const Type named = type.held;
+    if (named == Type::Str) {
+      if (into)
+        builder_.CreateCall(runtime_["xag_str_push"], {into, where});
+      else
+        builder_.CreateCall(runtime_["xag_print"], {where});
+      return;
+    }
+    auto *value = builder_.CreateLoad(typeFor(type), where);
+    auto *one = into ? scratch(str_, "one") : nullptr;
+    if (isDecimal(named))
+      builder_.CreateCall(
+          runtime_[into ? "xag_str_of_deci" : "xag_print_deci"],
+          into ? llvm::ArrayRef<llvm::Value *>{
+                     one, builder_.getInt32(static_cast<int>(widthOf(named))),
+                     builder_.CreateZExt(value, builder_.getInt128Ty())}
+               : llvm::ArrayRef<llvm::Value *>{
+                     builder_.getInt32(static_cast<int>(widthOf(named))),
+                     builder_.CreateZExt(value, builder_.getInt128Ty())});
+    else if (named == Type::Bin128)
+      builder_.CreateCall(runtime_[into ? "xag_str_of_bin128" : "xag_print_bin128"],
+                          into ? llvm::ArrayRef<llvm::Value *>{one, value}
+                               : llvm::ArrayRef<llvm::Value *>{value});
+    else if (isBinary(named))
+      builder_.CreateCall(
+          runtime_[into ? "xag_str_of_bin" : "xag_print_bin"],
+          into ? llvm::ArrayRef<llvm::Value *>{
+                     one, builder_.CreateFPExt(value, builder_.getDoubleTy()),
+                     builder_.getInt32(widthOf(named))}
+               : llvm::ArrayRef<llvm::Value *>{
+                     builder_.CreateFPExt(value, builder_.getDoubleTy()),
+                     builder_.getInt32(widthOf(named))});
+    else if (isWhole(named))
+      builder_.CreateCall(
+          runtime_[into ? "xag_str_of_int" : "xag_print_int"],
+          into ? llvm::ArrayRef<llvm::Value *>{one, widened(value, named),
+                                               builder_.getInt32(widthOf(named)),
+                                               builder_.getInt32(isSigned(named) ? 1 : 0)}
+               : llvm::ArrayRef<llvm::Value *>{widened(value, named),
+                                               builder_.getInt32(widthOf(named)),
+                                               builder_.getInt32(isSigned(named) ? 1 : 0)});
+    else if (named == Type::Bool)
+      builder_.CreateCall(
+          runtime_[into ? "xag_str_of_bool" : "xag_print_bool"],
+          into ? llvm::ArrayRef<llvm::Value *>{
+                     one, builder_.CreateZExt(value, builder_.getInt32Ty())}
+               : llvm::ArrayRef<llvm::Value *>{
+                     builder_.CreateZExt(value, builder_.getInt32Ty())});
+    else
+      return;
+    if (into) {
+      builder_.CreateCall(runtime_["xag_str_push"], {into, one});
+      builder_.CreateCall(runtime_["xag_str_drop"], {one});
+    }
+  }
+
+  // Where a value sits, whether the local holds it or a loan of it. Named for
+  // the `many` it was written for, and true of anything with an address.
   llvm::Value *manyPointer(const Operand &operand) {
     if (operand.kind == OperandKind::Written)
       return nullptr;
@@ -1318,6 +1434,12 @@ private:
         // and asking `loan int64` what type it is answers nothing at all.
         const MirType type = withoutLoan(typing(operand.type));
         const Type named = type.held;
+        // Several values rather than one, and how many is not settled here.
+        if (type.many > 0 || named == Type::Struct) {
+          if (auto *where = manyPointer(operand))
+            showAll(where, type);
+          continue;
+        }
         if (isDecimal(named))
           builder_.CreateCall(
               runtime_["xag_print_deci"],
@@ -1441,9 +1563,20 @@ private:
     // Written out by the very code that prints, so a number on the screen and
     // the same number in a `str` can never come out differently.
     if (value.callee == "convert-to-str") {
-      auto *out = builder_.CreateAlloca(str_, nullptr, "written");
+      auto *out = scratch(str_, "written");
       if (!value.operands.empty()) {
-        const Type named = withoutLoan(typing(value.operands[0].type)).held;
+        const MirType whole = withoutLoan(typing(value.operands[0].type));
+        // Several values rather than one: the same walk a print takes, with the
+        // characters going into this rather than out.
+        if (whole.many > 0 || whole.held == Type::Struct) {
+          builder_.CreateCall(runtime_["xag_str_from"],
+                              {out, llvm::Constant::getNullValue(builder_.getPtrTy()),
+                               builder_.getInt64(0)});
+          if (auto *where = manyPointer(value.operands[0]))
+            showAll(where, whole, out);
+          return builder_.CreateLoad(str_, out);
+        }
+        const Type named = whole.held;
         llvm::Value *held = behind(value.operands[0]);
         if (named == Type::Bool)
           builder_.CreateCall(runtime_["xag_str_of_bool"],

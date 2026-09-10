@@ -1543,9 +1543,66 @@ impl<'a> Writer<'a> {
         self.out.push_str("];\n");
     }
 
+    /// A `many` or a struct with nothing absent anywhere inside it. Showing one
+    /// writes every value it holds, which is the only way the oracle sees
+    /// inside what these programs build — an element at a time only ever asked
+    /// about the element it named.
+    fn showable_whole(&mut self) -> Vec<String> {
+        let mut seen: Vec<String> =
+            self.arrays(false).into_iter().map(|(name, _, _, _)| name).collect();
+        for scope in &self.scopes {
+            for var in scope {
+                let Some(which) = var.group else { continue };
+                if var.moved || var.lent || !var.parts_moved.is_empty() {
+                    continue;
+                }
+                if Self::shows_whole(&self.shapes, which, 0) {
+                    seen.push(var.name.clone());
+                }
+            }
+        }
+        seen
+    }
+
+    /// Whether every field of this struct, and of every struct inside it, is
+    /// there to be written. An absence is not a value, so showing one is
+    /// refused wherever it sits.
+    fn shows_whole(shapes: &[Shape], which: usize, depth: u32) -> bool {
+        if depth > 8 || which >= shapes.len() {
+            return false;
+        }
+        shapes[which].fields.iter().all(|(_, held)| match held {
+            Held::Maybe(_) => false,
+            Held::Group(inner) => Self::shows_whole(shapes, *inner, depth + 1),
+            _ => true,
+        })
+    }
+
     fn print(&mut self) {
         self.pad();
         self.out.push_str("print.stdout[");
+        // The whole of something that holds several values, sometimes: every
+        // value it holds, one after another. Both ways of writing it, because
+        // `convert-to-str` promises the same characters and the promise is
+        // worth asking about.
+        if self.rng.chance(30) {
+            let seen = self.showable_whole();
+            if !seen.is_empty() {
+                let at = self.rng.below(seen.len() as u32) as usize;
+                let name = seen[at].clone();
+                if self.rng.chance(35) {
+                    self.out.push_str("(convert-to-str[loan '");
+                    self.out.push_str(&name);
+                    self.out.push_str("']) ");
+                } else {
+                    self.out.push('\'');
+                    self.out.push_str(&name);
+                    self.out.push_str("' ");
+                }
+                self.out.push_str("\\n];\n");
+                return;
+            }
+        }
         match self.rng.below(3) {
             0 => {
                 self.out.push_str("str:*");

@@ -44,6 +44,59 @@ bool isLoanType(const std::string &spelled) {
   return spelled.rfind("loan ", 0) == 0 || spelled.rfind("loanmut ", 0) == 0;
 }
 
+bool opensWith(std::string_view spelled, std::string_view word) {
+  return spelled.rfind(word, 0) == 0;
+}
+
+MirType takeApart(std::string_view spelled, const Shapes &shapes) {
+  MirType out;
+  if (opensWith(spelled, "loanmut ")) {
+    out.lending = MirType::Lending::Write;
+    spelled.remove_prefix(std::string_view("loanmut ").size());
+  } else if (opensWith(spelled, "loan ")) {
+    out.lending = MirType::Lending::Read;
+    spelled.remove_prefix(std::string_view("loan ").size());
+  }
+  if (spelled.rfind("or-nothing ", 0) == 0) {
+    out.orNothing = true;
+    spelled.remove_prefix(std::string_view("or-nothing ").size());
+  }
+  while (spelled.rfind("many ", 0) == 0 || spelled.rfind("many-growing ", 0) == 0) {
+    if (spelled.rfind("many-growing ", 0) == 0) {
+      out.grows = true;
+      spelled.remove_prefix(std::string_view("many-growing ").size());
+    } else {
+      spelled.remove_prefix(std::string_view("many ").size());
+    }
+    ++out.many;
+  }
+  out.held = typeNamed(spelled);
+  if (out.held == Type::Unknown)
+    for (unsigned which = 0; which < shapes.size(); ++which)
+      if (shapes[which].name == spelled) {
+        out.held = Type::Struct;
+        out.named = which;
+        break;
+      }
+  return out;
+}
+
+// Every struct's fields, said the way the middle layer says types. A `Shape`
+// holds what the checker worked out, and nothing after the checker can read
+// that — showing a struct walks its fields and has to know what each one is.
+std::vector<std::vector<MirType>> fieldsOfEveryShape(const Shapes &shapes) {
+  std::vector<std::vector<MirType>> out;
+  out.reserve(shapes.size());
+  for (const Shape &shape : shapes) {
+    std::vector<MirType> fields;
+    fields.reserve(shape.fields.size());
+    for (const Field &field : shape.fields)
+      fields.push_back(takeApart(spell(field.type), shapes));
+    out.push_back(std::move(fields));
+  }
+  return out;
+}
+
 class Builder {
 public:
   Builder(const Program &program, const CheckResult &checked)
@@ -228,10 +281,6 @@ private:
   // Taking a word off the front, counted from the word rather than by hand.
   // Renaming `loan` to `loan` left the hand-written 4 behind, and a type came
   // back with a space on the front and meant nothing at all.
-  static bool opensWith(std::string_view spelled, std::string_view word) {
-    return spelled.rfind(word, 0) == 0;
-  }
-
   static std::string withoutLoan(const std::string &spelled) {
     if (opensWith(spelled, "loanmut "))
       return spelled.substr(std::string_view("loanmut ").size());
@@ -259,37 +308,7 @@ private:
   }
 
   MirType takeApart(std::string_view spelled) const {
-    MirType out;
-    if (opensWith(spelled, "loanmut ")) {
-      out.lending = MirType::Lending::Write;
-      spelled.remove_prefix(std::string_view("loanmut ").size());
-    } else if (opensWith(spelled, "loan ")) {
-      out.lending = MirType::Lending::Read;
-      spelled.remove_prefix(std::string_view("loan ").size());
-    }
-    if (spelled.rfind("or-nothing ", 0) == 0) {
-      out.orNothing = true;
-      spelled.remove_prefix(std::string_view("or-nothing ").size());
-    }
-    while (spelled.rfind("many ", 0) == 0 ||
-           spelled.rfind("many-growing ", 0) == 0) {
-      if (spelled.rfind("many-growing ", 0) == 0) {
-        out.grows = true;
-        spelled.remove_prefix(std::string_view("many-growing ").size());
-      } else {
-        spelled.remove_prefix(std::string_view("many ").size());
-      }
-      ++out.many;
-    }
-    out.held = typeNamed(spelled);
-    if (out.held == Type::Unknown)
-      for (unsigned which = 0; which < checked_.shapes.size(); ++which)
-        if (checked_.shapes[which].name == spelled) {
-          out.held = Type::Struct;
-          out.named = which;
-          break;
-        }
-    return out;
+    return xag::takeApart(spelled, checked_.shapes);
   }
 
   unsigned addLocal(const std::string &name, TypeRef type, bool copyable) {
@@ -1165,6 +1184,7 @@ MirResult build(const Source &source, const Program &program,
   (void)source; // spans in the IR already carry everything a diagnostic needs
   MirResult result = Builder(program, checked).run();
   result.mir.shapes = checked.shapes;
+  result.mir.fieldTypes = fieldsOfEveryShape(checked.shapes);
   return result;
 }
 

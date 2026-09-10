@@ -176,6 +176,71 @@ private:
   // ---- values
 
   // Following a loan to the slot it names. A loan of a loan is still one slot.
+  // One value, written out.
+  //
+  // A `many` writes every place it holds and a struct every field, one after
+  // another with nothing between them — which is not a decision about
+  // separators dodged, but the same thing as writing those values side by side
+  // in the print, because that is what it is. Anything between them is
+  // something the program writes.
+  // `into` is where the characters go: nothing, and they are written out; a
+  // text, and they are added to the end of it. One walk either way, because
+  // `convert-to-str` promises exactly the characters a print would write and
+  // two walks are two chances to drift.
+  void show(Value &given, MirType type, XagStr *into = nullptr) {
+    Value *at = behind(given);
+    if (!at)
+      return;
+    if (type.many > 0) {
+      if (at->places)
+        for (Value &one : *at->places)
+          show(one, type.element(), into);
+      return;
+    }
+    if (type.held == Type::Struct) {
+      if (!at->places || type.named >= mir_.fieldTypes.size())
+        return;
+      const std::vector<MirType> &fields = mir_.fieldTypes[type.named];
+      for (unsigned i = 0; i < at->places->size() && i < fields.size(); ++i)
+        show((*at->places)[i], fields[i], into);
+      return;
+    }
+    if (!into) {
+      if (at->kind == Value::Kind::Text)
+        xag_print(&at->text);
+      else if (at->kind == Value::Kind::Deci)
+        xag_print_deci(widthOf(type.held), at->wide);
+      else if (at->kind == Value::Kind::Wide)
+        xag_print_bin128(at->wide);
+      else if (at->kind == Value::Kind::Real)
+        xag_print_bin(at->real, widthOf(type.held));
+      else if (at->kind == Value::Kind::Number) {
+        if (isWhole(type.held))
+          xag_print_int(at->number, widthOf(type.held), isSigned(type.held) ? 1 : 0);
+        else
+          xag_print_bool(at->number != 0);
+      }
+      return;
+    }
+    if (at->kind == Value::Kind::Text) {
+      xag_str_push(into, &at->text);
+      return;
+    }
+    XagStr one{nullptr, 0, 0};
+    if (at->kind == Value::Kind::Deci)
+      xag_str_of_deci(&one, widthOf(type.held), at->wide);
+    else if (at->kind == Value::Kind::Wide)
+      xag_str_of_bin128(&one, at->wide);
+    else if (at->kind == Value::Kind::Real)
+      xag_str_of_bin(&one, at->real, widthOf(type.held));
+    else if (isWhole(type.held))
+      xag_str_of_int(&one, at->number, widthOf(type.held), isSigned(type.held) ? 1 : 0);
+    else
+      xag_str_of_bool(&one, at->number != 0);
+    xag_str_push(into, &one);
+    xag_str_drop(&one);
+  }
+
   Value *behind(Value &value) {
     Value *at = &value;
     // A loan chain is short in any program that means anything. Counting the
@@ -728,22 +793,7 @@ private:
     if (value.callee == "print.stdout") {
       for (const Operand &operand : value.operands) {
         Value piece = read(operand);
-        Value *at = behind(piece);
-        if (at && at->kind == Value::Kind::Text)
-          xag_print(&at->text);
-        else if (at && at->kind == Value::Kind::Deci)
-          xag_print_deci(widthOf(kindOf(operand.type)), at->wide);
-        else if (at && at->kind == Value::Kind::Wide)
-          xag_print_bin128(at->wide);
-        else if (at && at->kind == Value::Kind::Real)
-          xag_print_bin(at->real, widthOf(kindOf(operand.type)));
-        else if (at && at->kind == Value::Kind::Number) {
-          const Type named = kindOf(operand.type);
-          if (isWhole(named))
-            xag_print_int(at->number, widthOf(named), isSigned(named) ? 1 : 0);
-          else
-            xag_print_bool(at->number != 0);
-        }
+        show(piece, shapeOf(operand.type).lent());
         endValue(piece);
       }
       return Value{};
@@ -849,6 +899,13 @@ private:
       Value answer;
       answer.kind = Value::Kind::Text;
       answer.owns = true; // it is made here, so it is let go of here
+      const MirType whole = shapeOf(value.operands[0].type).lent();
+      if (whole.many > 0 || whole.held == Type::Struct) {
+        xag_str_from(&answer.text, "", 0);
+        show(piece, whole, &answer.text);
+        endValue(piece);
+        return answer;
+      }
       const Type given = kindOf(value.operands[0].type);
       if (!at) {
         xag_str_from(&answer.text, "", 0);
