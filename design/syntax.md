@@ -1443,12 +1443,33 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **A number inside a case's own padding.** A `one-of` writes into a spare byte
-  where exactly one case holds something, and otherwise keeps its number just
-  past the widest case. Rust goes further: it puts the tag inside a case's own
-  padding even where two cases hold something, which wants the payload written
-  field by field — written whole, the store would clobber the padding the tag is
-  in. `Option<String>` is twenty-four bytes there and thirty-two here.
+- **A number in room the cases do not reach.** Done, and in two ways. Where
+  exactly one case holds something and that something has a value it never
+  takes, the number is written there and there is no number of its own: a
+  `bool` uses two of its byte, and a `str`'s pointer is somewhere for every
+  `str` there is, so nowhere means the other case. And where two cases hold
+  something, the number goes in padding a case was going to have anyway.
+
+  `one-of [str 'some', nothing 'none']` and `or-nothing str` are twenty-four
+  bytes, which is a `str` — the same as Rust's `Option<String>`. `one-of [p 'x',
+  int64 'y']`, where `p` is an `int64` and a `bool`, is sixteen rather than
+  twenty-four.
+
+  This said the gap was about padding and it was not: `Option<String>` was
+  thirty-two bytes here because an empty `str` and an absent one were both a
+  null pointer, so no pattern was free to tell them apart. The runtime keeps
+  every empty `str` pointing at one static byte now, and the pattern is free.
+
+  It also said the padding case wants the payload written field by field.
+  It does not — it wants it written *first*. A store of the whole value writes
+  its own padding as it likes, so the number goes in after it and survives.
+  Nothing writes a value into a `one-of` that already stands: one is built whole
+  and read after, never filled in twice, and that is the assumption the layout
+  rests on.
+
+  What is left is a case that reaches every byte it has and leaves nothing
+  over — `one-of [str 'text', int64 'number']` is thirty-two, honestly, because
+  a `str` uses all twenty-four of its own.
 - **Visibility.** `export` and `program` wait on there being more than one file.
 - **`wrapping` on a sum with no name.** The word is written where a name is
   declared, and a sum happens between values. `('n' x *4*)` inside a comparison

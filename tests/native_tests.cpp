@@ -102,6 +102,36 @@ void rejects(const std::string &program, const std::string &unwanted, int line) 
 
 // A `print` says where it goes, and the backend has to say so too — one call
 // naming the stream in front of the pieces, per print statement.
+// What a `one-of` costs. These are the sizes, not a proxy for them: a layout
+// that quietly grew would still run correctly and nothing else here would say
+// a word about it.
+void itKeepsASumAsSmallAsItCan() {
+  // One case holds something and its pointer is somewhere for every `str` there
+  // is — so nowhere means the other case, and there is no number of its own.
+  // Twenty-four bytes, which is a `str`.
+  EMITS("one-of 'maybe' [str 'some', nothing 'none']\n"
+        "START { var.maybe 'a' = [some:*hi*];\n"
+        "  when 'a' { is some 'x' { print.stdout['x' \n]; } is none { } } }\n",
+        "%xag.maybe = type { [3 x i64] }");
+  // The same for `or-nothing`, which is the other way of writing it.
+  EMITS("START { var.or-nothing.str 'a' = [*hi*];\n"
+        "  when 'a' { is 'x' { print.stdout['x' \n]; } is nothing { } } }\n",
+        "%XagStr = type { ptr, i64, i64 }");
+  // Two cases hold something, so there is a number — and it goes in padding a
+  // case was going to have anyway. Sixteen bytes rather than twenty-four.
+  EMITS("struct 'p' [int64 'a', bool 'b']\n"
+        "one-of 'k' [p 'x', int64 'y']\n"
+        "START { var.k 'a' = [y:*1*];\n"
+        "  when 'a' { is x 'v' { } is y 'v' { print.stdout['v' \n]; } } }\n",
+        "%xag.k = type { [2 x i64] }");
+  // And where no case leaves a gap, the number has room of its own and the type
+  // is honestly bigger. A `str` reaches every byte it has.
+  EMITS("one-of 'm' [str 'text', int64 'number']\n"
+        "START { var.m 'a' = [number:*2*];\n"
+        "  when 'a' { is text 'v' { } is number 'v' { print.stdout['v' \n]; } } }\n",
+        "%xag.m = type { [4 x i64] }");
+}
+
 void itSaysWhichStreamAPrintGoesTo() {
   EMITS("START { print.stderr[str:*complaint* \n]; }\n", "xag_writes_to");
   EMITS("START { print.stdout[str:*answer* \n]; }\n", "xag_writes_to");
@@ -485,6 +515,7 @@ void aWatchedBuildStopsAtTheWorldOutside() {
 } // namespace
 
 int main() {
+  itKeepsASumAsSmallAsItCan();
   itSaysWhichStreamAPrintGoesTo();
   itEmitsWholePrograms();
   itEmitsFunctionsAndLoans();

@@ -60,8 +60,21 @@ char *take(uint64_t bytes) {
   return memory;
 }
 
+// Where empty text points. A `str` that is here and empty and a `str` that is
+// not here at all were both a null pointer, so no bit pattern was free to tell
+// them apart and anything that may hold nothing had to carry a flag beside it.
+// Empty text points here instead, and a null pointer means nothing at all —
+// which is what lets `or-nothing str` be as wide as a `str`.
+//
+// One byte rather than none, because two objects of size zero may share an
+// address and this one has to be its own.
+char nothingAtAll[1] = {0};
+
+bool borrowed(const char *memory) { return memory == nothingAtAll; }
+
 void release(char *memory) {
-  if (!memory)
+  // Never the static empty: nobody took it, so nobody gives it back.
+  if (!memory || borrowed(memory))
     return;
   std::free(memory);
   --live;
@@ -100,7 +113,7 @@ extern "C" {
 void xag_str_from(XagStr *out, const char *bytes, uint64_t length) {
   if (!out)
     return;
-  *out = XagStr{nullptr, length, length};
+  *out = XagStr{nothingAtAll, length, length};
   if (length == 0)
     return;
   out->bytes = take(length);
@@ -114,7 +127,7 @@ void xag_str_join(XagStr *out, const XagStr *pieces, uint64_t count) {
   for (uint64_t i = 0; i < count; ++i)
     total += pieces[i].length;
 
-  *out = XagStr{nullptr, total, total};
+  *out = XagStr{nothingAtAll, total, total};
   if (total == 0)
     return;
   out->bytes = take(total);
@@ -136,7 +149,9 @@ void xag_str_push(XagStr *text, const XagStr *tail) {
     if (capacity < wanted)
       capacity = wanted;
     char *grown = take(capacity);
-    if (text->bytes) {
+    // The static empty is not memory anybody took, so there is nothing in it to
+    // carry over and nothing to give back.
+    if (text->bytes && !borrowed(text->bytes)) {
       std::memcpy(grown, text->bytes, text->length);
       release(text->bytes);
     }
@@ -267,7 +282,10 @@ void xag_str_drop(XagStr *text) {
   if (!text)
     return;
   release(text->bytes);
-  text->bytes = nullptr;
+  // Empty text, not absent text. A slot that has been let go of still holds a
+  // `str`, and a `str` never holds a null pointer — that pattern means there is
+  // nothing there at all, which is a different thing and somebody else's to say.
+  text->bytes = nothingAtAll;
   text->length = 0;
   text->capacity = 0;
 }
@@ -752,7 +770,9 @@ int32_t xag_read_line(XagStr *out) {
   const auto got = ::getline(&line, &room, input());
   if (got < 0) {
     std::free(line);
-    out->bytes = nullptr;
+    // Nothing was read, and the `str` handed back is empty rather than absent —
+    // whether there was a line is the answer, said separately.
+    out->bytes = nothingAtAll;
     out->length = 0;
     out->capacity = 0;
     return 0;

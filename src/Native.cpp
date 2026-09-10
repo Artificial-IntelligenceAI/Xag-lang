@@ -39,6 +39,16 @@ std::string symbolFor(const std::string &name) {
 bool isLoan(const MirType &type) { return type.isLoan(); }
 bool holdsMany(const MirType &type) { return type.many && !type.orNothing; }
 bool mayBeNothing(const MirType &type) { return type.orNothing; }
+
+// Whether what this may hold has a bit pattern free to mean "not here", so the
+// absence needs no flag beside the value. A `str` is the one: it is here and
+// empty or it is here and full, and either way its pointer is somewhere — the
+// runtime keeps every empty `str` pointing at one static byte for exactly this.
+// So a null pointer is a pattern no `str` ever has, and `or-nothing str` is as
+// wide as a `str` rather than a word wider.
+bool absenceFitsInside(const MirType &type) {
+  return type.orNothing && !type.isLoan() && !type.many && type.held == Type::Str;
+}
 MirType withoutLoan(const MirType &type) { return type.lent(); }
 MirType within(const MirType &type) { return type.within(); }
 MirType elementOf(const MirType &type) { return type.element(); }
@@ -211,15 +221,22 @@ private:
       return;
     }
     if (mayBeNothing(bare)) {
-      // What is inside goes only when there is something inside. The flag is in
-      // the value rather than in a local beside it.
+      // What is inside goes only when there is something inside. What says
+      // whether there is sits in the value rather than in a local beside it —
+      // the flag, or the pointer itself where the pointer can say it.
       llvm::Function *function = builder_.GetInsertBlock()->getParent();
       auto *letgo = llvm::BasicBlock::Create(context_, "letgo", function);
       auto *after = llvm::BasicBlock::Create(context_, "kept", function);
       auto *whole = builder_.CreateLoad(typeFor(bare), at);
-      builder_.CreateCondBr(builder_.CreateExtractValue(whole, 0), letgo, after);
+      const bool inside = absenceFitsInside(bare);
+      auto *there = inside
+                        ? builder_.CreateICmpNE(
+                              builder_.CreateExtractValue(whole, 0),
+                              llvm::Constant::getNullValue(builder_.getPtrTy()))
+                        : builder_.CreateExtractValue(whole, 0);
+      builder_.CreateCondBr(there, letgo, after);
       builder_.SetInsertPoint(letgo);
-      letGo(within(bare), builder_.CreateStructGEP(typeFor(bare), at, 1));
+      letGo(within(bare), inside ? at : builder_.CreateStructGEP(typeFor(bare), at, 1));
       builder_.CreateBr(after);
       builder_.SetInsertPoint(after);
       return;
@@ -261,9 +278,7 @@ private:
         if (!ownsAnything(cases[room.holder]))
           return;
         auto *mine = llvm::BasicBlock::Create(context_, "letgocase", function);
-        auto *saw = builder_.CreateLoad(builder_.getInt8Ty(), whichCaseAt(bare, at));
-        builder_.CreateCondBr(
-            builder_.CreateICmpULT(saw, builder_.getInt8(room.used)), mine, after);
+        builder_.CreateCondBr(holdsItsCase(room, whichCaseAt(bare, at)), mine, after);
         builder_.SetInsertPoint(mine);
         letGo(cases[room.holder], at);
         builder_.CreateBr(after);
@@ -331,10 +346,13 @@ private:
   llvm::Type *typeFor(const MirType &type) {
     if (type.isLoan())
       return builder_.getPtrTy();
+    // Where a pattern is free to mean "not here", the value is the whole of it.
+    if (absenceFitsInside(type))
+      return typeFor(type.within());
     if (type.orNothing)
-      // Whether it is there, and what it is. Two fields, because a `str` that
-      // is absent and a `str` that is empty are different things and no bit
-      // pattern of one is free to mean the other.
+      // Whether it is there, and what it is. Two fields, because for everything
+      // else no bit pattern of the value is free to mean the absence — an
+      // `int64` that is absent and an `int64` holding zero are different things.
       return llvm::StructType::get(context_,
                                    {builder_.getInt1Ty(), typeFor(type.within())});
     if (type.many)
@@ -370,16 +388,31 @@ private:
     bool any = false;
     uint64_t at = 0;
     uint64_t used = 0;
+    // How wide the field the spare values live in is, and which way round they
+    // run. Ordinarily the values from `used` up are free and a byte holds them.
+    // A pointer is the other way: the only value it never has is none at all,
+    // so zero is the one free value and everything else is the case that holds
+    // something — which is room for exactly one case that holds nothing.
+    unsigned width = 1;
+    bool zeroFree = false;
   };
 
   Spare spareIn(const MirType &type) {
     if (type.isLoan() || type.orNothing || type.many)
       return {};
     if (type.held == Type::Bool)
-      return {true, 0, 2};
+      return {true, 0, 2, 1, false};
+    if (type.held == Type::Str) {
+      // Its pointer, which is somewhere for every `str` there is — the runtime
+      // keeps even an empty one pointing at a static byte. So nowhere is a
+      // pattern no `str` has, and it is free to mean a case that holds nothing.
+      const uint64_t wide =
+          module_.getDataLayout().getPointerSize(); // the bytes field, at the front
+      return {true, 0, 0, static_cast<unsigned>(wide), true};
+    }
     if (type.held == Type::OneOf) {
       const Room &room = roomOf(type.named);
-      return {true, room.at, room.used};
+      return {true, room.at, room.used, room.width, room.zeroFree};
     }
     if (type.held == Type::Struct && type.named < mir_.shapes.size()) {
       auto *shell = llvm::cast<llvm::StructType>(structFor(type.named));
@@ -412,7 +445,9 @@ private:
     uint64_t at = 0;            // where the number sits
     uint64_t used = 0;          // below this means the case that holds something
     llvm::IntegerType *is = nullptr; // what the number is kept as
-    bool spare = false;         // written into a byte something else owns
+    bool spare = false;         // written into room something else owns
+    unsigned width = 1;         // how wide that room is, in bytes
+    bool zeroFree = false;      // zero is the one free value, not the ones above
     unsigned holder = 0;        // the case that holds something, when spare
     std::vector<unsigned> empty; // the others, in the order they are written
   };
@@ -448,20 +483,41 @@ private:
     Room room;
     const unsigned empties = static_cast<unsigned>(cases.size()) - holding;
     const Spare spare = holding == 1 ? spareIn(cases[holder]) : Spare{};
-    if (holding == 1 && spare.any && spare.used + empties <= 256) {
+    // Room enough for the cases that hold nothing: the values above the mark
+    // where they run upwards, and exactly one where zero is the only one free.
+    const bool fits = spare.zeroFree ? empties == 1 : spare.used + empties <= 256;
+    if (holding == 1 && spare.any && fits) {
       room.spare = true;
       room.at = spare.at;
       room.used = spare.used;
+      room.width = spare.width;
+      room.zeroFree = spare.zeroFree;
       room.holder = holder;
       for (unsigned i = 0; i < cases.size(); ++i)
         if (i != holder)
           room.empty.push_back(i);
     } else {
       auto *tag = tagFor(static_cast<unsigned>(sum.fields.size()));
-      room.at = widest;
-      room.used = sum.fields.size();
       room.is = tag;
-      widest += module_.getDataLayout().getTypeAllocSize(tag);
+      room.used = sum.fields.size();
+      // Inside the padding a case was going to have anyway, where there is
+      // some. Every case reaches around it, so the number costs nothing at all
+      // — `one-of [p 'x', int64 'y']` where `p` is an `int64` and a `bool` is
+      // sixteen bytes rather than twenty-four.
+      //
+      // What makes this safe is the order things are written in: the value goes
+      // in first and the number after it, so a store of the whole value writing
+      // its own padding as it likes cannot reach the number. Nothing writes a
+      // value into a `one-of` that already stands — one is built whole and read
+      // after, never filled in twice.
+      const uint64_t tagIs = module_.getDataLayout().getTypeAllocSize(tag);
+      const uint64_t spot = paddingFreeInEveryCase(cases, widest);
+      if (spot + tagIs <= widest) {
+        room.at = spot;
+      } else {
+        room.at = widest;
+        widest += tagIs;
+      }
     }
     const uint64_t whole = ((widest + strictest - 1) / strictest) * strictest;
     auto *made = llvm::StructType::create(context_, "xag." + sum.name);
@@ -478,6 +534,56 @@ private:
   llvm::Type *sumFor(unsigned which) { return roomOf(which).shell; }
 
   // Where the number saying which case sits.
+  // Which bytes of a value its fields actually reach. What is left over is
+  // padding the alignment insisted on, which no case ever reads or writes — and
+  // a `one-of` can keep the number saying which case it is in there, for
+  // nothing. Asked of the machine's own layout rather than worked out by hand.
+  //
+  // An array is taken whole: the gaps between its elements belong to it, and a
+  // `one-of`'s own room is an array, so a nested one is spent already.
+  void marksUsed(llvm::Type *type, uint64_t at, std::vector<bool> &used) const {
+    if (auto *shape = llvm::dyn_cast<llvm::StructType>(type)) {
+      const llvm::StructLayout *laid = module_.getDataLayout().getStructLayout(shape);
+      for (unsigned i = 0; i < shape->getNumElements(); ++i)
+        marksUsed(shape->getElementType(i), at + laid->getElementOffset(i), used);
+      return;
+    }
+    // Everything else is solid: what it is stored as is what it uses.
+    const uint64_t size = module_.getDataLayout().getTypeStoreSize(type);
+    for (uint64_t b = 0; b < size; ++b)
+      if (at + b < used.size())
+        used[at + b] = true;
+  }
+
+  // A byte inside the room that no case reaches. Answers `widest` when there is
+  // none, which is where the number goes when it has to have room of its own.
+  uint64_t paddingFreeInEveryCase(const std::vector<MirType> &cases, uint64_t widest) {
+    if (widest == 0)
+      return 0;
+    std::vector<bool> used(widest, false);
+    for (const MirType &one : cases) {
+      if (one.held == Type::Nothing)
+        continue; // it holds nothing, so it reaches nothing
+      marksUsed(typeFor(one), 0, used);
+    }
+    for (uint64_t at = 0; at < widest; ++at)
+      if (!used[at])
+        return at;
+    return widest;
+  }
+
+  // Whether a `one-of` kept in room something else owns is in the case that
+  // holds something. Read the room as one number and ask it the way round its
+  // shape says: below the mark where the free values run upwards, and not zero
+  // where zero is the only free value there is.
+  llvm::Value *holdsItsCase(const Room &room, llvm::Value *at) {
+    auto *as = builder_.getIntNTy(room.width * 8);
+    auto *saw = builder_.CreateLoad(as, at);
+    return room.zeroFree
+               ? builder_.CreateICmpNE(saw, llvm::ConstantInt::get(as, 0))
+               : builder_.CreateICmpULT(saw, llvm::ConstantInt::get(as, room.used));
+  }
+
   llvm::Value *whichCaseAt(const MirType &of, llvm::Value *where) {
     return builder_.CreateConstInBoundsGEP1_64(builder_.getInt8Ty(), where,
                                                roomOf(of.named).at);
@@ -914,7 +1020,8 @@ private:
     // A value going into something that may hold nothing is that value, held.
     // The absence writes itself; everything else has to be wrapped on the way.
     const MirType &into = localType(s.place);
-    if (mayBeNothing(into) && !mayBeNothing(typing(s.value.type))) {
+    if (mayBeNothing(into) && !mayBeNothing(typing(s.value.type)) &&
+        !absenceFitsInside(into)) {
       auto *shell = llvm::UndefValue::get(typeFor(into));
       auto *held = builder_.CreateInsertValue(shell, builder_.getInt1(true), 0);
       builder_.CreateStore(builder_.CreateInsertValue(held, value, 1),
@@ -1331,6 +1438,11 @@ private:
         return nullptr;
       if (isLoan(of))
         whole = builder_.CreateLoad(typeFor(withoutLoan(of)), whole);
+      // A `str`'s pointer says it: somewhere means here, nowhere means not.
+      if (absenceFitsInside(withoutLoan(of)))
+        return builder_.CreateICmpNE(
+            builder_.CreateExtractValue(whole, 0),
+            llvm::Constant::getNullValue(builder_.getPtrTy()));
       return builder_.CreateExtractValue(whole, 0);
     }
 
@@ -1350,7 +1462,8 @@ private:
                                : slots_[value.operands[0].local];
       // A `one-of`'s room starts where the value does; an `or-nothing` keeps
       // what it holds behind the truth saying whether it is there.
-      auto *at = withoutLoan(of).held == Type::OneOf
+      auto *at = withoutLoan(of).held == Type::OneOf ||
+                         absenceFitsInside(withoutLoan(of))
                      ? where
                      : builder_.CreateStructGEP(typeFor(withoutLoan(of)), where, 1);
       return copiesNamed(held) ? builder_.CreateLoad(typeFor(held), at)
@@ -1373,10 +1486,18 @@ private:
       // Written into a byte something else owns: everything below the mark is
       // the case that holds something, and what is above it counts off the
       // others in the order the type declares them.
-      auto *saw = builder_.CreateLoad(builder_.getInt8Ty(), whichCaseAt(bare, where));
-      auto *holds = builder_.CreateICmpULT(saw, builder_.getInt8(room.used));
+      auto *at = whichCaseAt(bare, where);
+      auto *holds = holdsItsCase(room, at);
+      // Where zero is the only free value there is one case that holds nothing
+      // and no counting to do: it is that one or it is the holder.
+      if (room.zeroFree)
+        return builder_.CreateSelect(holds,
+                                     llvm::ConstantInt::get(wide, room.holder),
+                                     llvm::ConstantInt::get(wide, room.empty.front()));
+      auto *as = builder_.getIntNTy(room.width * 8);
+      auto *saw = builder_.CreateLoad(as, at);
       auto *rank = builder_.CreateZExt(
-          builder_.CreateSub(saw, builder_.getInt8(room.used)), wide);
+          builder_.CreateSub(saw, llvm::ConstantInt::get(as, room.used)), wide);
       llvm::Value *which = llvm::ConstantInt::get(wide, room.empty.back());
       for (unsigned i = static_cast<unsigned>(room.empty.size()) - 1; i-- > 0;)
         which = builder_.CreateSelect(
@@ -1394,22 +1515,30 @@ private:
       auto *shell = typeFor(whole);
       auto *made = scratch(shell, "made");
       builder_.CreateStore(llvm::Constant::getNullValue(shell), made);
+      // The value goes in at the front, where every case's does — and it goes in
+      // *first*, because the number saying which case this is may sit in padding
+      // the value's own store writes as it pleases.
+      if (!value.operands.empty())
+        builder_.CreateStore(read(value.operands[0]), made);
       if (!room.spare) {
         builder_.CreateStore(llvm::ConstantInt::get(room.is, value.local),
                              whichCaseAt(whole, made));
-      } else if (value.local != room.holder) {
+      } else if (value.local != room.holder && !room.zeroFree) {
         // One of the ones that hold nothing, said in a value the case that does
         // hold something cannot have.
         unsigned rank = 0;
         for (unsigned i = 0; i < room.empty.size(); ++i)
           if (room.empty[i] == value.local)
             rank = i;
-        builder_.CreateStore(builder_.getInt8(room.used + rank),
-                             whichCaseAt(whole, made));
+        builder_.CreateStore(
+            llvm::ConstantInt::get(builder_.getIntNTy(room.width * 8),
+                                   room.used + rank),
+            whichCaseAt(whole, made));
       }
-      // The value goes in at the front, where every case's does.
-      if (!value.operands.empty())
-        builder_.CreateStore(read(value.operands[0]), made);
+      // Where zero is the free value, nothing is written for the case that
+      // holds nothing at all: the room was zeroed on the way in, and that is
+      // already what it says. The case that holds something says so by the
+      // value going in, whose pointer is somewhere.
       return builder_.CreateLoad(shell, made);
     }
 
@@ -1725,8 +1854,15 @@ private:
       builder_.CreateStore(llvm::Constant::getNullValue(str_), line);
       auto *got = builder_.CreateCall(runtime_["xag_read_line"], {line});
       auto *there = builder_.CreateICmpNE(got, builder_.getInt32(0));
+      auto *read = builder_.CreateLoad(str_, line);
+      // No line is a `str` pointing nowhere, which is what the absence is when
+      // it fits inside. The runtime leaves an empty one behind either way, and
+      // an empty one owns nothing, so there is nothing dropped by not using it.
+      if (absenceFitsInside(typing(value.type)))
+        return builder_.CreateSelect(there, read,
+                                     llvm::Constant::getNullValue(shell));
       auto *held = builder_.CreateInsertValue(llvm::UndefValue::get(shell), there, 0);
-      return builder_.CreateInsertValue(held, builder_.CreateLoad(str_, line), 1);
+      return builder_.CreateInsertValue(held, read, 1);
     }
 
     if (value.callee == "arguments") {

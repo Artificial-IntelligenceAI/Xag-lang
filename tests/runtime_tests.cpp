@@ -41,9 +41,45 @@ void textIsCopiedAndFreed() {
   CHECK(xag_live_allocations() == before + 1);
   xag_str_drop(&hello);
   CHECK(xag_live_allocations() == before);
-  CHECK(hello.bytes == nullptr);
+  // Empty text, not absent text: what was let go of still holds a `str`.
+  CHECK(hello.bytes != nullptr);
+  CHECK(hello.length == 0);
   // Dropping what holds nothing is not a second drop.
   xag_str_drop(&hello);
+  CHECK(xag_live_allocations() == before);
+}
+
+// A `str` that is here never holds a null pointer, whatever it holds. That is
+// what leaves the pattern free to mean a `str` that is not here at all — which
+// is how `or-nothing str` is as wide as a `str` rather than a word wider.
+void textIsNeverANullPointer() {
+  const int64_t before = xag_live_allocations();
+
+  XagStr empty = of("");
+  CHECK(empty.bytes != nullptr);
+  CHECK(empty.length == 0);
+  // And it took nothing, so there is nothing to give back.
+  CHECK(xag_live_allocations() == before);
+  xag_str_drop(&empty);
+  CHECK(xag_live_allocations() == before);
+
+  // Joining nothing with nothing is still somewhere.
+  XagStr pieces[2] = {of(""), of("")};
+  XagStr joined{};
+  xag_str_join(&joined, pieces, 2);
+  CHECK(joined.bytes != nullptr);
+  CHECK(joined.length == 0);
+  xag_str_drop(&joined);
+
+  // Growing empty text takes memory of its own rather than writing into the
+  // one byte every empty `str` in the program is pointing at.
+  XagStr grown = of("");
+  XagStr tail = of("more");
+  xag_str_push(&grown, &tail);
+  CHECK(read(grown) == "more");
+  CHECK(grown.bytes != nullptr);
+  xag_str_drop(&grown);
+  xag_str_drop(&tail);
   CHECK(xag_live_allocations() == before);
 }
 
@@ -367,6 +403,7 @@ void nothingIsLeftHolding() {
 
 int main() {
   textIsCopiedAndFreed();
+  textIsNeverANullPointer();
   joiningBuildsSomethingNew();
   textGrowsWhereItStands();
   countingAgreesWithUnicodeItself();

@@ -299,6 +299,38 @@ void onShowingWhatSeveralThingsHold() {
 }
 
 // A `print` says where it goes, and both engines have to send it there.
+// Text that is here and empty against text that is not here at all. The two
+// were one bit pattern until a `str` was made never to point nowhere, and the
+// backend now spends that: `or-nothing str` is as wide as a `str`. If the
+// distinction were lost, this is where it would show.
+void onEmptyTextAgainstNoTextAtAll() {
+  AGREE("START { var.or-nothing.str 'a' = [**];\n"
+        "  when 'a' { is 'x' { print.stdout[str:*here[* 'x' str:*]* \\n]; }\n"
+        "             is nothing { print.stdout[str:*none* \\n]; } } }\n");
+  AGREE("START { var.or-nothing.str 'a' = [nothing];\n"
+        "  when 'a' { is 'x' { print.stdout[str:*here[* 'x' str:*]* \\n]; }\n"
+        "             is nothing { print.stdout[str:*none* \\n]; } } }\n");
+  AGREE("one-of 'maybe' [str 'some', nothing 'none']\n"
+        "START { var.maybe 'a' = [some:**]; var.maybe 'b' = [none];\n"
+        "  when 'a' { is some 'x' { print.stdout[str:*a[* 'x' str:*]* \\n]; }\n"
+        "             is none { print.stdout[str:*a none* \\n]; } }\n"
+        "  when 'b' { is some 'x' { print.stdout[str:*b[* 'x' str:*]* \\n]; }\n"
+        "             is none { print.stdout[str:*b none* \\n]; } } }\n");
+  // Joined and counted, so an empty one that owns nothing is still a value.
+  AGREE("START { var.str 'e' = [**]; var.str 'j' = ['e' 'e'];\n"
+        "  print.stdout[(count[loan 'j']) str:*|* 'j' str:*|* \\n]; }\n");
+  // The number lives in a case's padding here, and every case has to reach
+  // around it — including one holding a struct and one holding nothing.
+  AGREE("struct 'p' [int64 'a', bool 'b']\n"
+        "one-of 'k' [p 'x', int64 'y', nothing 'z']\n"
+        "START { var.k 'a' = [x:p[*7* *true*]]; var.k 'b' = [y:*99*];\n"
+        "  var.k 'c' = [z];\n"
+        "  when 'a' { is x 'v' { print.stdout['v'.a str:* * 'v'.b \\n]; }\n"
+        "             is y 'v' { } is z { } }\n"
+        "  when 'b' { is x 'v' { } is y 'v' { print.stdout['v' \\n]; } is z { } }\n"
+        "  when 'c' { is x 'v' { } is y 'v' { } is z { print.stdout[str:*z* \\n]; } } }\n");
+}
+
 void onSayingWhereAPrintGoes() {
   AGREE("START { print.stderr[str:*complaint* \\n]; }\n");
   AGREE("START { print.stdout[str:*a* \\n]; print.stderr[str:*b* \\n];\n"
@@ -619,6 +651,7 @@ int main() {
   onBeingOneOfSeveralThings();
   onACaseThatOwnsSomething();
   onShowingWhatSeveralThingsHold();
+  onEmptyTextAgainstNoTextAtAll();
   onSayingWhereAPrintGoes();
   onGroupingNamedThings();
   onTurningNumbersIntoText();
