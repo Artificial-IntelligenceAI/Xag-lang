@@ -52,7 +52,7 @@ Owned run(const std::string &text) {
   o.lexed = xag::lex(o.source);
   o.parsed = xag::parse(o.source, o.lexed.tokens);
   o.checked = xag::check(o.source, o.parsed.program);
-  o.owned = xag::own(o.source, o.parsed.program);
+  o.owned = xag::own(o.source, o.parsed.program, o.checked);
   return o;
 }
 

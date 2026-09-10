@@ -30,7 +30,7 @@ Held run(const std::string &text) {
   if (!lexed.ok() || !parsed.ok())
     return out;
   const xag::CheckResult checked = xag::check(source, parsed.program);
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!checked.ok() || !owned.ok())
     return out;
   out.compiled = true;

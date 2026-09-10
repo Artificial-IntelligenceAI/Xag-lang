@@ -12,69 +12,37 @@ namespace {
 // How a name holds what it names.
 enum class Mode { Owned, Ref, RefMut };
 
+// This pass used to keep a model of types of its own, built out of chains read
+// as text: whether a word meant several, whether a type copied, what one of the
+// things a struct holds is. Three bugs came out of it in one day, all the same
+// shape — something asked what kind of thing it had and got its answer from a
+// list written before that kind existed. `many-growing` was not in the list of
+// words meaning several. A case of a `one-of` was not in the list of things
+// that hand a value over. Nesting was not in the question at all.
+//
+// So it asks the checker now, through the typed tree, and the questions below
+// are the whole of what it asks.
+
 // A number is small enough that handing one over costs nothing and leaves the
-// original where it was, so numbers are never moved. `str` is.
-//
-// This asks the one place that knows what a type is, rather than comparing the
-// spelling here as well — which is how `int64` arriving quietly broke it.
-bool copyType(std::string_view type) {
-  if (type == "bool")
-    return true;
-  const Type named = typeNamed(type);
-  return isNumber(named);
+// original where it was, so numbers are never moved. Text is not, and neither
+// is anything that owns places or fields.
+bool copies(Ty type) {
+  if (type.holds() || type.isStruct() || type.kind == Type::OneOf)
+    return false;
+  return type.kind == Type::Bool || isNumber(type.kind);
 }
 
-// A `many` owns the places it holds, whatever sits in them, so it is handed
-// over rather than copied even when every element would be.
-//
-// Every word that says several, and anywhere before the type rather than only
-// one segment back. Written as `segments[n - 2].text == "many"`, a
-// `many-growing.int64` was not several at all: nothing asked for it to be
-// handed over, so a second name took it without a word and both let go of the
-// places. The built program aborted; the interpreters, which end a value once
-// however many names think they hold it, said nothing.
-unsigned manyDeep(const Chain &chain) {
-  unsigned deep = 0;
-  for (std::size_t at = 0; at + 1 < chain.segments.size(); ++at) {
-    const ChainSegment &seg = chain.segments[at];
-    if (!seg.isName && (seg.text == "many" || seg.text == "many-growing"))
-      ++deep;
-  }
-  return deep;
-}
+// Whether what goes into one of its places is copied there. One place of a
+// `many.many.int64` holds a whole `many.int64`, which owns its own places.
+bool placeCopies(Ty type) { return copies(type.holds() ? elementOf(type) : type); }
 
-bool holdsMany(const Chain &chain) { return manyDeep(chain) > 0; }
-
-// Whether what one place of it holds is copied into that place. One place of a
-// `many.many.int64` holds a whole `many.int64`, which owns its own places and
-// is handed over rather than copied — asked of the type at the end of the chain
-// instead, it answered for the `int64` at the bottom, so putting a row into a
-// grid took it without a word and both names let go of the same places.
-bool placeCopies(const Chain &chain) {
-  return manyDeep(chain) <= 1 && copyType(chain.type().text);
-}
-
-bool copyChain(const Chain &chain) {
-  return !holdsMany(chain) && copyType(chain.type().text);
-}
-
-Mode modeOfChain(const Chain &chain) {
-  for (const ChainSegment &seg : chain.segments) {
-    if (seg.isName)
-      continue;
-    if (seg.text == "loanmut")
-      return Mode::RefMut;
-    if (seg.text == "loan")
-      return Mode::Ref;
+Mode modeOf(Ty type) {
+  switch (type.held) {
+  case Held::Loan:    return Mode::Ref;
+  case Held::LoanMut: return Mode::RefMut;
+  case Held::Owned:   break;
   }
   return Mode::Owned;
-}
-
-std::string loanOfChain(const Chain &chain) {
-  for (const ChainSegment &seg : chain.segments)
-    if (seg.isName)
-      return seg.text;
-  return {};
 }
 
 const char *word(Mode mode) {
@@ -88,12 +56,7 @@ const char *word(Mode mode) {
 
 struct Binding {
   Mode mode = Mode::Owned;
-  bool copies = true;
-  // What one of its places holds, when it is a `many`. An array never copies,
-  // but writing `set 'xs'[*0*] = [*9*]` puts an element there, and whether that
-  // needs a word spelled is the element's question rather than the array's.
-  bool elementCopies = true;
-  bool holds = false; // whether it is a `many` at all
+  Ty type;
   bool changes = false;
   Span span;
   bool moved = false;
@@ -101,33 +64,25 @@ struct Binding {
   // Which of the things it holds have been handed over on their own. A field is
   // known where it is written, so this can be tracked one at a time — which is
   // the whole reason a struct's ownership is not the array's.
-  std::vector<std::string> partsMoved;
+  std::vector<unsigned> partsMoved;
   std::vector<Span> partsMovedAt;
-  // Which struct it is, when it is one, so that a value written for it knows
-  // that its items go into places of their own rather than being joined.
-  std::string fills;
+
+  bool copiesWhole() const { return copies(type); }
+  bool holds() const { return type.holds(); }
+  bool placeCopiesInto() const { return placeCopies(type); }
+  bool fillsAStruct() const { return type.isStruct() && mode == Mode::Owned; }
 };
 
 // What `holds` lends: a borrow of what was there, so it is read where it stands
-// and never handed over. The type is only wanted to know whether it is the sort
-// of thing that copies.
-Binding heldBinding(Span where) {
+// and never handed over.
+Binding heldBinding(Span where, Ty what) {
   Binding out;
   out.mode = Mode::Ref;
-  out.copies = false;
-  out.elementCopies = true;
+  out.type = what;
+  out.type.held = Held::Loan;
   out.changes = false;
   out.span = where;
   return out;
-}
-
-// `mut` on what a name owns, `loanmut` on what it borrows. Either way the name
-// may be written through, and nothing else may.
-bool changeable(const Chain &chain) {
-  for (const ChainSegment &seg : chain.segments)
-    if (!seg.isName && (seg.text == "mut" || seg.text == "loanmut"))
-      return true;
-  return false;
 }
 
 struct ParamInfo {
@@ -146,61 +101,28 @@ enum class Use { Read, Consume };
 
 class Owner {
 public:
-  Owner(const Source &source, const Program &program)
+  Owner(const Source &source, const TypedProgram &program)
       : source_(source), program_(program) {}
 
   OwnResult run() {
     collect();
     scopes_.emplace_back();
-    for (const Item &item : program_.items)
-      if (item.kind == ItemKind::Struct) {
-        std::vector<std::pair<std::string, std::string>> fields;
-        std::vector<std::pair<std::string, const Chain *>> written;
-        for (const Param &field : item.params) {
-          fields.emplace_back(field.name, holdsMany(field.chain)
-                                              ? std::string("many")
-                                              : field.chain.type().text);
-          // The chain itself, because the type word alone does not say how the
-          // thing is held — and a field that is a borrow was being read here as
-          // one held outright, so nothing refused writing through it or taking
-          // it out.
-          written.emplace_back(field.name, &field.chain);
-        }
-        shapes_[item.name] = std::move(fields);
-        partChains_[item.name] = std::move(written);
-      }
-    for (const Item &item : program_.items)
-      if (item.kind == ItemKind::OneOf)
-        for (const Param &one : item.params)
-          cases_[one.name] = holdsMany(one.chain) ? std::string("many")
-                                                  : one.chain.type().text;
-    for (const Item &item : program_.items)
-      if (item.kind == ItemKind::Const)
+    for (const TypedItem &item : program_.items)
+      if (item.kind == TypedItemKind::Const)
         scopes_.back()[item.name] =
-            Binding{Mode::Owned, copyChain(item.chain), placeCopies(item.chain),
-                    holdsMany(item.chain), false, item.nameSpan, false, {}};
-    for (const Item &item : program_.items)
+            Binding{Mode::Owned, item.answers, false, item.nameSpan, false, {}, {}, {}};
+    for (const TypedItem &item : program_.items)
       body(item);
+    (void)source_;
     return std::move(result_);
   }
 
 private:
   const Source &source_;
-  const Program &program_;
+  const TypedProgram &program_;
   OwnResult result_;
   std::vector<std::unordered_map<std::string, Binding>> scopes_;
   std::unordered_map<std::string, FnInfo> functions_;
-  // What each struct holds: the name of each thing and the type word it was
-  // written with, in order. The names are needed as well as the types, because
-  // `set 'p'.x = […]` says which one it means by name and what may go in is
-  // that one's question rather than the struct's.
-  std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>>
-      shapes_;
-  std::unordered_map<std::string, std::string> cases_;
-  // The same fields, as they were written. The map above keeps only the type
-  // word, which does not say how a thing is held.
-  std::unordered_map<std::string, std::vector<std::pair<std::string, const Chain *>>>
-      partChains_;
   Mode giving_ = Mode::Owned;
   bool givingCopies_ = true;
 
@@ -221,11 +143,18 @@ private:
     return nullptr;
   }
 
-  static std::string joined(const std::vector<std::string> &path) {
-    std::string out;
-    for (const std::string &part : path)
-      out += (out.empty() ? "" : ".") + part;
-    return out;
+  // What a struct holds, and what one of the things it holds is called. Both
+  // come from the checker's own table now rather than from a copy of it.
+  const Field *fieldOf(Ty of, unsigned which) const {
+    if (!of.isStruct() || of.named >= program_.shapes.size())
+      return nullptr;
+    const Shape &shape = program_.shapes[of.named];
+    return which < shape.fields.size() ? &shape.fields[which] : nullptr;
+  }
+
+  std::string fieldName(Ty of, unsigned which) const {
+    const Field *field = fieldOf(of, which);
+    return field ? field->name : std::string();
   }
 
   // ---- signatures, and the one lifetime rule a signature can answer alone
@@ -236,38 +165,38 @@ private:
     functions_["read.stdin"] = FnInfo{{}, Mode::Owned, false};
     functions_["arguments"] = FnInfo{{}, Mode::Owned, false};
     // Read where it stands, and the text goes on belonging to whoever had it.
-    functions_["convert-to-number"] = FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false};
+    functions_["convert-to-number"] =
+        FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false};
 
-    for (const Item &item : program_.items) {
-      if (item.kind != ItemKind::Function)
+    for (const TypedItem &item : program_.items) {
+      if (item.kind != TypedItemKind::Function)
         continue;
 
       FnInfo info;
-      info.result = modeOfChain(item.chain);
+      info.result = modeOf(item.answers);
       unsigned borrowed = 0;
-      const std::string resultLoan = loanOfChain(item.chain);
       bool loanIsLent = false;
       std::vector<Note> lent;
-      for (const Param &param : item.params) {
-        const Mode mode = modeOfChain(param.chain);
-        info.params.push_back(ParamInfo{mode, copyChain(param.chain)});
+      for (const TypedParam &param : item.params) {
+        const Mode mode = modeOf(param.type);
+        info.params.push_back(ParamInfo{mode, copies(param.type)});
         if (mode != Mode::Owned) {
           ++borrowed;
           lent.push_back(Note{param.span, "lent here"});
-          if (!resultLoan.empty() && loanOfChain(param.chain) == resultLoan)
+          if (!item.loan.empty() && param.loan == item.loan)
             loanIsLent = true;
         }
       }
       functions_[item.name] = std::move(info);
 
-      if (modeOfChain(item.chain) == Mode::Owned)
+      if (modeOf(item.answers) == Mode::Owned)
         continue;
 
       // The answer is borrowed. With one borrowed parameter there is only one
       // loan it could be on; with more there is a choice, and the compiler does
       // not get to make it.
-      if (resultLoan.empty() && borrowed != 1)
-        complain(item.chain.span, "E0402",
+      if (item.loan.empty() && borrowed != 1)
+        complain(item.answersSpan, "E0402",
                  borrowed == 0
                      ? "this answer is borrowed, and nothing was lent to borrow it from."
                      : "this answer is borrowed, and so are " + std::to_string(borrowed) +
@@ -276,9 +205,9 @@ private:
                  {"with one borrowed parameter there is only one loan the answer could "
                   "be on, so nothing is written; with more there is a choice."},
                  "this answer is borrowed", lent);
-      else if (!resultLoan.empty() && !loanIsLent)
-        complain(item.chain.span, "E0402",
-                 "the answer is on the loan `'" + resultLoan +
+      else if (!item.loan.empty() && !loanIsLent)
+        complain(item.answersSpan, "E0402",
+                 "the answer is on the loan `'" + item.loan +
                      "'`, and no parameter is lent on it.",
                  {"a borrow that is given back says which loan it belongs to"},
                  {"a loan is a name for what the caller lent, so something the caller "
@@ -288,24 +217,23 @@ private:
 
   // ---- expressions
 
-  void read(const Expr &e) { use(e, Use::Read, Mode::Owned, false); }
+  void read(const TypedExpr &e) { use(e, Use::Read, Mode::Owned, false); }
 
-  // `'p'.name` down to the name it is of, and the fields walked through on the
-  // way. Anything else is not somewhere a field can be taken from.
-  static const Expr *rootOf(const Expr &e, std::vector<std::string> &fields) {
-    const Expr *at = &e;
-    while (at->kind == ExprKind::Field) {
-      fields.insert(fields.begin(), at->text);
-      if (at->children.empty())
-        return nullptr;
+  // The name a run of fields is reached out of, and which fields those were.
+  static const TypedExpr *rootOf(const TypedExpr &e, std::vector<unsigned> &fields,
+                                 std::vector<Ty> &of) {
+    const TypedExpr *at = &e;
+    while (at->kind == TypedKind::Field && !at->children.empty()) {
+      fields.insert(fields.begin(), at->which);
+      of.insert(of.begin(), at->children[0]->type);
       at = at->children[0].get();
     }
-    return at->kind == ExprKind::Name ? at : nullptr;
+    return at->kind == TypedKind::Name ? at : nullptr;
   }
 
   // Whether this field, or the whole it is part of, has already gone.
   const Span *goneAlready(const Binding &binding,
-                          const std::vector<std::string> &fields) const {
+                          const std::vector<unsigned> &fields) const {
     for (unsigned i = 0; i < binding.partsMoved.size(); ++i)
       if (fields.empty() || binding.partsMoved[i] == fields.front())
         return &binding.partsMovedAt[i];
@@ -313,16 +241,17 @@ private:
   }
 
   // `mode` and `copies` describe the place the value is going.
-  void use(const Expr &e, Use how, Mode wanted, bool copies) {
+  void use(const TypedExpr &e, Use how, Mode wanted, bool copiesThere) {
     switch (e.kind) {
-    case ExprKind::Name: {
+    case TypedKind::Name: {
       Binding *binding = lookup(e.text);
       if (!binding)
         return; // the checker has already said so
       if (!binding->partsMoved.empty()) {
+        const std::string gone = fieldName(binding->type, binding->partsMoved.front());
         complain(e.span, "E0414",
-                 "`'" + e.text + "'` is not all here: `'" + e.text + "'." +
-                     binding->partsMoved.front() + "` was handed over.",
+                 "`'" + e.text + "'` is not all here: `'" + e.text + "'." + gone +
+                     "` was handed over.",
                  {"a struct holds each of its things until that one is moved"},
                  {"what is left of it can still be reached one field at a time; the "
                   "whole of it cannot, because part of the whole is somewhere else."},
@@ -339,7 +268,7 @@ private:
                  {Note{binding->movedAt, "but it was handed over here"}});
         return;
       }
-      if (how == Use::Consume && !copies) {
+      if (how == Use::Consume && !copiesThere) {
         // Passing a loan along is not a transfer: the borrow travels, and the
         // name it came from still holds what it holds.
         if (wanted != Mode::Owned && binding->mode != Mode::Owned)
@@ -354,17 +283,19 @@ private:
       return;
     }
 
-    case ExprKind::Field: {
-      std::vector<std::string> fields;
-      const Expr *root = rootOf(e, fields);
+    case TypedKind::Field: {
+      std::vector<unsigned> fields;
+      std::vector<Ty> of;
+      const TypedExpr *root = rootOf(e, fields, of);
       Binding *binding = root ? lookup(root->text) : nullptr;
       if (!binding) {
-        for (const ExprPtr &child : e.children)
+        for (const TypedPtr &child : e.children)
           read(*child);
         return;
       }
       if (binding->moved) {
-        complain(e.span, "E0403", "`'" + root->text + "'` was moved, and holds nothing now.",
+        complain(e.span, "E0403",
+                 "`'" + root->text + "'` was moved, and holds nothing now.",
                  {"a name holds its value until it is moved, and then holds nothing"},
                  {}, "used here",
                  {Note{binding->movedAt, "but it was handed over here"}});
@@ -372,14 +303,14 @@ private:
       }
       if (const Span *gone = goneAlready(*binding, fields)) {
         complain(e.span, "E0413",
-                 "`'" + root->text + "'." + fields.front() +
+                 "`'" + root->text + "'." + fieldName(binding->type, fields.front()) +
                      "` was handed over, and is not there now.",
                  {"a struct holds each of its things until that one is moved"},
                  {"the rest of it is still there; this one is not."},
                  "used here", {Note{*gone, "but it was handed over here"}});
         return;
       }
-      if (how == Use::Consume && wanted == Mode::Owned && !copies) {
+      if (how == Use::Consume && wanted == Mode::Owned && !copiesThere) {
         // Taking one of them out, which leaves the rest where they are.
         binding->partsMoved.push_back(fields.front());
         binding->partsMovedAt.push_back(e.span);
@@ -387,23 +318,29 @@ private:
       return;
     }
 
-    case ExprKind::Index: {
+    case TypedKind::Element: {
       // An element is a place inside the array, so reading one reads the array
       // and lending one lends the whole of it: which element `'xs'['i']` names
       // is not known until the program runs, and no loan can be narrower than
       // what the index is read out of.
-      if (!e.children.empty())
-        read(*e.children[0]);
-      Binding *binding = lookup(e.text);
+      if (e.children.size() > 1)
+        read(*e.children[1]);
+      Binding *binding =
+          !e.children.empty() && e.children[0]->kind == TypedKind::Name
+              ? lookup(e.children[0]->text)
+              : nullptr;
       if (binding && binding->moved) {
-        complain(e.span, "E0403", "`'" + e.text + "'` was moved, and holds nothing now.",
+        complain(e.span, "E0403",
+                 "`'" + e.children[0]->text + "'` was moved, and holds nothing now.",
                  {"a name holds its value until it is moved, and then holds nothing"},
                  {"what was moved is somewhere else now, and there is only ever one of it."},
                  "used here",
                  {Note{binding->movedAt, "but it was handed over here"}});
         return;
       }
-      if (how == Use::Consume && wanted == Mode::Owned && !copies)
+      if (!binding && !e.children.empty())
+        read(*e.children[0]);
+      if (how == Use::Consume && wanted == Mode::Owned && !copiesThere)
         complain(e.span, "E0412",
                  "taking this out would leave a hole where it was.",
                  {"a `many` holds a value in every place it has"},
@@ -412,23 +349,27 @@ private:
       return;
     }
 
-    case ExprKind::Borrow: {
+    case TypedKind::Borrow: {
       if (e.children.empty())
         return;
-      const Expr &inner = *e.children[0];
-      Binding *binding = (inner.kind == ExprKind::Name || inner.kind == ExprKind::Index)
-                             ? lookup(inner.text)
-                             : nullptr;
+      const TypedExpr &inner = *e.children[0];
+      const std::string named =
+          inner.kind == TypedKind::Name ? inner.text
+          : inner.kind == TypedKind::Element && !inner.children.empty() &&
+                    inner.children[0]->kind == TypedKind::Name
+              ? inner.children[0]->text
+              : std::string();
+      Binding *binding = named.empty() ? nullptr : lookup(named);
 
-      if (e.text == "move" && inner.kind == ExprKind::Field) {
-        std::vector<std::string> reached;
-        const Expr *root = rootOf(inner, reached);
-        const Binding *of = root ? lookup(root->text) : nullptr;
+      if (e.text == "move" && inner.kind == TypedKind::Field) {
+        std::vector<unsigned> reached;
+        std::vector<Ty> of;
+        const TypedExpr *root = rootOf(inner, reached, of);
         // A struct may hold a borrow, and what is borrowed is not the struct's
         // to give away — no more than a borrowed name is. This was let through,
         // and the value went to whoever asked for it while still belonging to
         // whoever lent it.
-        if (of && heldAs(of->fills, reached) != Mode::Owned) {
+        if (root && modeOf(inner.type) != Mode::Owned) {
           complain(e.span, "E0404",
                    "this is borrowed, and a borrow is not yours to give away.",
                    {"what is lent goes back to whoever lent it"},
@@ -441,7 +382,7 @@ private:
       }
 
       if (e.text == "move") {
-        if (inner.kind == ExprKind::Index) {
+        if (inner.kind == TypedKind::Element) {
           complain(e.span, "E0412", "taking this out would leave a hole where it was.",
                    {"a `many` holds a value in every place it has"},
                    {"an element is read, written and lent where it stands; nothing in "
@@ -449,12 +390,13 @@ private:
           return;
         }
         if (binding && binding->mode != Mode::Owned) {
-          complain(e.span, "E0404", "this is borrowed, and a borrow is not yours to give away.",
+          complain(e.span, "E0404",
+                   "this is borrowed, and a borrow is not yours to give away.",
                    {"what is lent goes back to whoever lent it"},
                    {"only an owner can hand a value over for good."});
           return;
         }
-        if (binding && binding->copies) {
+        if (binding && binding->copiesWhole()) {
           complain(e.span, "E0405", "nothing is moved out of a value this small.",
                    {"a small value is handed over by being copied, and the original stays"},
                    {"`move` says a name stops holding what it held, and this one does not."});
@@ -476,8 +418,8 @@ private:
         complain(e.span, "E0407",
                  binding->mode == Mode::Ref
                      ? "this was lent for reading, and cannot be lent for writing."
-                     : "`'" + inner.text + "'` does not change, and cannot be lent for "
-                                           "writing.",
+                     : "`'" + named + "'` does not change, and cannot be lent for "
+                                      "writing.",
                  {"a loan gives away no more than the lender had"},
                  {"a chain says `mut` when a name may be written through, and this one "
                   "does not."});
@@ -485,63 +427,79 @@ private:
       return;
     }
 
-    case ExprKind::Call: {
-      const std::string path = joined(e.path);
-      auto found = functions_.find(path);
+    case TypedKind::Call: {
+      auto found = functions_.find(e.name);
       if (found == functions_.end()) {
-        for (const Value &value : e.args.values)
-          for (const ExprPtr &item : value.items)
+        for (const std::vector<TypedPtr> &given : e.args)
+          for (const TypedPtr &item : given)
             read(*item);
         return;
       }
       const FnInfo &info = found->second;
-      for (unsigned i = 0; i < e.args.values.size(); ++i) {
-        const Value &argument = e.args.values[i];
+      for (unsigned i = 0; i < e.args.size(); ++i) {
+        const std::vector<TypedPtr> &argument = e.args[i];
         const bool known = !info.variadic && i < info.params.size();
         const ParamInfo param = known ? info.params[i] : ParamInfo{Mode::Owned, true};
-        if (argument.items.size() == 1)
-          argue(*argument.items[0], param, path);
+        if (argument.size() == 1)
+          argue(*argument[0], param, e.name);
         else
-          for (const ExprPtr &piece : argument.items)
+          for (const TypedPtr &piece : argument)
             read(*piece);
       }
       return;
     }
 
-    case ExprKind::Typed: {
+    case TypedKind::Made: {
+      // A struct made where it stands: each item goes into a place of its own,
+      // so each is handed over. What the field holds says whether that costs a
+      // word.
+      fillWith(e.children, e.type);
+      return;
+    }
+
+    case TypedKind::Case: {
       // `text:'s'` puts `'s'` into a `one-of`, which is a hand-over the same
       // way putting it in a struct is: the case holds it afterwards, and the
-      // name it came from does not. Read as an ordinary read, both of them
-      // thought they had it and both let go of it.
-      const std::string *held = caseNamed(e.text);
-      if (held && !e.children.empty()) {
-        use(*e.children[0], Use::Consume, Mode::Owned, copyType(*held));
-        return;
-      }
-      for (const ExprPtr &child : e.children)
-        read(*child);
+      // name it came from does not.
+      if (!e.children.empty() && e.sum < program_.sums.size() &&
+          e.which < program_.sums[e.sum].fields.size())
+        use(*e.children[0], Use::Consume, Mode::Owned,
+            copies(program_.sums[e.sum].fields[e.which].type));
+      else
+        for (const TypedPtr &child : e.children)
+          read(*child);
       return;
     }
 
     default:
-      for (const ExprPtr &child : e.children)
+      for (const TypedPtr &child : e.children)
         read(*child);
-      if (e.kind == ExprKind::Call)
-        return;
-      for (const Value &value : e.args.values)
-        for (const ExprPtr &item : value.items)
+      for (const std::vector<TypedPtr> &given : e.args)
+        for (const TypedPtr &item : given)
           read(*item);
       return;
     }
   }
 
   // One argument against what its parameter asked for.
-  void argue(const Expr &e, ParamInfo param, const std::string &path) {
-    if (e.kind == ExprKind::Borrow) {
+  void argue(const TypedExpr &e, ParamInfo param, const std::string &path) {
+    if (e.kind == TypedKind::Borrow && e.text != "move") {
       const char *wanted = word(param.mode);
       if (e.text != wanted && !(param.mode == Mode::Owned && param.copies))
         complain(e.span, "E0406",
-                 "`" + path + "` asks for `" + wanted + "` here, and this says `" + e.text + "`.",
+                 "`" + path + "` asks for `" + wanted + "` here, and this says `" +
+                     e.text + "`.",
+                 {"a transfer is spelled where it happens, and says which one it is"},
+                 {"`loan` lends for reading, `loanmut` lends for writing, and `move` hands "
+                  "the value over for good."});
+      use(e, Use::Consume, param.mode, param.copies);
+      return;
+    }
+    if (e.kind == TypedKind::Borrow) {
+      const char *wanted = word(param.mode);
+      if (std::string("move") != wanted && !(param.mode == Mode::Owned && param.copies))
+        complain(e.span, "E0406",
+                 "`" + path + "` asks for `" + wanted + "` here, and this says `move`.",
                  {"a transfer is spelled where it happens, and says which one it is"},
                  {"`loan` lends for reading, `loanmut` lends for writing, and `move` hands "
                   "the value over for good."});
@@ -568,96 +526,67 @@ private:
       binding->moved = moved;
   }
 
-  void block(const Block &b) {
+  void block(const TypedBlock &b) {
     scopes_.emplace_back();
-    for (const StmtPtr &s : b.stmts)
+    for (const TypedStmtPtr &s : b.stmts)
       statement(*s);
     scopes_.pop_back();
   }
 
+  // Which of the things a struct holds a name means, and what that one is.
+  const Field *fieldCalled(Ty of, const std::string &name) const {
+    if (!of.isStruct() || of.named >= program_.shapes.size())
+      return nullptr;
+    for (const Field &field : program_.shapes[of.named].fields)
+      if (field.name == name)
+        return &field;
+    return nullptr;
+  }
+
   // How one of the things a struct holds is held, reached by the path written.
-  // `Mode::Owned` when nothing along the way says otherwise, which is also the
-  // answer when the path names something that is not there — the checker has
-  // already said so, and saying it twice helps nobody.
-  Mode heldAs(const std::string &fills, const std::vector<std::string> &path) const {
-    std::string here = fills;
+  Mode heldAs(Ty of, const std::vector<std::string> &path) const {
+    Ty here = of;
     Mode held = Mode::Owned;
     for (const std::string &step : path) {
-      auto found = partChains_.find(here);
-      if (found == partChains_.end())
+      const Field *field = fieldCalled(here, step);
+      if (!field)
         return Mode::Owned;
-      const Chain *chain = nullptr;
-      for (const auto &field : found->second)
-        if (field.first == step) {
-          chain = field.second;
-          break;
-        }
-      if (!chain)
-        return Mode::Owned;
-      held = modeOfChain(*chain);
-      here = holdsMany(*chain) ? std::string("many") : chain->type().text;
+      held = modeOf(field->type);
+      here = field->type;
     }
     return held;
   }
 
-  const std::vector<std::pair<std::string, std::string>> *
-  shapeNamed(const std::string &type) const {
-    auto found = shapes_.find(type);
-    return found == shapes_.end() ? nullptr : &found->second;
-  }
-
-  // The type a `one-of` case holds, or nothing when no case is called that.
-  // What goes into a case is handed over exactly as what goes into one of the
-  // things a struct holds is: the value lives in there afterwards, and the name
-  // it came from does not still have it.
-  const std::string *caseNamed(const std::string &word) const {
-    auto found = cases_.find(word);
-    return found == cases_.end() ? nullptr : &found->second;
-  }
-
   // Whether what goes into one of the things a struct holds is copied there.
-  // Reading the struct's own answer instead said a number could not be written
-  // into a number, because a struct is never copied however little is in it.
-  bool partCopies(const std::string &fills, const std::vector<std::string> &path) const {
-    std::string here = fills;
-    for (unsigned i = 0; i < path.size(); ++i) {
-      const auto *fields = shapeNamed(here);
-      if (!fields)
+  bool partCopies(Ty of, const std::vector<std::string> &path) const {
+    Ty here = of;
+    for (const std::string &step : path) {
+      const Field *field = fieldCalled(here, step);
+      if (!field)
         return true; // the checker has already said so
-      bool found = false;
-      for (const auto &field : *fields)
-        if (field.first == path[i]) {
-          here = field.second;
-          found = true;
-          break;
-        }
-      if (!found)
-        return true;
+      here = field->type;
     }
-    return copyType(here);
+    return copies(here);
   }
 
   // One item for each of the things a struct holds. An item that is itself a
-  // group is a struct made there, so it fills that field's own shape the same
-  // way — the brackets nest, and so does this.
-  void fillWith(const std::vector<ExprPtr> &items, const std::string &fills) {
-    const auto *fields = shapeNamed(fills);
-    if (!fields) {
-      for (const ExprPtr &one : items)
+  // struct made where it stands fills that field's own shape the same way — the
+  // brackets nest, and so does this.
+  void fillWith(const std::vector<TypedPtr> &items, Ty fills) {
+    if (!fills.isStruct() || fills.named >= program_.shapes.size()) {
+      for (const TypedPtr &one : items)
         read(*one);
       return;
     }
+    const Shape &shape = program_.shapes[fills.named];
     for (unsigned i = 0; i < items.size(); ++i) {
-      const std::string inner =
-          i < fields->size() ? (*fields)[i].second : std::string();
-      if (items[i]->kind == ExprKind::Call && items[i]->path.size() == 1 &&
-          items[i]->path[0] == inner && shapeNamed(inner)) {
-        if (!items[i]->args.values.empty())
-          fillWith(items[i]->args.values[0].items, inner);
+      const Ty inner = i < shape.fields.size() ? shape.fields[i].type : Ty{};
+      if (items[i]->kind == TypedKind::Made) {
+        fillWith(items[i]->children, items[i]->type);
         continue;
       }
       use(*items[i], Use::Consume, Mode::Owned,
-          i < fields->size() ? copyType(inner) : true);
+          i < shape.fields.size() ? copies(inner) : true);
     }
   }
 
@@ -666,101 +595,66 @@ private:
   // struct — and a struct with exactly one field is where the two readings
   // meet, which is where this was getting it wrong: every one-field struct
   // asked for its value to be handed over, however little was in it.
-  //
-  //     struct 'h' [int8 'm']
-  //     var.h 'g' = ['n'];     # `'n'` is handed over here, and nothing says so
-  //
-  // The same value into a struct with two fields was taken without a word.
-  bool isTheWholeStruct(const Expr &item, const std::string &fills) {
-    const Expr *at = &item;
-    if (at->kind == ExprKind::Borrow && !at->children.empty())
+  bool isTheWholeStruct(const TypedExpr &item, Ty fills) {
+    const TypedExpr *at = &item;
+    if (at->kind == TypedKind::Borrow && !at->children.empty())
       at = at->children[0].get();
-    // `h[…]` names the struct where it is made, so it is one of these.
-    if (at->kind == ExprKind::Call && at->path.size() == 1 && at->path[0] == fills)
-      return true;
-    if (at->kind != ExprKind::Name)
+    if (at->kind == TypedKind::Made)
+      return at->type.isStruct() && at->type.named == fills.named;
+    if (at->kind != TypedKind::Name)
       return false;
     const Binding *from = lookup(at->text);
-    return from && from->fills == fills;
+    return from && from->type.isStruct() && from->type.named == fills.named;
   }
 
-  void consumeInto(const ValueList &list, Mode mode, bool copies, bool collects = false,
-                   bool elementCopies = true, const std::string &fills = {}) {
-    const auto *fields = fills.empty() ? nullptr : shapeNamed(fills);
-    for (const Value &value : list.values) {
-      // A struct's items each go into a place of their own, as a `many`'s do,
-      // so each of them is handed over. Reading them as pieces of a joined
-      // value let an owning one be put in and let go twice.
-      if (fields && !value.items.empty() &&
-          !(value.items.size() == 1 && isTheWholeStruct(*value.items[0], fills))) {
-        fillWith(value.items, fills);
-        continue;
-      }
-      // Items side by side under a `many` each end up in a place of their own,
-      // so each is handed over. Under anything else they are joined, and
-      // joining reads its pieces and builds something new out of them.
-      if (collects) {
-        if (value.items.size() == 1) {
-          const Expr &only = *value.items[0];
-          const Binding *from =
-              only.kind == ExprKind::Name ? lookup(only.text) : nullptr;
-          const bool whole = from && from->holds;
-          use(only, Use::Consume, mode, whole ? copies : elementCopies);
-          continue;
-        }
-        for (const ExprPtr &item : value.items)
-          use(*item, Use::Consume, Mode::Owned, elementCopies);
-        continue;
-      }
-      if (value.items.size() == 1)
-        use(*value.items[0], Use::Consume, mode, copies);
-      else
-        for (const ExprPtr &item : value.items)
-          read(*item);
+  void consumeInto(const std::vector<TypedPtr> &items, Mode mode, bool copiesThere,
+                   bool collects = false, bool elementCopies = true, Ty fills = Ty{}) {
+    const bool intoStruct = fills.isStruct() && fills.named < program_.shapes.size();
+    // A struct's items each go into a place of their own, as a `many`'s do, so
+    // each of them is handed over. Reading them as pieces of a joined value let
+    // an owning one be put in and let go twice.
+    if (intoStruct && !items.empty() &&
+        !(items.size() == 1 && isTheWholeStruct(*items[0], fills))) {
+      fillWith(items, fills);
+      return;
     }
+    // Items side by side under a `many` each end up in a place of their own, so
+    // each is handed over. Under anything else they are joined, and joining
+    // reads its pieces and builds something new out of them.
+    if (collects) {
+      if (items.size() == 1) {
+        const TypedExpr &only = *items[0];
+        const Binding *from =
+            only.kind == TypedKind::Name ? lookup(only.text) : nullptr;
+        const bool whole = from && from->holds();
+        use(only, Use::Consume, mode, whole ? copiesThere : elementCopies);
+        return;
+      }
+      for (const TypedPtr &item : items)
+        use(*item, Use::Consume, Mode::Owned, elementCopies);
+      return;
+    }
+    if (items.size() == 1)
+      use(*items[0], Use::Consume, mode, copiesThere);
+    else
+      for (const TypedPtr &item : items)
+        read(*item);
   }
 
-  void statement(const Stmt &s) {
+  void statement(const TypedStmt &s) {
     switch (s.kind) {
-    case StmtKind::LoopParts:
-      // Never here, for the same reason a `whichever` is not: it is written out
-      // as one copy of its body per field long before this, and walking past one
-      // would drop every turn of it from a program that then builds.
-      result_.diagnostics.push_back(Diagnostic{
-          s.span, "", "I did not finish walking a struct before building this.",
-          "here",
-          {"A `loop.parts` should have been written out as one copy of its body "
-           "per field, and the whole statement arrived instead."},
-          {}, {}, Severity::Mine});
-      break;
-    case StmtKind::Whichever:
-      // Never here. A `whichever` is decided while checking and the statement is
-      // replaced by the arm that was chosen, so reaching this pass means the
-      // pruning did not happen — and quietly walking past it would drop
-      // whichever arm the reader meant, silently, from a program that then
-      // builds. Said in the voice that means the fault is ours, and stopped,
-      // because the middle layer has no way to say anything at all.
-      result_.diagnostics.push_back(Diagnostic{
-          s.span, "", "I did not finish reading a `whichever` before building this.",
-          "here",
-          {"Only the arm it chose should have reached here, and the whole statement "
-           "arrived instead."},
-          {}, {}, Severity::Mine});
-      break;
-    case StmtKind::Declare: {
-      const Mode mode = modeOfChain(s.chain);
-      const bool copies = copyChain(s.chain);
-      const std::string fills =
-          holdsMany(s.chain) || mode != Mode::Owned ? std::string() : s.chain.type().text;
-      consumeInto(s.value, mode, copies, holdsMany(s.chain), placeCopies(s.chain),
+    case TypedStmtKind::Declare: {
+      const Mode mode = modeOf(s.type);
+      const Ty fills = s.type.holds() || mode != Mode::Owned ? Ty{} : s.type;
+      consumeInto(s.value, mode, copies(s.type), s.type.holds(), placeCopies(s.type),
                   fills);
       scopes_.back()[s.name] =
-          Binding{mode, copies, placeCopies(s.chain), holdsMany(s.chain),
-                  changeable(s.chain), s.nameSpan, false, {}, {}, {}, fills};
+          Binding{mode, s.type, s.changeable, s.nameSpan, false, {}, {}, {}};
       break;
     }
 
-    case StmtKind::Set: {
+    case TypedStmtKind::Add:
+    case TypedStmtKind::Set: {
       Binding *binding = lookup(s.name);
       if (s.index) {
         // Writing one place reads the array to find it, and what goes in is an
@@ -774,7 +668,16 @@ private:
                    {"what was moved is somewhere else now, and there is only ever one "
                     "of it."},
                    "used here", {Note{binding->movedAt, "but it was handed over here"}});
-        consumeInto(s.value, Mode::Owned, binding ? binding->elementCopies : true);
+        // What one place holds decides how the value is read. A place of a
+        // `many.str` holds one text, so a name put there is handed over. A
+        // place of a `many.many.int64` holds a whole row, so what is written
+        // there is *collected* into one — several items each going into a place
+        // of the row, or one item that is already a row and is handed over.
+        // Read as one value going in, a number written into a grid looked like
+        // a hand-over of something that copies.
+        const Ty place = binding && binding->holds() ? elementOf(binding->type) : Ty{};
+        consumeInto(s.value, Mode::Owned, copies(place), place.holds(),
+                    placeCopies(place));
         break;
       }
       // Writing one of the things it holds is that one's question: which of
@@ -785,38 +688,51 @@ private:
         // reading was being written through: the compiler took it, and then
         // every engine agreed that nothing happened. Silence three ways is the
         // one thing running a program twice cannot find.
-        if (const Mode held = heldAs(binding->fills, s.fields); held == Mode::Ref)
+        if (const Mode held = heldAs(binding->type, s.fields); held == Mode::Ref)
           complain(s.nameSpan, "E0407",
                    "`'" + s.name + "'." + s.fields.front() +
                        "` was lent for reading, and cannot be written through.",
                    {"a loan gives away no more than the lender had"},
                    {"`loanmut` is the word for a borrow that may be written through, "
                     "and this field says `loan`."});
-        consumeInto(s.value, Mode::Owned, partCopies(binding->fills, s.fields));
+        consumeInto(s.value, Mode::Owned, partCopies(binding->type, s.fields));
+        break;
+      }
+      // `add` puts one more value in a place of its own, exactly as writing a
+      // place does, so it asks what a place holds rather than what the whole is.
+      if (s.kind == TypedStmtKind::Add) {
+        const Ty place = binding && binding->holds() ? elementOf(binding->type) : Ty{};
+        consumeInto(s.value, Mode::Owned, copies(place), place.holds(),
+                    placeCopies(place));
         break;
       }
       consumeInto(s.value, binding ? binding->mode : Mode::Owned,
-                  binding ? binding->copies : true, binding && binding->holds,
-                  binding ? binding->elementCopies : true,
-                  binding ? binding->fills : std::string());
+                  binding ? binding->copiesWhole() : true,
+                  binding && binding->holds(),
+                  binding ? binding->placeCopiesInto() : true,
+                  binding && binding->fillsAStruct() ? binding->type : Ty{});
       if (binding)
         binding->moved = false; // it holds something again
       break;
     }
 
-    case StmtKind::When: {
+    case TypedStmtKind::When:
+    case TypedStmtKind::If: {
       // Each arm is a way the program could go, so a name given away down one
-      // is gone after all of them — the same reading as an `if`.
-      if (s.condition)
+      // is gone after all of them — the compiler does not get to assume which
+      // arm ran.
+      if (s.kind == TypedStmtKind::When && s.condition)
         read(*s.condition);
       const auto before = snapshot();
       std::vector<std::pair<Binding *, Span>> movedSomewhere;
-      for (const Branch &arm : s.branches) {
+      for (const TypedArm &arm : s.arms) {
         restore(before);
+        if (s.kind == TypedStmtKind::If && arm.condition)
+          read(*arm.condition);
         scopes_.emplace_back();
-        if (!arm.matchesNothing && !arm.holds.empty())
-          scopes_.back()[arm.holds] = heldBinding(arm.holdsSpan);
-        for (const StmtPtr &inner : arm.body.stmts)
+        if (!arm.matchesNothing && !arm.binds.empty())
+          scopes_.back()[arm.binds] = heldBinding(arm.bindsSpan, arm.bound);
+        for (const TypedStmtPtr &inner : arm.body.stmts)
           statement(*inner);
         scopes_.pop_back();
         for (const auto &[binding, was] : before)
@@ -833,54 +749,27 @@ private:
 
     // The block changes nothing about what is inside it: what it grants is
     // asked for by name, and ownership is not one of the things it grants.
-    case StmtKind::Unsafe:
-      for (const StmtPtr &inner : s.body.stmts)
+    case TypedStmtKind::Unsafe:
+      for (const TypedStmtPtr &inner : s.body.stmts)
         statement(*inner);
       break;
 
-    case StmtKind::If: {
-      // A name given away down any arm is gone afterwards, because the compiler
-      // does not get to assume which arm ran.
-      const auto before = snapshot();
-      std::vector<std::pair<Binding *, Span>> movedSomewhere;
-      for (const Branch &branch : s.branches) {
-        restore(before);
-        if (branch.condition)
-          read(*branch.condition);
-        scopes_.emplace_back();
-        if (!branch.holds.empty())
-          scopes_.back()[branch.holds] = heldBinding(branch.holdsSpan);
-        for (const StmtPtr &inner : branch.body.stmts)
-          statement(*inner);
-        scopes_.pop_back();
-        for (const auto &[binding, was] : before)
-          if (!was && binding->moved)
-            movedSomewhere.emplace_back(binding, binding->movedAt);
-      }
-      restore(before);
-      for (const auto &[binding, where] : movedSomewhere) {
-        binding->moved = true;
-        binding->movedAt = where;
-      }
-      break;
-    }
-
-    case StmtKind::LoopRange:
-    case StmtKind::LoopWhile: {
+    case TypedStmtKind::LoopRange:
+    case TypedStmtKind::LoopWhile: {
       const auto before = snapshot();
       if (s.condition)
         read(*s.condition);
-      for (const Value &value : s.value.values)
-        for (const ExprPtr &item : value.items)
-          read(*item);
+      if (s.from)
+        read(*s.from);
+      if (s.to)
+        read(*s.to);
       scopes_.emplace_back();
-      if (!s.holds.empty())
-        scopes_.back()[s.holds] = heldBinding(s.holdsSpan);
-      if (s.kind == StmtKind::LoopRange)
+      if (!s.binds.empty())
+        scopes_.back()[s.binds] = heldBinding(s.bindsSpan, s.bound);
+      if (s.kind == TypedStmtKind::LoopRange)
         scopes_.back()[s.name] =
-            Binding{Mode::Owned, copyChain(s.chain), placeCopies(s.chain),
-                    holdsMany(s.chain), false, s.nameSpan, false, {}};
-      for (const StmtPtr &inner : s.body.stmts)
+            Binding{Mode::Owned, s.type, false, s.nameSpan, false, {}, {}, {}};
+      for (const TypedStmtPtr &inner : s.body.stmts)
         statement(*inner);
       scopes_.pop_back();
 
@@ -896,14 +785,13 @@ private:
       break;
     }
 
-    case StmtKind::Give:
-      for (const Value &value : s.value.values) {
-        if (value.items.size() != 1) {
-          for (const ExprPtr &item : value.items)
-            read(*item);
+    case TypedStmtKind::Give:
+      for (const TypedPtr &one : s.value) {
+        if (s.value.size() != 1) {
+          read(*one);
           continue;
         }
-        const Expr &given = *value.items[0];
+        const TypedExpr &given = *one;
         if (giving_ != Mode::Owned) {
           givingBorrow(given);
           continue;
@@ -911,7 +799,7 @@ private:
         // `give` is the word. A call site has a choice between lending and
         // handing over, so it says which; `give` has no second reading, so
         // spelling `move` here would be a second way to write one thing.
-        if (given.kind == ExprKind::Borrow && given.text == "move") {
+        if (given.kind == TypedKind::Borrow && given.text == "move") {
           complain(given.span, "E0406", "`give` already hands the answer over.",
                    {"a word is written where there is a choice, and here there is none"},
                    {"a call site chooses between lending and handing over, so it says "
@@ -919,16 +807,16 @@ private:
           continue;
         }
         read(given);
-        if (!givingCopies_ && given.kind == ExprKind::Name)
+        if (!givingCopies_ && given.kind == TypedKind::Name)
           if (Binding *binding = lookup(given.text))
             binding->moved = true;
       }
       break;
 
-    case StmtKind::Break:
+    case TypedStmtKind::Break:
       break;
 
-    case StmtKind::Call:
+    case TypedStmtKind::Call:
       if (s.call)
         read(*s.call);
       break;
@@ -936,12 +824,12 @@ private:
   }
 
   // An answer that is borrowed has to be borrowed from something the caller lent.
-  void givingBorrow(const Expr &given) {
-    const Expr *inner = &given;
-    if (given.kind == ExprKind::Borrow && !given.children.empty())
+  void givingBorrow(const TypedExpr &given) {
+    const TypedExpr *inner = &given;
+    if (given.kind == TypedKind::Borrow && !given.children.empty())
       inner = given.children[0].get();
 
-    if (inner->kind == ExprKind::Name) {
+    if (inner->kind == TypedKind::Name) {
       Binding *binding = lookup(inner->text);
       if (binding && binding->mode == Mode::Owned) {
         complain(given.span, "E0401",
@@ -959,61 +847,55 @@ private:
 
   // ---- items
 
-  // Whether a chain still has a blank in it — `any`, written where a type goes.
-  static bool hasBlank(const Chain &chain) {
-    for (const ChainSegment &seg : chain.segments)
-      if (!seg.isName && seg.text == "any")
-        return true;
-    return false;
+  // Whether a type still has a blank in it — `any`, written where a type goes.
+  static bool hasBlank(Ty type) {
+    return type.kind == Type::Blank || type.element == Type::Blank;
   }
 
-  void body(const Item &item) {
-    if (item.kind == ItemKind::Const)
+  void body(const TypedItem &item) {
+    if (item.kind == TypedItemKind::Const)
       return;
 
     // A generic's body is not read with the blank still in it, for the same
     // reason the checker will not: whether a thing copies or is handed over is
     // exactly what the blank has not said yet, and this pass asks that of
-    // everything. Reaching into a `many.any` looked like taking a value out and
-    // leaving a hole, when for a `many.int64` it is a copy and nothing moves.
-    // The body is read once per type it is called with, after the blank is
-    // filled.
-    if (item.kind == ItemKind::Function) {
-      if (hasBlank(item.chain))
+    // everything. The body is read once per type it is called with, after the
+    // blank is filled.
+    if (item.kind == TypedItemKind::Function) {
+      if (hasBlank(item.answers))
         return;
-      for (const Param &param : item.params)
-        if (hasBlank(param.chain))
+      for (const TypedParam &param : item.params)
+        if (hasBlank(param.type))
           return;
     }
 
-    // A type declares a shape, not something that runs. Walking a `one-of`'s
-    // cases as if they were a body read its case names as parameters.
-    if (item.kind == ItemKind::Struct || item.kind == ItemKind::OneOf)
-      return;
     scopes_.emplace_back();
-    if (item.kind == ItemKind::Function) {
-      giving_ = modeOfChain(item.chain);
-      givingCopies_ = copyType(item.chain.type().text);
-      for (const Param &param : item.params)
+    if (item.kind == TypedItemKind::Function) {
+      giving_ = modeOf(item.answers);
+      givingCopies_ = copies(item.answers);
+      for (const TypedParam &param : item.params)
         scopes_.back()[param.name] =
-            Binding{modeOfChain(param.chain), copyChain(param.chain),
-                    placeCopies(param.chain), holdsMany(param.chain),
-                    changeable(param.chain), param.nameSpan, false, {}};
+            Binding{modeOf(param.type), param.type,
+                    modeOf(param.type) == Mode::RefMut, param.nameSpan, false, {}, {}, {}};
     } else {
       giving_ = Mode::Owned;
       givingCopies_ = true;
     }
-    for (const StmtPtr &s : item.body.stmts)
+    for (const TypedStmtPtr &s : item.body.stmts)
       statement(*s);
     scopes_.pop_back();
-    (void)source_;
   }
 };
 
 } // namespace
 
-OwnResult own(const Source &source, const Program &program) {
+OwnResult own(const Source &source, const TypedProgram &program) {
   return Owner(source, program).run();
+}
+
+OwnResult own(const Source &source, const Program &program, const CheckResult &checked) {
+  const TypedResult tree = typedTree(source, program, checked);
+  return own(source, tree.program);
 }
 
 } // namespace xag

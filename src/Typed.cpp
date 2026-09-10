@@ -253,6 +253,15 @@ private:
     return out;
   }
 
+  // The lifetime a chain names, which is written like every other name because
+  // it is one.
+  static std::string loanOf(const Chain &chain) {
+    for (const ChainSegment &seg : chain.segments)
+      if (seg.isName)
+        return seg.text;
+    return {};
+  }
+
   static bool chainSays(const Chain &chain, std::string_view word) {
     for (const ChainSegment &seg : chain.segments)
       if (!seg.isName && seg.text == word)
@@ -282,15 +291,7 @@ private:
       out->kind = s.kind == StmtKind::Set ? TypedStmtKind::Set : TypedStmtKind::Add;
       if (s.index)
         out->index = expr_(*s.index);
-      // A field is a number here, the way it is everywhere after the checker.
-      Ty walking = out->type;
-      for (const std::string &field : s.fields) {
-        const unsigned which = fieldNamed(walking, field);
-        out->fields.push_back(which);
-        if (walking.kind == Type::Struct && walking.named < checked_.shapes.size() &&
-            which < checked_.shapes[walking.named].fields.size())
-          walking = checked_.shapes[walking.named].fields[which].type;
-      }
+      out->fields = s.fields;
       out->value = valueOf(s.value);
       break;
     }
@@ -368,6 +369,8 @@ private:
     const auto said = checked_.items.find(&item);
     if (said != checked_.items.end())
       out.answers = said->second;
+    out.answersSpan = item.chain.span;
+    out.loan = loanOf(item.chain);
     switch (item.kind) {
     case ItemKind::Function:
       out.kind = TypedItemKind::Function;
@@ -388,6 +391,7 @@ private:
       const auto held = checked_.parameters.find(&param);
       if (held != checked_.parameters.end())
         one.type = held->second;
+      one.loan = loanOf(param.chain);
       out.params.push_back(std::move(one));
     }
     out.body = block(item.body);

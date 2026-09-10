@@ -62,7 +62,7 @@ void agree(const std::string &text, int line) {
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!lexed.ok() || !parsed.ok() || !checked.ok() || !owned.ok()) {
     std::cerr << "FAIL line " << line << ": the program did not compile\n";
     ++failures;

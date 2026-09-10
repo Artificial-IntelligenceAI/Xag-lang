@@ -24,7 +24,7 @@ void emits(const std::string &program, const std::string &wanted, int line) {
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!lexed.ok() || !parsed.ok() || !checked.ok() || !owned.ok()) {
     std::cerr << "FAIL line " << line << ": the program did not get as far as codegen\n";
     ++failures;
@@ -75,7 +75,7 @@ void rejects(const std::string &program, const std::string &unwanted, int line) 
   const xag::LexResult lexed = xag::lex(source);
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!lexed.ok() || !parsed.ok() || !checked.ok() || !owned.ok()) {
     std::cerr << "FAIL line " << line << ": the program did not get as far as codegen\n";
     ++failures;
@@ -458,7 +458,7 @@ void aWatchedBuildStopsAtTheWorldOutside() {
     const xag::LexResult lexed = xag::lex(source);
     const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
     const xag::CheckResult checked = xag::check(source, parsed.program);
-    const xag::OwnResult owned = xag::own(source, parsed.program);
+    const xag::OwnResult owned = xag::own(source, parsed.program, checked);
     CHECK(lexed.ok() && parsed.ok() && checked.ok() && owned.ok());
     xag::MirResult built = xag::build(source, parsed.program, checked);
     xag::elaborate(built.mir);

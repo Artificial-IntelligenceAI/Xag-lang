@@ -105,7 +105,7 @@ Settled settle(const std::string &text, const xag::Building &building = {}) {
   const xag::CheckResult checked = xag::check(source, parsed.program);
   if (!checked.ok())
     return out;
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!owned.ok())
     return out;
   xag::MirResult built = xag::build(source, parsed.program, checked);
@@ -348,7 +348,7 @@ void aLoopWithAnAnswerIsWrittenAsItsAnswer() {
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   const xag::CheckResult checked = xag::check(source, parsed.program);
   CHECK(checked.ok());
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   CHECK(owned.ok());
   xag::MirResult built = xag::build(source, parsed.program, checked);
   xag::elaborate(built.mir);

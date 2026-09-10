@@ -109,7 +109,11 @@ struct TypedStmt {
   bool wrapping = false;      // a sum that comes round is meant to
   std::vector<TypedPtr> value;    // the items being assigned or given
   TypedPtr index;             // `set 'xs'[…] = …`
-  std::vector<unsigned> fields;   // `set 'p'.x = …`
+  // `set 'p'.x = …`, as written. Which field each of those is depends on what
+  // the name holds, and the name is what the walk knows rather than what the
+  // tree does — the checker records a type against a declaration, and this is
+  // not one.
+  std::vector<std::string> fields;
   TypedPtr from;              // LoopRange: where the count starts
   TypedPtr to;                //            and where it stops
   TypedPtr condition;         // LoopWhile, and a `when`'s subject
@@ -129,6 +133,10 @@ struct TypedParam {
   Span nameSpan;
   std::string name;
   Ty type;
+  // The lifetime it was lent on, when it says one. A `Ty` says a thing is
+  // borrowed; only the chain said which loan it is on, and the one rule a
+  // signature can answer alone is about exactly that.
+  std::string loan;
 };
 
 struct TypedItem {
@@ -137,6 +145,8 @@ struct TypedItem {
   Span nameSpan;
   std::string name;
   Ty answers;
+  Span answersSpan;      // the chain, for a diagnostic about the answer
+  std::string loan;      // which loan the answer is on, when it says
   std::vector<TypedParam> params;
   std::vector<TypedPtr> value;   // Const
   TypedBlock body;

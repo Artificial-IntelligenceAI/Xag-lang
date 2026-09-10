@@ -49,7 +49,7 @@ Ran run(const std::string &text) {
   const xag::CheckResult checked = xag::check(source, parsed.program);
   if (!checked.ok())
     return out;
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!owned.ok())
     return out;
   out.compiled = true;
@@ -98,7 +98,7 @@ int watched(const std::string &text) {
   const xag::CheckResult checked = xag::check(source, parsed.program);
   if (!checked.ok())
     return -1;
-  const xag::OwnResult owned = xag::own(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!owned.ok())
     return -1;
   xag::MirResult built = xag::build(source, parsed.program, checked);

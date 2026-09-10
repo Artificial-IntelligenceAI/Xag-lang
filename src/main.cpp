@@ -620,7 +620,7 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // same reason.
   xag::prune(const_cast<xag::Program &>(*program), checked);
 
-  const xag::OwnResult owned = xag::own(source, *program);
+  const xag::OwnResult owned = xag::own(source, *program, checked);
   if (report(source, owned.diagnostics) != 0)
     return false;
   built = xag::build(source, *program, checked);
