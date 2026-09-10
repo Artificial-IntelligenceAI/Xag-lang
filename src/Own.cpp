@@ -533,40 +533,18 @@ private:
     scopes_.pop_back();
   }
 
-  // Which of the things a struct holds a name means, and what that one is.
-  const Field *fieldCalled(Ty of, const std::string &name) const {
-    if (!of.isStruct() || of.named >= program_.shapes.size())
-      return nullptr;
-    for (const Field &field : program_.shapes[of.named].fields)
-      if (field.name == name)
-        return &field;
-    return nullptr;
-  }
-
-  // How one of the things a struct holds is held, reached by the path written.
-  Mode heldAs(Ty of, const std::vector<std::string> &path) const {
+  // What the path of a `set 'p'.a.b` arrives at. Each step is a number the
+  // checker worked out where it walked the path itself; nothing here matches a
+  // name against a struct's list, which is where this used to go wrong.
+  Ty alongPath(Ty of, const std::vector<unsigned> &path) const {
     Ty here = of;
-    Mode held = Mode::Owned;
-    for (const std::string &step : path) {
-      const Field *field = fieldCalled(here, step);
+    for (const unsigned step : path) {
+      const Field *field = fieldOf(here, step);
       if (!field)
-        return Mode::Owned;
-      held = modeOf(field->type);
+        return Ty{}; // the checker has already said so
       here = field->type;
     }
-    return held;
-  }
-
-  // Whether what goes into one of the things a struct holds is copied there.
-  bool partCopies(Ty of, const std::vector<std::string> &path) const {
-    Ty here = of;
-    for (const std::string &step : path) {
-      const Field *field = fieldCalled(here, step);
-      if (!field)
-        return true; // the checker has already said so
-      here = field->type;
-    }
-    return copies(here);
+    return here;
   }
 
   // One item for each of the things a struct holds. An item that is itself a
@@ -688,14 +666,15 @@ private:
         // reading was being written through: the compiler took it, and then
         // every engine agreed that nothing happened. Silence three ways is the
         // one thing running a program twice cannot find.
-        if (const Mode held = heldAs(binding->type, s.fields); held == Mode::Ref)
+        const Ty written = alongPath(binding->type, s.path);
+        if (modeOf(written) == Mode::Ref)
           complain(s.nameSpan, "E0407",
                    "`'" + s.name + "'." + s.fields.front() +
                        "` was lent for reading, and cannot be written through.",
                    {"a loan gives away no more than the lender had"},
                    {"`loanmut` is the word for a borrow that may be written through, "
                     "and this field says `loan`."});
-        consumeInto(s.value, Mode::Owned, partCopies(binding->type, s.fields));
+        consumeInto(s.value, Mode::Owned, s.path.empty() || copies(written));
         break;
       }
       // `add` puts one more value in a place of its own, exactly as writing a

@@ -156,14 +156,6 @@ private:
 
   // ---- types
 
-  // What each struct is made of, by the name it was given.
-  const Shape *shapeOf(const std::string &spelled) const {
-    for (const Shape &shape : mir_.shapes)
-      if (shape.name == spelled)
-        return &shape;
-    return nullptr;
-  }
-
   // Whether letting one of these go means doing anything at all. A struct of
   // numbers holds nothing that has an owner, and asking is what keeps a drop of
   // one from being written at all.

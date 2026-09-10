@@ -286,6 +286,18 @@ void onShowingWhatSeveralThingsHold() {
 }
 
 void onGroupingNamedThings() {
+  // A struct whose one thing is a struct, both engines the same way. One item
+  // that is a struct reads two ways — the whole thing, or the first of the
+  // things it holds — and the middle layer took the first reading whenever the
+  // item was a struct at all, whichever struct it was.
+  AGREE("struct 'inner' [int64 'a']\nstruct 'outer' [inner 'i']\n"
+        "START { var.outer 'o' = [inner[*5*]];\n"
+        "  print.stdout['o'.i.a \\n]; }\n");
+  AGREE("struct 'holds' [loanmut.int64 'seen']\nstruct 'wrap' [holds 'inner']\n"
+        "START { var.mut.int64 'n' = [*4*];\n"
+        "  var.mut.wrap 'w' = [holds[loanmut 'n']];\n"
+        "  set 'w'.inner.seen = [*7*];\n"
+        "  print.stdout['n' \\n]; }\n");
   // A field read and a field written, with the rest left as it was.
   AGREE("struct 'point' [int64 'x', int64 'y']\n"
         "START { var.mut.point 'p' = [*3* *4*];\n"

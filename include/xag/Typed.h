@@ -114,11 +114,14 @@ struct TypedStmt {
   bool noItmt = false;        // a loop the chain told not to run ahead of time
   std::vector<TypedPtr> value;    // the items being assigned or given
   TypedPtr index;             // `set 'xs'[…] = …`
-  // `set 'p'.x = …`, as written. Which field each of those is depends on what
-  // the name holds, and the name is what the walk knows rather than what the
-  // tree does — the checker records a type against a declaration, and this is
-  // not one.
+  // `set 'p'.x = …`. The names as they were written, for a diagnostic and for
+  // the middle layer to carry, and beside them which field each one is —
+  // counted from the outside in, one number per step. The checker walks the
+  // path to work out what is being written to, so it is the checker that says
+  // which; matching the names against a struct's list again is what every pass
+  // below used to do.
   std::vector<std::string> fields;
+  std::vector<unsigned> path;
   TypedPtr from;              // LoopRange: where the count starts
   TypedPtr to;                //            and where it stops
   TypedPtr condition;         // LoopWhile, and a `when`'s subject

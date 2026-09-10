@@ -430,6 +430,21 @@ void itHoldsAGroupOfNamedThings() {
        "  var.pair 'p' = [move 'a' move 'b'];\n"
        "  print.stdout['p'.one.name str:* * 'p'.two.name \\n]; }\n", "ada bob\n");
 
+  // A struct whose one thing is a struct. One item that is a struct is where
+  // two readings meet — the whole thing, or the first of the things it holds —
+  // and reading it as the whole thing lost a level: the inner struct went where
+  // the outer belonged, and reaching in read a field of the wrong one.
+  SAYS("struct 'inner' [int64 'a']\nstruct 'outer' [inner 'i']\n"
+       "START { var.outer 'o' = [inner[*5*]];\n"
+       "  print.stdout['o'.i.a \\n]; }\n", "5\n");
+  // And the same one written through: a borrow two fields deep is still the
+  // borrow it is, and writing to it reaches what was lent.
+  SAYS("struct 'holds' [loanmut.int64 'seen']\nstruct 'wrap' [holds 'inner']\n"
+       "START { var.mut.int64 'n' = [*4*];\n"
+       "  var.mut.wrap 'w' = [holds[loanmut 'n']];\n"
+       "  set 'w'.inner.seen = [*7*];\n"
+       "  print.stdout['n' \\n]; }\n", "7\n");
+
   // One of them handed over on its own: what went is gone, and the rest is let
   // go as it always was.
   SAYS("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"

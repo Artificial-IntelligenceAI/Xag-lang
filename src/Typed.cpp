@@ -299,6 +299,9 @@ private:
       if (s.index)
         out->index = expr_(*s.index);
       out->fields = s.fields;
+      const auto steps = checked_.setPath.find(&s);
+      if (steps != checked_.setPath.end())
+        out->path = steps->second;
       out->value = valueOf(s.value);
       break;
     }
@@ -490,7 +493,17 @@ private:
     case TypedStmtKind::Declare:
       out_ << "declare '" << s.name << "' : " << spelled(s.type) << '\n';
       break;
-    case TypedStmtKind::Set: out_ << "set '" << s.name << "'\n"; break;
+    case TypedStmtKind::Set:
+      out_ << "set '" << s.name << "'";
+      // The names as written and which field each one is, side by side, so a
+      // reader can see the numbers are the ones the checker worked out.
+      for (unsigned at = 0; at < s.fields.size(); ++at) {
+        out_ << " ." << s.fields[at];
+        if (at < s.path.size())
+          out_ << " #" << s.path[at];
+      }
+      out_ << '\n';
+      break;
     case TypedStmtKind::Add: out_ << "add '" << s.name << "'\n"; break;
     case TypedStmtKind::If: out_ << "if\n"; break;
     case TypedStmtKind::LoopRange:

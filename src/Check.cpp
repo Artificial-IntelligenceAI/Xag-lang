@@ -2347,18 +2347,21 @@ private:
           if (want != Ty{})
             complain(s.fieldSpans[i], "E0527", "a `" + name(want) + "` has no fields.",
                      {"a field is one of the things a struct holds"});
+          result_.setPath.erase(&s);
           want = Ty{};
           break;
         }
         const Shape &shape = result_.shapes[want.named];
         bool found = false;
-        for (const Field &one : shape.fields)
-          if (one.name == s.fields[i]) {
-            want = one.type;
+        for (unsigned which = 0; which < shape.fields.size(); ++which)
+          if (shape.fields[which].name == s.fields[i]) {
+            want = shape.fields[which].type;
+            result_.setPath[&s].push_back(which);
             found = true;
             break;
           }
         if (!found) {
+          result_.setPath.erase(&s); // half a path is worse than none
           complain(s.fieldSpans[i], "E0528",
                    "`" + shape.name + "` has no field called `" + s.fields[i] + "`.",
                    {"a field is one of the things a struct holds"});

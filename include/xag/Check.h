@@ -379,6 +379,12 @@ struct CheckResult {
   std::unordered_map<const Expr *, unsigned> cases;
   // Which case a `when` arm covers.
   std::unordered_map<const Branch *, unsigned> chosenCase;
+  // `set 'p'.a.b = …` — which of the things each struct along the way holds,
+  // one number per step, in the order the steps were written. The checker walks
+  // the path already to work out what is being written to; without this every
+  // pass below it walked the same path again by matching names against a list,
+  // which is the shape of every type bug this compiler has had.
+  std::unordered_map<const Stmt *, std::vector<unsigned>> setPath;
   // Reaches into a `many` that were shown to be places it has, so that nothing
   // asks again while the program runs. A `many` is a fixed length once it is
   // made, which is what makes a loop counting to `count[…]` answerable here.

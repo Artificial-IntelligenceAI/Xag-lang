@@ -107,6 +107,23 @@ void namesBecomeNumbers() {
              "arm flag #1 'b' : bool"));
 }
 
+// The path a `set` writes down is numbers as well as names. Every pass below
+// used to walk it again, matching each name against a struct's list of them —
+// the one shape of bug this layer exists to make impossible.
+void aWrittenPathCarriesItsNumbers() {
+  CHECK(says("struct 'point' [int64 'x', int64 'y']\n"
+             "START { var.mut.point 'p' = [*1* *2*];\n"
+             "  set 'p'.y = [*9*];\n  print.stdout['p'.y \\n]; }\n",
+             "set 'p' .y #1"));
+  // Two steps in, and the second is counted against the struct the first
+  // arrives at rather than against the one the name holds.
+  CHECK(says("struct 'point' [int64 'x', int64 'y']\n"
+             "struct 'line' [point 'from', point 'to']\n"
+             "START { var.mut.line 'l' = [point[*1* *2*] point[*3* *4*]];\n"
+             "  set 'l'.to.x = [*9*];\n  print.stdout['l'.to.x \\n]; }\n",
+             "set 'l' .to #1 .x #0"));
+}
+
 // Brackets that only group are gone: grouping is the shape of the tree, and a
 // node that says nothing but "there were brackets here" is one more thing for
 // every pass below to walk past.
@@ -125,6 +142,7 @@ int main() {
   aCaseAndAWrittenValueAreDifferentNodes();
   aStructMadeWhereItStandsIsNotACall();
   namesBecomeNumbers();
+  aWrittenPathCarriesItsNumbers();
   bracketsThatOnlyGroupAreGone();
 
   if (failures == 0)

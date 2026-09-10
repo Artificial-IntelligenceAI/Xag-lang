@@ -617,7 +617,15 @@ private:
                  Ty shape) {
     if (items.empty())
       return;
-    if (items.size() == 1 && items[0]->type.isStruct()) {
+    // A lone item that is already the whole struct is the whole struct. Asking
+    // only whether it *is a* struct was a weaker question than the one that had
+    // to be answered: a struct holding one struct is filled by one item that is
+    // a struct too, and reading that as the whole thing put the inner one where
+    // the outer belonged. A level went missing, reaching into it read a field of
+    // the wrong struct, and writing through a borrowed field two deep changed
+    // nothing at all — with every engine agreeing, because they were all handed
+    // the same wrong middle layer.
+    if (items.size() == 1 && owned(items[0]->type).within() == shape) {
       Operand whole = operandOf(*items[0]);
       const TypeRef type = whole.type;
       emit(Statement{StatementKind::Assign, span, place, {}, {},
@@ -792,28 +800,27 @@ private:
       const unsigned *local = findName(s.name);
       if (!local)
         break;
-      // Which of the things it holds is written. The path is worked out here,
-      // where the fields are known, so nothing further down reads a name.
+      // Which of the things it holds is written, carried as numbers so that
+      // nothing further down reads a name.
       if (!s.fields.empty()) {
+        // Which of them each step is came from the checker, which walked this
+        // path to work out what is being written to. Walking it again here by
+        // matching names was one more answer to a question already answered.
         std::vector<unsigned> parts;
         std::vector<Ty> along;    // what each step is, in the order taken
         Ty held = owned(holds_[*local]);
         Ty declared;              // the last step as the struct says it holds it
-        for (const std::string &field : s.fields) {
+        for (const unsigned which : s.path) {
           const Shape *shape = shapeOf(held);
-          if (!shape)
+          if (!shape || which >= shape->fields.size())
             break;
-          for (unsigned i = 0; i < shape->fields.size(); ++i)
-            if (shape->fields[i].name == field) {
-              parts.push_back(i);
-              declared = shape->fields[i].type;
-              held = owned(declared);
-              // Every step is reached by lending it where it stands; the last
-              // one is lent the way the struct says it holds it.
-              along.push_back(declared.held == Held::Owned ? lent(held, Held::Loan)
-                                                           : declared);
-              break;
-            }
+          parts.push_back(which);
+          declared = shape->fields[which].type;
+          held = owned(declared);
+          // Every step is reached by lending it where it stands; the last one
+          // is lent the way the struct says it holds it.
+          along.push_back(declared.held == Held::Owned ? lent(held, Held::Loan)
+                                                       : declared);
         }
 
         // A field that is a borrow holds the pointer, so writing to it means
@@ -824,7 +831,7 @@ private:
         //
         // Read out and written through, which is the shape a borrowed name
         // already takes and both backends already know.
-        if (!parts.empty() && parts.size() == along.size() &&
+        if (!parts.empty() && parts.size() == s.fields.size() &&
             declared.held != Held::Owned) {
           unsigned at = *local;
           for (unsigned step = 0; step < parts.size(); ++step) {
