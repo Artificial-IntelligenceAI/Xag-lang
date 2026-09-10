@@ -220,6 +220,35 @@ void onChoosingBetweenCases() {
         "    is 't'     { print.stdout['t' str:* * (count['t']) \\n]; } } }\n");
 }
 
+void onBeingOneOfSeveralThings() {
+  AGREE("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+        "START { var.answer 'a' = [ok:*7*];\n"
+        "  when 'a' { is ok 'n' { print.stdout['n' \\n]; }\n"
+        "             is gave-up { print.stdout[str:*none* \\n]; } } }\n");
+  AGREE("one-of 'answer' [int64 'ok', bool 'flag', deci64 'money', nothing 'no']\n"
+        "fn.answer 'pick' [int64 'n'] {\n"
+        "  if 'n' == *0* { give [no]; }\n"
+        "  if 'n' == *1* { give [flag:*true*]; }\n"
+        "  if 'n' == *2* { give [money:*1.25*]; }\n"
+        "  give [ok:'n']; }\n"
+        "START { loop.range.int64 'i' = [*0*, *3*] {\n"
+        "  when pick['i'] {\n"
+        "    is ok 'n'    { print.stdout[str:*ok * 'n' \\n]; }\n"
+        "    is flag 'b'  { print.stdout[str:*flag * 'b' \\n]; }\n"
+        "    is money 'd' { print.stdout[str:*money * 'd' \\n]; }\n"
+        "    is no        { print.stdout[str:*no* \\n]; } } } }\n");
+  AGREE("one-of 'answer' [int64 'ok', nothing 'no']\n"
+        "struct 'box' [answer 'a', int64 'n']\n"
+        "START { var.box 'b' = [ok:*1* *2*];\n"
+        "  when 'b'.a { is ok 'n' { print.stdout['n' \\n]; } is no { } } }\n");
+  AGREE("one-of 'answer' [int64 'ok', nothing 'no']\n"
+        "START { var.many.answer 'as' = [ok:*1* no ok:*3*];\n"
+        "  loop.range.int64 'i' = [*1*, count[loan 'as']] {\n"
+        "    when 'as'['i'] { is ok 'n' { print.stdout['n']; }\n"
+        "                     is no     { print.stdout[str:*-*]; } } }\n"
+        "  print.stdout[\\n]; }\n");
+}
+
 void onShowingWhatSeveralThingsHold() {
   AGREE("struct 'point' [int64 'x', int64 'y']\n"
         "START { var.point 'p' = [*1* *2*];\n"
@@ -527,6 +556,7 @@ int main() {
   onHoldingSeveralValues();
   onHoldingNothing();
   onChoosingBetweenCases();
+  onBeingOneOfSeveralThings();
   onShowingWhatSeveralThingsHold();
   onGroupingNamedThings();
   onTurningNumbersIntoText();

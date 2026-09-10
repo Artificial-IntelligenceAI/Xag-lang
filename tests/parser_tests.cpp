@@ -364,7 +364,11 @@ void whenIsMadeOfIs() {
   CHECK(!inStart("when ['x'] { is nothing { } }").parsed.ok());
   // Nothing but `is` goes in one.
   CHECK(inStart("when 'x' { else { } }").code(0) == "E0108");
-  CHECK(inStart("when 'x' { is value { } }").code(0) == "E0108");
+  // A word after `is` is a case of a `one-of`. Whether it names one is the
+  // checker's question — the parser refused it here until there were cases to
+  // name, and a `when` over something with no cases is `E0520` either way.
+  CHECK(inStart("when 'x' { is value { } }").parsed.ok());
+  CHECK(inStart("when 'x' { is *4* { } }").code(0) == "E0108");
 }
 
 void aDeclarationMarksWhatItNames() {

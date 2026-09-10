@@ -48,17 +48,30 @@ const char *name(Type type) {
 // was reading freed memory, and a field of a struct came back spelled
 // `unknown`.
 std::vector<std::string> shapeNames;
+std::vector<std::string> sumNames;
 
 const char *shapeName(unsigned which) {
   return which < shapeNames.size() ? shapeNames[which].c_str() : "unknown";
 }
 
+const char *sumName(unsigned which) {
+  return which < sumNames.size() ? sumNames[which].c_str() : "unknown";
+}
+
+// Which table `named` points into: a struct's or a `one-of`'s. Only one of them
+// can be, so one number says which.
+const char *namedAs(Type kind, unsigned which) {
+  return kind == Type::OneOf ? sumName(which) : shapeName(which);
+}
+
 std::string name(Ty type) {
-  const std::string one =
-      type.kind == Type::Struct ? shapeName(type.named) : name(type.kind);
+  const std::string one = type.kind == Type::Struct || type.kind == Type::OneOf
+                              ? namedAs(type.kind, type.named)
+                              : name(type.kind);
   std::string inside =
-      type.holds() ? (type.element == Type::Struct ? shapeName(type.named)
-                                                   : name(type.element))
+      type.holds() ? (type.element == Type::Struct || type.element == Type::OneOf
+                          ? namedAs(type.element, type.named)
+                          : name(type.element))
                    : one;
   // One `many` per level, so a `many` of a `many` says so rather than reading
   // as either one of them.
@@ -297,7 +310,8 @@ private:
   unsigned insideUnsafe_ = 0;
   std::vector<std::unordered_map<std::string, Symbol>> scopes_;
   std::unordered_map<std::string, Signature> functions_;
-  std::vector<std::string> names_; // struct names, indexed the way `Ty` names them
+  std::vector<std::string> names_;     // struct names, indexed the way `Ty` names them
+  std::vector<std::string> sumsNamed_; // and the same for `one-of` names
   Ty giving_ = Type::Nothing;
   bool inFunction_ = false;
   unsigned loopDepth_ = 0;
@@ -444,6 +458,7 @@ private:
     const Type type = typeNamed(last.text);
     unsigned which = 0;
     bool isShape = false;
+    bool isSum = false;
     if (type == Type::Unknown) {
       for (unsigned i = 0; i < result_.shapes.size(); ++i)
         if (result_.shapes[i].name == last.text) {
@@ -451,7 +466,14 @@ private:
           isShape = true;
           break;
         }
-      if (!isShape) {
+      if (!isShape)
+        for (unsigned i = 0; i < result_.sums.size(); ++i)
+          if (result_.sums[i].name == last.text) {
+            which = i;
+            isSum = true;
+            break;
+          }
+      if (!isShape && !isSum) {
         complain(last.span, "E0503", "`" + last.text + "` is not a type.",
                  {"a size is always written, and only sizes the standard defines"});
         return unknownFrom(last.span);
@@ -494,6 +516,8 @@ private:
 
     Ty settled = isShape ? (several ? Ty{Type::Many, Type::Struct, false, which}
                                     : structNamed(which))
+                 : isSum ? (several ? Ty{Type::Many, Type::OneOf, false, which}
+                                    : sumTyped(which))
                          : (several ? many(type) : Ty{type});
     settled.deep = several;
     settled.grows = grows;
@@ -518,6 +542,164 @@ private:
         settled.held = Held::LoanMut;
     }
     return settled;
+  }
+
+  // Which `one-of` a case name belongs to, and which case it is. The expected
+  // type says when it is a `one-of`; where nothing expected one, a name used by
+  // exactly one `one-of` in the file says it by itself, and one used by more
+  // than one cannot.
+  bool caseNamed(const std::string &word, Ty expected, unsigned &which,
+                 unsigned &at) const {
+    if (expected.kind == Type::OneOf && expected.named < result_.sums.size()) {
+      const Shape &sum = result_.sums[expected.named];
+      for (unsigned i = 0; i < sum.fields.size(); ++i)
+        if (sum.fields[i].name == word) {
+          which = expected.named;
+          at = i;
+          return true;
+        }
+      return false;
+    }
+    unsigned found = 0;
+    for (unsigned s = 0; s < result_.sums.size(); ++s)
+      for (unsigned i = 0; i < result_.sums[s].fields.size(); ++i)
+        if (result_.sums[s].fields[i].name == word) {
+          ++found;
+          which = s;
+          at = i;
+        }
+    return found == 1;
+  }
+
+  // `text:'s'` and, where the case holds nothing, `gave-up` on its own.
+  Ty madeCase(const Expr &e, Ty expected) {
+    unsigned which = 0;
+    unsigned at = 0;
+    if (!caseNamed(e.text, expected, which, at)) {
+      if (expected.kind != Type::OneOf && knownCase(e.text))
+        complain(e.span, "E0503",
+                 "`" + e.text + "` is a case of more than one `one-of`, and nothing "
+                 "here says which.",
+                 {"a value says which of the things it could be it is"},
+                 {"what it is going into says which `one-of` this is, and here "
+                  "nothing does."});
+      else if (expected.kind == Type::OneOf)
+        complain(e.span, "E0503",
+                 "`" + e.text + "` is not a case of `" + name(expected) + "`.",
+                 {"a value says which of the things it could be it is"},
+                 {"what `" + name(expected) + "` may be is written where it is "
+                  "declared."});
+      else if (e.children.empty())
+        // A bare word that names nothing is the mistake it always was.
+        complain(e.span, "E0107", "a word on its own is not a value.",
+                 {"a name is a value, and a word followed by `[` is a call"},
+                 {"words name functions, types and chain segments; a variable is a "
+                  "name, and names wear marks."});
+      else
+        complain(e.span, "E0503", "`" + e.text + "` is not a type.",
+                 {"a size is always written, and only sizes the standard defines"});
+      return unknownFrom(e.span);
+    }
+    const Field &one = result_.sums[which].fields[at];
+    const bool empty = one.type == Ty{Type::Nothing};
+    if (empty && !e.children.empty()) {
+      complain(e.span, "E0528",
+               "`" + e.text + "` is a case that holds nothing, and this gives it "
+               "something.",
+               {"a case holds what its type says it holds"},
+               {"`" + e.text + "` on its own is the whole of it."});
+    } else if (!empty && e.children.empty()) {
+      complain(e.span, "E0528",
+               "`" + e.text + "` holds a `" + name(one.type) + "`, and nothing is "
+               "given to it.",
+               {"a case holds what its type says it holds"},
+               {"`" + e.text + ":" + "…` is how the value goes in."});
+    } else if (!empty) {
+      expr(*e.children[0], one.type);
+    }
+    Ty made = sumTyped(which);
+    made.from = e.span;
+    result_.cases[&e] = at;
+    return made;
+  }
+
+  bool knownCase(const std::string &word) const {
+    for (const Shape &sum : result_.sums)
+      for (const Field &one : sum.fields)
+        if (one.name == word)
+          return true;
+    return false;
+  }
+
+  // Every case of a `one-of`, once each. The same rule `or-nothing` has had
+  // since there were two cases to cover, counted over as many as the type names.
+  void whenOverASum(const Stmt &s, Ty subject) {
+    const Shape &sum = result_.sums[subject.named];
+    std::vector<const Branch *> seen(sum.fields.size(), nullptr);
+    for (const Branch &arm : s.branches) {
+      unsigned at = sum.fields.size();
+      for (unsigned i = 0; i < sum.fields.size(); ++i)
+        if (sum.fields[i].name == arm.family)
+          at = i;
+      if (at == sum.fields.size()) {
+        complain(arm.familySpan.begin == arm.familySpan.end ? arm.holdsSpan
+                                                            : arm.familySpan,
+                 "E0503",
+                 arm.family.empty()
+                     ? "an `is` over a `" + sum.name + "` says which case it is."
+                     : "`" + arm.family + "` is not a case of `" + sum.name + "`.",
+                 {"every case a `when` covers is written out"},
+                 {"what `" + sum.name + "` may be is written where it is declared."});
+        continue;
+      }
+      if (seen[at])
+        complain(arm.familySpan, "E0521",
+                 "this `when` already says what to do with `" + arm.family + "`.",
+                 {"every case a `when` covers is written once"}, {}, "again here",
+                 {Note{seen[at]->familySpan, "and here first"}});
+      else
+        seen[at] = &arm;
+
+      const Field &one = sum.fields[at];
+      const bool empty = one.type == Ty{Type::Nothing};
+      if (empty && !arm.holds.empty())
+        complain(arm.holdsSpan, "E0528",
+                 "`" + arm.family + "` holds nothing, and this asks for a name to "
+                 "lend it to.",
+                 {"a case holds what its type says it holds"},
+                 {"`is " + arm.family + "` on its own is the whole of it."});
+      else if (!empty && arm.holds.empty())
+        complain(arm.familySpan, "E0528",
+                 "`" + arm.family + "` holds a `" + name(one.type) + "`, and nothing "
+                 "here is lent it.",
+                 {"a case holds what its type says it holds"},
+                 {"`is " + arm.family + " 'name'` is how it comes out."});
+
+      scopes_.emplace_back();
+      if (!empty && !arm.holds.empty()) {
+        // Lent for the arm, the way `holds` lends: what held it goes on holding
+        // it, and taking it away is refused where taking is refused.
+        Ty held = one.type;
+        held.held = Held::Loan;
+        declare(arm.holds, Symbol{held, false, arm.holdsSpan});
+      }
+      for (const StmtPtr &inner : arm.body.stmts)
+        statement(*inner);
+      scopes_.pop_back();
+      result_.chosenCase[&arm] = at;
+    }
+    for (unsigned i = 0; i < sum.fields.size(); ++i)
+      if (!seen[i]) {
+        complain(s.span, "E0522",
+                 "this `when` says nothing about what to do with `" +
+                     sum.fields[i].name + "`.",
+                 {"a `when` covers every case a value could be"},
+                 {"`is " + sum.fields[i].name +
+                  (sum.fields[i].type == Ty{Type::Nothing} ? "" : " 'name'") +
+                  "` is the case that is missing."},
+                 "this leaves a case out");
+        break;
+      }
   }
 
   // An expression whose type is its own, whatever was expected of it. It is
@@ -904,7 +1086,8 @@ private:
   // one and a field's chain may name another.
   void collectShapes() {
     for (const Item &item : program_.items) {
-      if (item.kind != ItemKind::Struct)
+      const bool isSum = item.kind == ItemKind::OneOf;
+      if (item.kind != ItemKind::Struct && !isSum)
         continue;
       if (typeNamed(item.name) != Type::Unknown || item.name == "nothing") {
         complain(item.nameSpan, "E0524",
@@ -912,15 +1095,26 @@ private:
                  {"a word names one thing for the whole file"});
         continue;
       }
+      bool taken = false;
       for (const Shape &already : result_.shapes)
-        if (already.name == item.name) {
-          complain(item.nameSpan, "E0502", "`" + item.name + "` is already a struct.",
-                   {"a word names one thing for the whole file"});
-        }
-      result_.shapes.push_back(Shape{item.name, {}, item.nameSpan});
-      names_.push_back(item.name);
+        if (already.name == item.name)
+          taken = true;
+      for (const Shape &already : result_.sums)
+        if (already.name == item.name)
+          taken = true;
+      if (taken)
+        complain(item.nameSpan, "E0502", "`" + item.name + "` is already a type.",
+                 {"a word names one thing for the whole file"});
+      if (isSum) {
+        result_.sums.push_back(Shape{item.name, {}, item.nameSpan});
+        sumsNamed_.push_back(item.name);
+      } else {
+        result_.shapes.push_back(Shape{item.name, {}, item.nameSpan});
+        names_.push_back(item.name);
+      }
     }
     shapeNames = names_;
+    sumNames = sumsNamed_;
 
     // The fields come second, so that one struct may name another.
     unsigned at = 0;
@@ -944,14 +1138,96 @@ private:
                  {"a group of none is `nothing`, which the language already has."});
     }
 
-    // A struct that holds itself has no size a machine could give it.
-    for (unsigned which = 0; which < result_.shapes.size(); ++which)
-      if (reaches(which, which, 0))
-        complain(result_.shapes[which].span, "E0526",
-                 "`" + result_.shapes[which].name + "` holds itself.",
+    // The cases, once every name is known, so that a case may name any type
+    // this file declares — a struct, or another `one-of`.
+    unsigned which = 0;
+    for (const Item &item : program_.items) {
+      if (item.kind != ItemKind::OneOf)
+        continue;
+      Shape &sum = result_.sums[which++];
+      for (const Param &one : item.params) {
+        for (const Field &already : sum.fields)
+          if (already.name == one.name)
+            complain(one.nameSpan, "E0502",
+                     "`'" + one.name + "'` is already a case of `" + sum.name + "`.",
+                     {"a name means one thing for as long as it stands"});
+        // A case holding nothing is the case itself and no value, which is
+        // exactly what `nothing` says. A struct field cannot say it, because a
+        // field is something the struct holds; a case is something it may be.
+        const Ty held = typeOfChain(one.chain);
+        // Everything a case may hold, for now. What owns something has to be
+        // let go of when the value is, and which case is live is not known
+        // until it runs — so dropping one is a choice made while the program
+        // runs, and that is a piece of work of its own.
+        if (held != Ty{} && held != Ty{Type::Nothing} && !isNumber(held) &&
+            held != Ty{Type::Bool})
+          complain(one.nameSpan, "E0529",
+                   "a case cannot hold a `" + name(held) + "` yet.",
+                   {"a `one-of` holds one of its cases, and letting go of it means "
+                    "knowing which"},
+                   {"a number, a `bool` or `nothing` is what a case holds today."});
+        sum.fields.push_back(Field{one.name, held, one.nameSpan});
+      }
+      if (sum.fields.size() < 2)
+        complain(item.nameSpan, "E0527",
+                 "`" + sum.name + "` is one of " +
+                     (sum.fields.empty() ? "nothing" : "one thing") + ".",
+                 {"a `one-of` is a choice between cases"},
+                 {"a choice between one is that one, and a `struct` or a plain type "
+                  "says it without the asking."});
+    }
+
+    // A struct that holds itself has no size a machine could give it, and
+    // neither has a `one-of` that can be itself.
+    for (unsigned at = 0; at < result_.shapes.size(); ++at)
+      if (reaches(at, at, 0))
+        complain(result_.shapes[at].span, "E0526",
+                 "`" + result_.shapes[at].name + "` holds itself.",
                  {"a struct is as big as the things in it"},
                  {"however many times it were laid out, there would always be one "
                   "more of it inside."});
+    for (unsigned at = 0; at < result_.sums.size(); ++at)
+      if (reachesSum(at, at, 0))
+        complain(result_.sums[at].span, "E0526",
+                 "`" + result_.sums[at].name + "` can be itself.",
+                 {"a `one-of` is as big as the largest thing it can be"},
+                 {"however much room it were given, one of its cases would want "
+                  "that much and a tag as well."});
+  }
+
+  // Whether one `one-of` can be reached from another by walking cases, and
+  // through the structs those cases name.
+  bool reachesSum(unsigned from, unsigned to, unsigned depth) const {
+    if (depth > result_.sums.size() + result_.shapes.size())
+      return false;
+    for (const Field &one : result_.sums[from].fields) {
+      const Ty held = one.type;
+      if (held.kind == Type::OneOf || held.element == Type::OneOf) {
+        if (held.named == to || reachesSum(held.named, to, depth + 1))
+          return true;
+      } else if (held.kind == Type::Struct || held.element == Type::Struct) {
+        if (structReachesSum(held.named, to, depth + 1))
+          return true;
+      }
+    }
+    return false;
+  }
+
+  bool structReachesSum(unsigned from, unsigned to, unsigned depth) const {
+    if (depth > result_.sums.size() + result_.shapes.size() ||
+        from >= result_.shapes.size())
+      return false;
+    for (const Field &field : result_.shapes[from].fields) {
+      const Ty held = field.type;
+      if (held.kind == Type::OneOf || held.element == Type::OneOf) {
+        if (held.named == to || reachesSum(held.named, to, depth + 1))
+          return true;
+      } else if (held.kind == Type::Struct || held.element == Type::Struct) {
+        if (structReachesSum(held.named, to, depth + 1))
+          return true;
+      }
+    }
+    return false;
   }
 
   // Whether one struct can be reached from another by walking fields.
@@ -1191,12 +1467,13 @@ private:
       return Type::Str;
 
     case ExprKind::Typed: {
+      // The same notation says two things, and which one is settled by whether
+      // the word names a type. `int32:*161*` says what a written value is; a
+      // case name says which of the things a `one-of` may be this is. Both read
+      // the same way: the left says how to read the right.
+      if (typeNamed(e.text) == Type::Unknown)
+        return madeCase(e, expected);
       const Ty stated = typeNamed(e.text);
-      if (stated == Type::Unknown) {
-        complain(e.span, "E0503", "`" + e.text + "` is not a type.",
-                 {"a size is always written, and only sizes the standard defines"});
-        return unknownFrom(e.span);
-      }
       if (!e.children.empty())
         expr(*e.children[0], stated);
       return stated;
@@ -1447,6 +1724,20 @@ private:
     }
 
     if (comparing) {
+      // Two `one-of`s are the same when they are in the same case *and* what
+      // they hold is the same, and what they hold is a different type in every
+      // case. Comparing them as one value asked the same question of two
+      // different things and the engines gave different answers.
+      for (Ty side : {left, right})
+        if (side.kind == Type::OneOf) {
+          complain(e.span, "E0506",
+                   "a `" + name(side) + "` is one of several things, and there is no "
+                   "comparing which without asking.",
+                   {"two values are compared when they are the same kind of thing"},
+                   {"`when` is the asking, and what each case holds is compared on "
+                    "its own."});
+          return Type::Bool;
+        }
       if (left != Type::Unknown && right != Type::Unknown && left != right)
         complain(e.span, "E0506",
                  "a `" + std::string(name(left)) + "` and a `" + std::string(name(right)) +
@@ -1548,7 +1839,8 @@ private:
       Ty absent;
       std::string where;
       const bool several = got.holds() || got.isStruct();
-      if (got != Ty{} && !isNumber(got) && got != Ty{Type::Bool} && !several)
+      if (got != Ty{} && !isNumber(got) && got != Ty{Type::Bool} && !several &&
+          got.kind != Type::OneOf)
         complain(e.args.values[0].span, "E0535",
                  got == Ty{Type::Str}
                      ? std::string("this is already text.")
@@ -1559,10 +1851,19 @@ private:
                                                 "here to convert."}
                      : std::vector<std::string>{
                            "`holds` and `when` open what may be missing."});
+      else if (got.kind == Type::OneOf)
+        complain(e.args.values[0].span, "E0535",
+                 "a `" + name(got) + "` is one of several things, and there is no "
+                 "writing which without asking.",
+                 {"a value is written out the way it is shown"},
+                 {"`when` is the asking, and every case it covers has a way of "
+                  "being written."});
       else if (several && holdsNothingSomewhere(got, absent, where))
         complain(e.args.values[0].span, "E0535",
-                 "`" + where + "` inside this may hold nothing, and there is no "
-                               "writing an absence.",
+                 "`" + where + "` inside this " +
+                     (absent.kind == Type::OneOf ? "is one of several things"
+                                                 : "may hold nothing") +
+                     ", and there is no writing it without asking.",
                  {"a value is written out the way it is shown"},
                  {"`holds` and `when` open what may be missing."});
       return Type::Str;
@@ -1728,17 +2029,24 @@ private:
                   "be worked out");
     Ty absent;
     std::string where;
-    if (holdsNothingSomewhere(got, absent, where))
+    if (holdsNothingSomewhere(got, absent, where)) {
+      const bool oneOf = absent.kind == Type::OneOf;
+      const std::string what = oneOf ? " is one of several things"
+                                     : " may hold nothing";
       complain(item.span, "E0536",
-               where.empty()
-                   ? std::string("this may hold nothing, and showing it would not "
-                                 "say which.")
-                   : "`" + where + "` inside this may hold nothing, and showing it "
-                                   "would not say which.",
+               where.empty() ? "this" + what + ", and showing it would not say which."
+                             : "`" + where + "` inside this" + what +
+                                   ", and showing it would not say which.",
                {"there is no way to reach what is inside without asking first"},
-               {"`holds` and `when` are the asking. Written straight out, an "
-                "absent `str` and an empty one would look the same, and what "
-                "else an absence should look like is a decision nobody has made."});
+               oneOf
+                   ? std::vector<std::string>{"`when` is the asking, and every case "
+                                              "it covers can be shown on its own."}
+                   : std::vector<std::string>{
+                         "`holds` and `when` are the asking. Written straight out, an "
+                         "absent `str` and an empty one would look the same, and what "
+                         "else an absence should look like is a decision nobody has "
+                         "made."});
+    }
   }
 
   // Whether anything inside this, however deep, may hold nothing. A `many` of
@@ -1748,7 +2056,10 @@ private:
                              unsigned depth = 0) const {
     if (depth > 32) // a struct cannot hold itself (`E0526`), so this is a guard
       return false; // against a shape table that never finished being built
-    if (got.mayBeNothing()) {
+    // Both are values that are one of several things, and writing one out would
+    // not say which — an absence has nothing to write, and a `one-of` in one
+    // case looks like the same characters as another in a different one.
+    if (got.mayBeNothing() || got.kind == Type::OneOf) {
       absent = got;
       return true;
     }
@@ -2242,13 +2553,18 @@ private:
                       "this was not checked for what it could be.",
                       "a `when` chooses between the things a value could be, and what "
                       "this is could not be worked out");
+      if (subject.kind == Type::OneOf && !subject.mayBeNothing()) {
+        whenOverASum(s, subject);
+        break;
+      }
       if (subject != Ty{} && !subject.mayBeNothing()) {
         complain(s.condition->span, "E0520",
                  "a `" + name(subject) + "` is only ever one thing, so there is "
                  "nothing here to choose between.",
                  {"a `when` chooses between the things a value could be"},
-                 {"`or-nothing` in the chain is what gives a value a second shape; "
-                  "without it there is one case and an `if` says it better."});
+                 {"`or-nothing` in the chain is what gives a value a second shape, "
+                  "and a `one-of` is what gives it as many as it names; without "
+                  "either there is one case and an `if` says it better."});
       }
 
       const Branch *held = nullptr;
@@ -2480,6 +2796,7 @@ private:
   void body(const Item &item) {
     switch (item.kind) {
     case ItemKind::Struct:
+    case ItemKind::OneOf:
       break; // read before anything else, and it has no body to walk
 
     case ItemKind::Const:

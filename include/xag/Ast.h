@@ -142,7 +142,11 @@ struct Stmt {
   ExprPtr call;                // Call
 };
 
-enum class ItemKind { Function, Const, Start, Struct };
+// `OneOf` is a type that is one of several things, each with a name and a type
+// of its own — where a `Struct` is all of its fields at once. They are declared
+// the same way and held the same way here, because what is written is the same:
+// a name, then a list of typed names.
+enum class ItemKind { Function, Const, Start, Struct, OneOf };
 
 struct Param {
   Span span;

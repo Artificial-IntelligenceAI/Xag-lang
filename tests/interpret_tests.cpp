@@ -501,6 +501,54 @@ void itHoldsAGroupOfNamedThings() {
 // nothing between them. They wrote nothing at all until they were refused, and
 // nothing at all in all three engines is agreement, which is why the oracle
 // never saw it.
+// A value that is one of several things, each with a name and a type of its own.
+void itHoldsOneOfSeveralThings() {
+  SAYS("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+       "START { var.answer 'a' = [ok:*7*];\n"
+       "  when 'a' { is ok 'n' { print.stdout['n' \\n]; }\n"
+       "             is gave-up { print.stdout[str:*none* \\n]; } } }\n",
+       "7\n");
+  SAYS("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+       "START { var.answer 'a' = [gave-up];\n"
+       "  when 'a' { is ok 'n' { print.stdout['n' \\n]; }\n"
+       "             is gave-up { print.stdout[str:*none* \\n]; } } }\n",
+       "none\n");
+  // More than two, which is the whole reason for the type: `when` is doing
+  // something an `if` could not.
+  SAYS("one-of 'answer' [int64 'ok', bool 'flag', deci64 'money', nothing 'no']\n"
+       "fn.answer 'pick' [int64 'n'] {\n"
+       "  if 'n' == *0* { give [no]; }\n"
+       "  if 'n' == *1* { give [flag:*true*]; }\n"
+       "  if 'n' == *2* { give [money:*1.25*]; }\n"
+       "  give [ok:'n']; }\n"
+       "START { loop.range.int64 'i' = [*0*, *3*] {\n"
+       "  when pick['i'] {\n"
+       "    is ok 'n'    { print.stdout[str:*ok * 'n' \\n]; }\n"
+       "    is flag 'b'  { print.stdout[str:*flag * 'b' \\n]; }\n"
+       "    is money 'd' { print.stdout[str:*money * 'd' \\n]; }\n"
+       "    is no        { print.stdout[str:*no* \\n]; } } } }\n",
+       "no\nflag true\nmoney 1.25\nok 3\n");
+  // One inside a struct, one in a `many`, and one written over.
+  SAYS("one-of 'answer' [int64 'ok', nothing 'no']\n"
+       "struct 'box' [answer 'a', int64 'n']\n"
+       "START { var.box 'b' = [ok:*1* *2*];\n"
+       "  when 'b'.a { is ok 'n' { print.stdout['n' \\n]; } is no { } } }\n",
+       "1\n");
+  SAYS("one-of 'answer' [int64 'ok', nothing 'no']\n"
+       "START { var.many.answer 'as' = [ok:*1* no ok:*3*];\n"
+       "  loop.range.int64 'i' = [*1*, count[loan 'as']] {\n"
+       "    when 'as'['i'] { is ok 'n' { print.stdout['n']; }\n"
+       "                     is no     { print.stdout[str:*-*]; } } }\n"
+       "  print.stdout[\\n]; }\n",
+       "1-3\n");
+  SAYS("one-of 'answer' [int64 'ok', nothing 'no']\n"
+       "START { var.mut.answer 'a' = [ok:*7*];\n"
+       "  set 'a' = [no];\n"
+       "  when 'a' { is ok 'n' { print.stdout['n' \\n]; }\n"
+       "             is no { print.stdout[str:*none* \\n]; } } }\n",
+       "none\n");
+}
+
 void itShowsWhatSeveralThingsHold() {
   SAYS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
        "  print.stdout['xs' \\n]; }\n", "123\n");
@@ -767,6 +815,7 @@ int main() {
   itCountsWhatEachPlaceHolds();
   itHoldsSomethingOrNothing();
   itHoldsAGroupOfNamedThings();
+  itHoldsOneOfSeveralThings();
   itShowsWhatSeveralThingsHold();
   itWritesANumberIntoText();
   itLooksBehindALoan();

@@ -82,6 +82,11 @@ struct Printer {
     case RValueKind::Group:
       text = "group(";
       break;
+    case RValueKind::Case:
+      return "case " + std::to_string(v.local) +
+             (v.operands.empty() ? "" : "(" + operand(v.operands[0]) + ")");
+    case RValueKind::Which:
+      return "which(" + operand(v.operands[0]) + ")";
     }
     for (unsigned i = 0; i < v.operands.size(); ++i)
       text += (i ? ", " : "") + operand(v.operands[i]);

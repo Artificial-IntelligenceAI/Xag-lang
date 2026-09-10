@@ -492,6 +492,61 @@ void fillNeedsAValueThatCopies() {
 // nothing between them. `E0516` refused both until 2026-09-10, for a decision
 // about separators that turned out not to need making: a print writes its
 // pieces side by side, and these are pieces.
+// A type that is one of several things, each with a name and a type of its own
+// — where a struct is all of its fields at once.
+void aOneOfIsOneOfItsCases() {
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    when 'a' { is ok 'n' { } is gave-up { } }\n}\n").ok());
+  // A choice between one is that one.
+  CHECK(run("one-of 'lonely' [int64 'only']\nSTART { }\n").code(0) == "E0527");
+  // One that can be itself has no size a machine could give it. `E0529` comes
+  // first, because a case holding one is not something a case may hold yet.
+  CHECK(run("one-of 'tree' [int64 'leaf', tree 'branch']\nSTART { }\n")
+            .code(1) == "E0526");
+  // Every case, once each, and only cases this type has.
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    when 'a' { is ok 'n' { } }\n}\n").code(0) == "E0522");
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    when 'a' { is ok 'n' { } is ok 'm' { } is gave-up { } }\n}\n")
+            .code(0) == "E0521");
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    when 'a' { is ok 'n' { } is nope 'm' { } is gave-up { } }\n}\n")
+            .code(0) == "E0503");
+  // A case holds what its type says it holds, in both directions.
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [gave-up:*7*];\n}\n").code(0) == "E0528");
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok];\n}\n").code(0) == "E0528");
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    when 'a' { is ok { } is gave-up { } }\n}\n").code(0) == "E0528");
+  // A word that names no case is the mistake it always was.
+  CHECK(inStart("var.int64 'n' = [nope];").code(0) == "E0107");
+  // What it is going into says which `one-of` a case belongs to.
+  CHECK(run("one-of 'a' [int64 'ok', nothing 'no']\n"
+            "one-of 'b' [bool 'ok', nothing 'no']\n"
+            "START {\n    print.stdout[ok:*7* \\n];\n}\n").code(0) == "E0503");
+  // Showing one would not say which of the things it is, and neither would
+  // writing it out or comparing two.
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    print.stdout['a' \\n];\n}\n").code(0) == "E0536");
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    var.str 's' = [convert-to-str[loan 'a']];\n}\n").code(0) == "E0535");
+  CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
+            "START {\n    var.answer 'a' = [ok:*7*];\n"
+            "    var.answer 'b' = [ok:*7*];\n"
+            "    if 'a' == 'b' { }\n}\n").code(0) == "E0506");
+  // What a case may hold, for now.
+  CHECK(run("one-of 'answer' [str 'text', nothing 'gave-up']\nSTART { }\n")
+            .code(0) == "E0529");
+}
+
 void showingSeveralThingsWritesEachOfThem() {
   CHECK(inStart("var.many.int64 'xs' = [*1*];\n"
                 "    print.stdout['xs' \\n];").ok());
@@ -1534,6 +1589,7 @@ int main() {
   anElementIsOneOfWhatItHolds();
   countAsksHowManyOfEither();
   fillNeedsAValueThatCopies();
+  aOneOfIsOneOfItsCases();
   showingSeveralThingsWritesEachOfThem();
   askingToSkipNeedsSayingSo();
   aMutThatWasNotNeededIsSaidSo();

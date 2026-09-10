@@ -48,7 +48,8 @@ bool opensWith(std::string_view spelled, std::string_view word) {
   return spelled.rfind(word, 0) == 0;
 }
 
-MirType takeApart(std::string_view spelled, const Shapes &shapes) {
+MirType takeApart(std::string_view spelled, const Shapes &shapes,
+                  const Shapes &sums = {}) {
   MirType out;
   if (opensWith(spelled, "loanmut ")) {
     out.lending = MirType::Lending::Write;
@@ -78,20 +79,28 @@ MirType takeApart(std::string_view spelled, const Shapes &shapes) {
         out.named = which;
         break;
       }
+  if (out.held == Type::Unknown)
+    for (unsigned which = 0; which < sums.size(); ++which)
+      if (sums[which].name == spelled) {
+        out.held = Type::OneOf;
+        out.named = which;
+        break;
+      }
   return out;
 }
 
 // Every struct's fields, said the way the middle layer says types. A `Shape`
 // holds what the checker worked out, and nothing after the checker can read
 // that — showing a struct walks its fields and has to know what each one is.
-std::vector<std::vector<MirType>> fieldsOfEveryShape(const Shapes &shapes) {
+std::vector<std::vector<MirType>> fieldsOfEveryShape(const Shapes &shapes,
+                                                     const Shapes &sums) {
   std::vector<std::vector<MirType>> out;
   out.reserve(shapes.size());
   for (const Shape &shape : shapes) {
     std::vector<MirType> fields;
     fields.reserve(shape.fields.size());
     for (const Field &field : shape.fields)
-      fields.push_back(takeApart(spell(field.type), shapes));
+      fields.push_back(takeApart(spell(field.type), shapes, sums));
     out.push_back(std::move(fields));
   }
   return out;
@@ -140,7 +149,7 @@ public:
       // A struct declares a shape, not something to run. Laying one out as a
       // body made a callable named after the type, whose parameters were let go
       // at the end though nobody had ever handed them over.
-      if (item.kind == ItemKind::Struct)
+      if (item.kind == ItemKind::Struct || item.kind == ItemKind::OneOf)
         continue;
 
       // A generic is not lowered with the blank still in it. There is no code to
@@ -308,7 +317,7 @@ private:
   }
 
   MirType takeApart(std::string_view spelled) const {
-    return xag::takeApart(spelled, checked_.shapes);
+    return xag::takeApart(spelled, checked_.shapes, checked_.sums);
   }
 
   unsigned addLocal(const std::string &name, TypeRef type, bool copyable) {
@@ -411,7 +420,27 @@ private:
       return into;
     }
 
-    case ExprKind::Typed:
+    case ExprKind::Typed: {
+      // A case of a `one-of`, if the checker read it as one: which case, and
+      // what goes in it. Otherwise the word named a type, and a written value
+      // wearing its type is the value.
+      const auto made = checked_.cases.find(&e);
+      if (made != checked_.cases.end()) {
+        const auto known = checked_.expressions.find(&e);
+        const std::string spelled =
+            spell(known == checked_.expressions.end() ? Ty{} : known->second);
+        std::vector<Operand> parts;
+        if (!e.children.empty())
+          parts.push_back(operandOf(*e.children[0]));
+        const unsigned into = temporary(typeRef(spelled), copiesNamed(spelled));
+        emit(Statement{StatementKind::Assign, e.span, into, {}, {},
+                       RValue{RValueKind::Case, {}, {}, made->second,
+                              std::move(parts), typeRef(spelled)}});
+        return into;
+      }
+      return e.children.empty() ? temporary(typeRef("?"), true) : lower(*e.children[0]);
+    }
+
     case ExprKind::Group:
       return e.children.empty() ? temporary(typeRef("?"), true) : lower(*e.children[0]);
 
@@ -754,6 +783,75 @@ private:
 
   // Inside the arm, the name stands for what was there. It is lent rather than
   // taken, so nothing is dropped through it.
+  const Shape *sumOf(const std::string &spelled) const {
+    for (const Shape &sum : checked_.sums)
+      if (sum.name == spelled)
+        return &sum;
+    return nullptr;
+  }
+
+  // One target per case, chosen by which case the value is in. The same
+  // terminator two shapes use, with as many arms as the type names.
+  void whenOverASum(const Stmt &s, unsigned subject, const Shape &sum, unsigned after) {
+    const unsigned tag = temporary(typeRef("int64"), true);
+    emit(Statement{StatementKind::Assign, s.condition->span, tag, {}, {},
+                   RValue{RValueKind::Which, {}, {}, 0,
+                          {Operand{OperandKind::Copy, subject, {},
+                                   body_.locals[subject].type}},
+                          typeRef("int64")}});
+    // A block per case, and a test in front of each but the last. The switch
+    // this ends in carries a truth, which is the one shape every engine already
+    // branches on — a switch with a target per case would have been a second
+    // shape for each of them to learn, for a choice a chain of asks makes just
+    // as well.
+    //
+    // The last case needs no test: the checker insists every case is written
+    // and each of them once, so what is left when the others are ruled out is
+    // that one.
+    std::vector<unsigned> targets;
+    for (unsigned i = 0; i < sum.fields.size(); ++i)
+      targets.push_back(addBlock());
+    for (unsigned i = 0; i + 1 < sum.fields.size(); ++i) {
+      const unsigned matches = temporary(typeRef("bool"), true);
+      emit(Statement{StatementKind::Assign, s.span, matches, {}, {},
+                     RValue{RValueKind::Binary, "==", {}, 0,
+                            {Operand{OperandKind::Copy, tag, {}, typeRef("int64")},
+                             Operand{OperandKind::Written, 0, std::to_string(i),
+                                     typeRef("int64")}},
+                            typeRef("bool")}});
+      const unsigned next = i + 2 < sum.fields.size() ? addBlock() : targets.back();
+      finish(Terminator{TerminatorKind::Switch, s.span,
+                        Operand{OperandKind::Copy, matches, {}, typeRef("bool")},
+                        {"true"}, {targets[i], next}, false, {}});
+      current_ = next;
+    }
+
+    for (const Branch &arm : s.branches) {
+      const auto which = checked_.chosenCase.find(&arm);
+      if (which == checked_.chosenCase.end() || which->second >= targets.size())
+        continue;
+      current_ = targets[which->second];
+      openScope();
+      if (!arm.holds.empty()) {
+        const std::string inner = spell(sum.fields[which->second].type);
+        const bool copies = copiesNamed(inner);
+        const std::string as = copies ? inner : "loan " + inner;
+        const unsigned into = addLocal(arm.holds, typeRef(as), copies);
+        emit(Statement{StatementKind::Assign, arm.holdsSpan, into, {}, {},
+                       RValue{RValueKind::Inside, {}, {}, 0,
+                              {Operand{OperandKind::Copy, subject, {},
+                                       body_.locals[subject].type}},
+                              typeRef(as)}});
+        names_.back()[arm.holds] = into;
+      }
+      for (const StmtPtr &inner : arm.body.stmts)
+        statement(*inner);
+      closeScope();
+      finish(Terminator{TerminatorKind::Goto, arm.span, {}, {}, {after}, false, {}});
+    }
+    current_ = after;
+  }
+
   void bindHeld(const std::string &holds, unsigned carried, const std::string &spelled,
                 Span where) {
     if (holds.empty())
@@ -942,6 +1040,10 @@ private:
 
       const unsigned subject = lower(*s.condition);
       const std::string carried = body_.types[body_.locals[subject].type.index];
+      if (const Shape *sum = sumOf(withoutLoan(carried))) {
+        whenOverASum(s, subject, *sum, after);
+        break;
+      }
       const unsigned answer = temporary(typeRef("bool"), true);
       emit(Statement{StatementKind::Assign, s.condition->span, answer, {}, {},
                      RValue{RValueKind::Holds, {}, {}, 0,
@@ -1184,7 +1286,9 @@ MirResult build(const Source &source, const Program &program,
   (void)source; // spans in the IR already carry everything a diagnostic needs
   MirResult result = Builder(program, checked).run();
   result.mir.shapes = checked.shapes;
-  result.mir.fieldTypes = fieldsOfEveryShape(checked.shapes);
+  result.mir.sums = checked.sums;
+  result.mir.fieldTypes = fieldsOfEveryShape(checked.shapes, checked.sums);
+  result.mir.caseTypes = fieldsOfEveryShape(checked.sums, checked.sums);
   return result;
 }
 

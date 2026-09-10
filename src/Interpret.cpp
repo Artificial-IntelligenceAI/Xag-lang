@@ -604,9 +604,47 @@ private:
       // Lent, not taken: what holds it goes on holding it.
       Value held = read(value.operands[0]);
       Value *at = behind(held);
+      // A `one-of` keeps what it is holding in its one place, beside the number
+      // saying which case that is. An `or-nothing` is the value itself.
+      if (at && shapeOf(value.operands[0].type).lent().held == Type::OneOf) {
+        Value answer = at->places && !at->places->empty()
+                           ? viewOf((*at->places)[0])
+                           : Value{};
+        endValue(held);
+        return answer;
+      }
       Value answer = at ? viewOf(*at) : Value{};
       endValue(held);
       return answer;
+    }
+
+    // Which of the things it may be this is, as a number: the case's place in
+    // the order the type declares them, which is what the `when` switches on.
+    case RValueKind::Which: {
+      Value held = read(value.operands[0]);
+      Value *at = behind(held);
+      Value answer;
+      answer.kind = Value::Kind::Number;
+      answer.number = at ? at->number : 0;
+      endValue(held);
+      return answer;
+    }
+
+    case RValueKind::Case: {
+      std::vector<Value> held;
+      if (!value.operands.empty()) {
+        Value piece = read(value.operands[0]);
+        if (piece.kind == Value::Kind::Text && !piece.owns) {
+          XagStr copy{nullptr, 0, 0};
+          xag_str_from(&copy, piece.text.bytes, piece.text.length);
+          piece.text = copy;
+          piece.owns = true;
+        }
+        held.push_back(piece);
+      }
+      Value made = collected(std::move(held));
+      made.number = static_cast<XagInt>(value.local);
+      return made;
     }
 
     case RValueKind::Call:

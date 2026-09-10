@@ -151,6 +151,7 @@ private:
   llvm::StructType *many_ = nullptr;
   llvm::StructType *growing_ = nullptr;
   std::unordered_map<std::string, llvm::StructType *> shapes_;
+  std::unordered_map<std::string, llvm::StructType *> sums_;
 
   std::unordered_map<std::string, llvm::Function *> functions_;
   std::unordered_map<std::string, llvm::FunctionCallee> runtime_;
@@ -311,7 +312,36 @@ private:
       return str_;
     if (type.held == Type::Struct)
       return structFor(type.named);
+    if (type.held == Type::OneOf)
+      return sumFor(type.named);
     return typeFor(type.held);
+  }
+
+  // Which of the things it may be, and room for whichever that is.
+  //
+  // The room is counted in `i128` rather than in bytes, so that it is aligned
+  // for anything a case could hold — a `deci128` wants sixteen bytes of
+  // alignment, and a run of bytes gives one.
+  llvm::Type *sumFor(unsigned which) {
+    const Shape &sum = mir_.sums[which];
+    auto found = sums_.find(sum.name);
+    if (found != sums_.end())
+      return found->second;
+    auto *made = llvm::StructType::create(context_, "xag." + sum.name);
+    sums_[sum.name] = made;
+    uint64_t widest = 1;
+    const auto &held = mir_.caseTypes[which];
+    for (const MirType &one : held) {
+      if (one.held == Type::Nothing)
+        continue;
+      const uint64_t size = module_.getDataLayout().getTypeAllocSize(typeFor(one));
+      widest = size > widest ? size : widest;
+    }
+    auto *wide = builder_.getInt128Ty();
+    const uint64_t each = module_.getDataLayout().getTypeAllocSize(wide);
+    made->setBody({builder_.getInt64Ty(),
+                   llvm::ArrayType::get(wide, (widest + each - 1) / each)});
+    return made;
   }
 
   llvm::Type *structFor(unsigned which) {
@@ -1167,7 +1197,12 @@ private:
     case RValueKind::Inside: {
       // Lent where what is inside has an owner, read out where it has not.
       const MirType of = operandType(value.operands[0]);
-      const MirType held = within(of);
+      // A `one-of` keeps what it holds in the room beside the number saying
+      // which case that is, and which case it is decides how the room is read —
+      // so the type this answers with is the one to read it as. An
+      // `or-nothing`'s inside is what is left when the absence is off it.
+      const MirType held =
+          withoutLoan(of).held == Type::OneOf ? typing(value.type) : within(of);
       // The same again: what is inside a borrowed one is reached through the
       // borrow, not through the slot holding the borrow.
       auto *where = isLoan(of) ? builder_.CreateLoad(builder_.getPtrTy(),
@@ -1176,6 +1211,30 @@ private:
       auto *at = builder_.CreateStructGEP(typeFor(withoutLoan(of)), where, 1);
       return copiesNamed(held) ? builder_.CreateLoad(typeFor(held), at)
                                : static_cast<llvm::Value *>(at);
+    }
+
+    case RValueKind::Which: {
+      const MirType of = operandType(value.operands[0]);
+      auto *where = isLoan(of) ? builder_.CreateLoad(builder_.getPtrTy(),
+                                                    slots_[value.operands[0].local])
+                               : slots_[value.operands[0].local];
+      return builder_.CreateLoad(
+          builder_.getInt64Ty(),
+          builder_.CreateStructGEP(typeFor(withoutLoan(of)), where, 0));
+    }
+
+    case RValueKind::Case: {
+      // Built through memory rather than as a value, because what goes in the
+      // room is a different type each time and a value has one shape.
+      auto *shell = typeFor(typing(value.type));
+      auto *made = scratch(shell, "made");
+      builder_.CreateStore(llvm::Constant::getNullValue(shell), made);
+      builder_.CreateStore(builder_.getInt64(value.local),
+                           builder_.CreateStructGEP(shell, made, 0));
+      if (!value.operands.empty())
+        builder_.CreateStore(read(value.operands[0]),
+                             builder_.CreateStructGEP(shell, made, 1));
+      return builder_.CreateLoad(shell, made);
     }
 
     case RValueKind::Call:

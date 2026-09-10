@@ -826,6 +826,80 @@ There is no way to reach what is inside without asking first. Asking a `bool` is
 `E0519`, because a `bool` is never absent; using something that may be missing
 where a `bool` was wanted is `E0506`.
 
+## A type that is one of several things
+
+A struct holds all of its fields at once. A `one-of` is exactly one of them at a
+time — "and" against "or". It is declared the same way, because what is written
+is the same: a name, then a list of typed names.
+
+```
+one-of 'answer' [int64 'ok', bool 'flag', deci64 'money', nothing 'gave-up']
+```
+
+Each case has a name and a type of its own, and a case that carries nothing says
+`nothing`. A choice between one is that one, so fewer than two cases is `E0527`;
+a `one-of` that can be itself has no size a machine could give it, and is
+`E0526` for the same reason a struct that holds itself is.
+
+**A case holds one thing.** A case that wants to carry two names a struct — the
+language already has the word for a group of named things, and letting a case
+hold several would put a list inside the declaration, a list of names inside
+every `is`, and the same again inside every `holds`.
+
+### Which one it is, is written where the value is made
+
+```
+var.answer 'a' = [ok:*7*];
+var.answer 'b' = [money:*1.25*];
+var.answer 'c' = [gave-up];
+```
+
+`ok:` is the same notation `int32:*161*` is: the left says how to read the
+right. Writing a type there says what a written value is; writing a case says
+which of the things a `one-of` may be this one is. A case that holds nothing is
+written bare, the way `nothing` is.
+
+What the value is going into says which `one-of` a case belongs to. Where two of
+them share a case name and nothing says which is meant, that is `E0503` rather
+than a guess.
+
+### Getting at it is a `when`
+
+```
+when 'a' {
+    is ok 'n'    { print.stdout[str:*ok * 'n' \n]; }
+    is flag 'b'  { print.stdout[str:*flag * 'b' \n]; }
+    is money 'd' { print.stdout[str:*money * 'd' \n]; }
+    is gave-up   { print.stdout[str:*gave up* \n]; }
+}
+```
+
+The word after `is` says which case, and the name after that is what the case
+holds, lent for as long as the arm runs. A case holding nothing has no name
+after it, the same way `is nothing` has none.
+
+This is what `when` was built for. Every case written and each of them once —
+`E0522` when one is left out, `E0521` when one is written twice — which with two
+cases was a courtesy and with five is the reason to write a `when` rather than a
+chain of asks. The rule is the same one `or-nothing` has had all along, counted
+over as many cases as the type names.
+
+**Showing one is refused** (`E0536`), and so is writing one out (`E0535`) and
+comparing two (`E0506`). All three ask the same impossible question: what a
+value is, without asking which of the things it is. `when` is the asking, and
+inside an arm the case's own value can be shown, written and compared like
+anything else.
+
+**What a case may hold, for now**, is a number, a `bool` or `nothing`
+(`E0529`). A case holding text or a `many` owns something, and letting go of it
+means knowing which case is live where the value ends — which is a choice made
+while the program runs. That is the next piece of this.
+
+`or-nothing` stays its own thing rather than becoming a two-case `one-of`. It is
+in the type chain rather than declared, it needs no name for its cases, and
+`holds` reads it in one line; folding the two together would cost all of that to
+save a table.
+
 ## A group of named things
 
 A `struct` gives a name to a group of things, each with a name and a type of its
@@ -1260,10 +1334,11 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **A type with more than two shapes.** `when` covers every case a value could
-  be, and today a value can be two things. A type that could be several — with
-  its own names and its own contents — is what would make the construct earn
-  itself, and the middle layer is already shaped for it.
+- **A case that holds something with an owner.** A `one-of` case holds a number,
+  a `bool` or `nothing` today (`E0529`). Text, a `many` or a struct would mean
+  letting go of whatever the live case holds when the value ends, and which case
+  is live is not known until it runs — so the drop is a choice made while the
+  program runs, in three engines.
 - **Visibility.** `export` and `program` wait on there being more than one file.
 - **`wrapping` on a sum with no name.** The word is written where a name is
   declared, and a sum happens between values. `('n' x *4*)` inside a comparison

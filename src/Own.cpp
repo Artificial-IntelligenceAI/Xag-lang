@@ -933,6 +933,10 @@ private:
           return;
     }
 
+    // A type declares a shape, not something that runs. Walking a `one-of`'s
+    // cases as if they were a body read its case names as parameters.
+    if (item.kind == ItemKind::Struct || item.kind == ItemKind::OneOf)
+      return;
     scopes_.emplace_back();
     if (item.kind == ItemKind::Function) {
       giving_ = modeOfChain(item.chain);

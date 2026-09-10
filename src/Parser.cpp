@@ -77,7 +77,7 @@ const char *question(Slot slot) {
 
 Slot slotOf(std::string_view word) {
   if (word == "var" || word == "fn" || word == "const" || word == "loop" ||
-      word == "struct")
+      word == "struct" || word == "one-of")
     return Slot::Kind;
   if (word == "export" || word == "program" || word == "file")
     return Slot::Visibility;
@@ -116,6 +116,8 @@ const Role kFn{"a `fn`", "fn", true,
                {Slot::Visibility, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
 const Role kStruct{"a `struct`", "struct", false,
                    {Slot::Unknown, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
+const Role kOneOf{"a `one-of`", "one-of", false,
+                  {Slot::Unknown, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 const Role kConst{"a `const`", "const", true,
                   {Slot::Visibility, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 // `no-itmt` comes first, because it is about the loop rather than about the name
@@ -729,6 +731,15 @@ private:
     if (check(TokenKind::LBracket)) {
       expr->args = valueList();
       expr->span = Span{first.span.begin, expr->args.span.end};
+    } else if (expr->path.size() == 1) {
+      // A word on its own, which may name a case of a `one-of` that holds
+      // nothing — `gave-up`, the way `nothing` is written bare. Whether it
+      // names one is the checker's question, and it is asked of the same node a
+      // case with something in it makes.
+      auto made = make(ExprKind::Typed, first.span);
+      made->text = expr->path[0];
+      made->span = Span{first.span.begin, previous().span.end};
+      return made;
     } else {
       expr->span = Span{first.span.begin, previous().span.end};
       complain(expr->span, "E0107", "a word on its own is not a value.",
@@ -1032,9 +1043,22 @@ private:
           } else if (peek().kind == TokenKind::Word && peek().text == "nothing") {
             arm.holdsSpan = advance().span;
             arm.matchesNothing = true;
+          } else if (peek().kind == TokenKind::Word) {
+            // A case of a `one-of`: the word says which case, and a name after
+            // it is what the case holds, lent for the arm. A case holding
+            // nothing has no name after it, the same way `is nothing` has none.
+            const Token got = advance();
+            arm.family = got.text;
+            arm.familySpan = got.span;
+            arm.span.end = got.span.end;
+            if (check(TokenKind::Name)) {
+              const Token bound = advance();
+              arm.holds = bound.text;
+              arm.holdsSpan = bound.span;
+            }
           } else {
             complain(peek().span, "E0108",
-                     "an `is` says either a name to lend what is there to, or "
+                     "an `is` says a case, a name to lend what is there to, or "
                      "`nothing`.",
                      {"every case a `when` covers is written out"}, {},
                      std::string("found ") + describe(peek().kind));
@@ -1339,6 +1363,34 @@ private:
         }
       }
       readFields(out.params);
+    } else if (out.chain.startsWith("one-of")) {
+      // Declared exactly as a `struct` is, because what is written is the same:
+      // a name, then a list of typed names. What differs is that a value is one
+      // of them rather than all of them, which is a question for the checker.
+      out.kind = ItemKind::OneOf;
+      validate(out.chain, kOneOf);
+      if (out.chain.segments.size() > 1)
+        complain(out.chain.span, "E0212",
+                 "a `one-of` says nothing but what it is called.",
+                 {"a chain says what is unusual, and says nothing else"},
+                 {"what a `one-of` can be is written in its cases, and each of "
+                  "them has a chain of its own."});
+      if (check(TokenKind::Name)) {
+        const Token name = advance();
+        out.name = name.text;
+        out.nameSpan = name.span;
+      } else {
+        complain(peek().span, "E0101", "a declaration marks what it names.",
+                 {"a name wears marks where it is given, and a word does not"},
+                 {"`token` is the type; `'token'` is what it is called."},
+                 std::string("found ") + describe(peek().kind));
+        if (check(TokenKind::Word)) {
+          const Token name = advance();
+          out.name = name.text;
+          out.nameSpan = name.span;
+        }
+      }
+      readFields(out.params);
     } else if (out.chain.startsWith("const")) {
       out.kind = ItemKind::Const;
       validate(out.chain, kConst);
@@ -1355,8 +1407,8 @@ private:
       expect(TokenKind::Semicolon, "`;`");
     } else {
       complain(out.chain.span, "E0104",
-               "a `PREP` holds structs, constants and functions.",
-               {"`struct`, `const` and `fn` are what a `PREP` is made of"},
+               "a `PREP` holds types, constants and functions.",
+               {"`struct`, `one-of`, `const` and `fn` are what a `PREP` is made of"},
                {"a `var` belongs inside something that runs, and the part that runs "
                 "is `START`."});
       recover();

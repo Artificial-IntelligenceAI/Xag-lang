@@ -30,6 +30,10 @@ enum class Type {
   Deci32, Deci64, Deci128,
   Many,   // several of one type, however many were there when it was made
   Struct, // a group of named things, each with a type of its own
+  // One of several named things, each with a type of its own — where a struct
+  // is all of them at once. `or-nothing` is the two-case one the language had
+  // first, and stays its own thing.
+  OneOf,
   // A blank, written `any`: the type is the caller's to pick, and every `any` in
   // one signature is the same one. It never reaches the middle layer — a
   // generic is written once and built once per type it is called with, so what
@@ -41,6 +45,11 @@ const char *name(Type type);
 
 // The type a word names, or `Unknown` if no word names it.
 Type typeNamed(std::string_view word);
+
+// The name of a struct or a `one-of`, for anything holding a `Ty` without the
+// checker's tables to hand.
+const char *shapeName(unsigned which);
+const char *sumName(unsigned which);
 
 bool isWhole(Type type);   // int or uint
 bool isSigned(Type type);  // int
@@ -227,6 +236,10 @@ constexpr Ty structNamed(unsigned which) {
   return Ty{Type::Struct, Type::Unknown, false, which};
 }
 
+constexpr Ty sumTyped(unsigned which) {
+  return Ty{Type::OneOf, Type::Unknown, false, which};
+}
+
 // One of the things a `many` holds. Which struct it is has to come along:
 // building the element as `Ty{array.element}` said `Type::Struct` and left the
 // number behind, so every `many` of a struct resolved to whichever struct was
@@ -271,7 +284,9 @@ struct Shape {
   Span span;
 };
 
-// What a program's structs are made of, in the order they were declared.
+// What a program's structs are made of, in the order they were declared. A
+// `one-of` is held the same way: a name and a list of typed names, which is what
+// is written for either of them.
 using Shapes = std::vector<Shape>;
 
 struct CheckResult {
@@ -341,6 +356,14 @@ struct CheckResult {
   // The structs a file declared, so nothing after the checker has to read them
   // out of the tree again. A `Ty` naming one is an index into this.
   std::vector<Shape> shapes;
+  // The `one-of` types, in the order they were declared. Their `fields` are the
+  // cases: a value is one of them rather than all of them.
+  std::vector<Shape> sums;
+  // Which case a `Typed` expression makes, when the word names one rather than
+  // a type. The middle layer carries the number; the name is the checker's.
+  std::unordered_map<const Expr *, unsigned> cases;
+  // Which case a `when` arm covers.
+  std::unordered_map<const Branch *, unsigned> chosenCase;
   // Reaches into a `many` that were shown to be places it has, so that nothing
   // asks again while the program runs. A `many` is a fixed length once it is
   // made, which is what makes a loop counting to `count[…]` answerable here.

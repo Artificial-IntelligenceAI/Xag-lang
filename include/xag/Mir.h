@@ -38,8 +38,8 @@ struct MirType {
   // differently — and growing may move every place, which is why a loan into
   // one cannot outlive a growth.
   bool grows = false;
-  // What is left once the words above are off it. `named` says which struct,
-  // when `held` is one.
+  // What is left once the words above are off it. `named` says which struct or
+  // which `one-of`, when `held` is one of those.
   Type held = Type::Unknown;
   unsigned named = 0;
 
@@ -67,7 +67,7 @@ struct MirType {
   bool operator==(const MirType &other) const {
     return lending == other.lending && orNothing == other.orNothing &&
            many == other.many && held == other.held &&
-           (held != Type::Struct || named == other.named);
+           ((held != Type::Struct && held != Type::OneOf) || named == other.named);
   }
   bool operator!=(const MirType &other) const { return !(*this == other); }
 
@@ -123,6 +123,13 @@ enum class RValueKind {
   Group,   // one operand per thing a struct holds, in the order it holds them
   Part,    // one operand: a struct, and `local` says which of its fields
   Taken,   // the same, but the field is handed over and left holding nothing
+  // A `one-of`: which of the things it may be this is, and what that case
+  // holds. `Case` makes one — `local` says which case, and there is one operand
+  // unless the case holds nothing. `Which` answers the case a value is in, as a
+  // number, which is what a `when` switches on. What the case holds is read
+  // with `Inside`, exactly as an `or-nothing`'s is.
+  Case,
+  Which,
 };
 
 struct RValue {
@@ -219,6 +226,9 @@ struct Mir {
   // what the checker worked out, which the engines cannot read; showing a
   // struct walks its fields and has to know what each one is.
   std::vector<std::vector<MirType>> fieldTypes;
+  // The `one-of` types and what each of their cases holds, the same way.
+  std::vector<Shape> sums;
+  std::vector<std::vector<MirType>> caseTypes;
 };
 
 struct MirResult {

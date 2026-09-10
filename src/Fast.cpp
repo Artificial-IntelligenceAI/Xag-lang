@@ -68,6 +68,9 @@ enum class Op : uint8_t {
   // known until it runs, so this is one op that walks rather than a print per
   // place worked out here. `TextOfAll` is the same walk into a `str`.
   ShowAll, TextOfAll,
+  // A `one-of`: `MakeCase` builds one — `a` is which case and `b` how many
+  // values follow — and `WhichCase` answers which case a value is in.
+  MakeCase, WhichCase,
   Jump, JumpUnless, Return, ReturnValue,
   // A struct is a fixed run of places, held exactly as a `many` is; only the
   // type tells them apart, and the type was settled before anything ran. What
@@ -545,7 +548,31 @@ private:
 
     case RValueKind::Inside: {
       const uint32_t of = into(value.operands[0], scratch);
-      emit(Code{Op::TakeInside, s.place, of, 0, 0});
+      // A `one-of` keeps what it holds in its one place; an `or-nothing` is the
+      // value itself.
+      emit(Code{typing(value.operands[0].type).lent().held == Type::OneOf
+                    ? Op::ViewPart
+                    : Op::TakeInside,
+                s.place, of, 0, 0});
+      return;
+    }
+
+    case RValueKind::Which: {
+      const uint32_t of = into(value.operands[0], scratch);
+      emit(Code{Op::WhichCase, s.place, of, 0, 0});
+      return;
+    }
+
+    case RValueKind::Case: {
+      const std::vector<uint32_t> froms = gather(value.operands, scratch);
+      const uint32_t place = through ? scratch++ : s.place;
+      emit(Code{Op::MakeCase, place, value.local,
+                static_cast<uint32_t>(froms.size()), 0});
+      for (size_t i = 0; i < froms.size(); ++i)
+        emit(Code{Op::Argument, 0, froms[i],
+                  isText(typing(value.operands[i].type).lent()) ? 1u : 0u, 0});
+      if (through)
+        emit(Code{Op::StoreThrough, s.place, place, 0, 0});
       return;
     }
 
@@ -1580,6 +1607,12 @@ private:
         makeGroup(to, slots, code + at + 1, one.b);
         at += one.b;
         break;
+      [[unlikely]] case Op::MakeCase:
+        makeGroup(to, slots, code + at + 1, one.b);
+        to.whole = static_cast<XagInt>(one.a);
+        at += one.b;
+        break;
+      case Op::WhichCase: to.whole = read(one.a).whole; break;
       [[unlikely]] case Op::ViewPart: viewPart(to, slots[one.a], one.b); break;
       [[unlikely]] case Op::TakePart: takePart(to, slots[one.a], one.b); break;
       [[unlikely]] case Op::StorePart:
