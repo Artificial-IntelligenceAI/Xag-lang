@@ -63,8 +63,11 @@ struct TypedExpr {
   Ty type;                    // what the checker worked out this is
   std::string text;           // Name, Written, Escape, Unary/Binary's operator
   std::string name;           // Call: which one
-  unsigned which = 0;         // Case: the case; Field: the field
+  unsigned which = 0;         // Case: the case; Field: the field; Made: which struct
   unsigned sum = 0;           // Case: which `one-of`
+  // Element: whether reaching this place was already answered where the program
+  // was read, so nothing has to ask again while it runs.
+  bool settled = false;
   std::vector<TypedPtr> children;
   // A call's arguments, one list per parameter, each a run of items that are
   // joined or collected by whatever they go into.
@@ -89,6 +92,7 @@ struct TypedArm {
   Span bindsSpan;
   Ty bound;                   // what that name holds
   unsigned which = 0;         // `when` over a `one-of`: which case
+  bool chosen = false;        // whether `which` was said at all
   bool matchesNothing = false;
   std::string family;         // `whichever`: the word that says which kind
   TypedBlock body;
@@ -107,6 +111,7 @@ struct TypedStmt {
   bool changeable = false;    // `mut`
   bool keepsCounter = false;  // `perm`
   bool wrapping = false;      // a sum that comes round is meant to
+  bool noItmt = false;        // a loop the chain told not to run ahead of time
   std::vector<TypedPtr> value;    // the items being assigned or given
   TypedPtr index;             // `set 'xs'[…] = …`
   // `set 'p'.x = …`, as written. Which field each of those is depends on what
@@ -147,6 +152,10 @@ struct TypedItem {
   Ty answers;
   Span answersSpan;      // the chain, for a diagnostic about the answer
   std::string loan;      // which loan the answer is on, when it says
+  // Whether a blank is still written anywhere in it. A generic is not lowered
+  // with the blank still in: it reaches the middle layer once per type it is
+  // called with, blank filled.
+  bool generic = false;
   std::vector<TypedParam> params;
   std::vector<TypedPtr> value;   // Const
   TypedBlock body;

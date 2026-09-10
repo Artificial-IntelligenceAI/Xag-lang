@@ -86,7 +86,7 @@ void aStructMadeWhereItStandsIsNotACall() {
              "struct 'line' [point 'from', point 'to']\n"
              "START { var.line 'l' = [point[*1* *2*] point[*3* *4*]];\n"
              "  print.stdout['l'.from.x \\n]; }\n",
-             "made point : point"));
+             "made point #0 : point"));
   CHECK(says("START { var.str 's' = [*hello*];\n"
              "  var.int64 'n' = [count[loan 's']];\n"
              "  print.stdout['n' \\n]; }\n",

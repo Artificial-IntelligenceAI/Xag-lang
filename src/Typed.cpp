@@ -158,6 +158,7 @@ private:
       }
       if (!e.children.empty())
         out->children.push_back(expr_(*e.children[0]));
+      out->settled = checked_.settled.count(&e) != 0;
       return out;
     }
 
@@ -190,9 +191,14 @@ private:
       // settled before this: a struct made where it stands, or a call.
       bool isSum = false;
       const std::string word = e.path.size() == 1 ? e.path[0] : std::string();
-      if (!word.empty() && shapeNamed(word, isSum) && !isSum) {
+      const Shape *shape = word.empty() ? nullptr : shapeNamed(word, isSum);
+      if (shape && !isSum) {
         auto out = make(TypedKind::Made, e);
         out->text = word;
+        // Which struct, not which name — the number is what everything below
+        // the checker wants, and working the name out again is the thing this
+        // layer exists to stop.
+        out->which = static_cast<unsigned>(shape - checked_.shapes.data());
         if (!e.args.values.empty())
           out->children = items(e.args.values[0]);
         return out;
@@ -236,6 +242,7 @@ private:
     const auto which = checked_.chosenCase.find(&branch);
     if (which != checked_.chosenCase.end()) {
       out.which = which->second;
+      out.chosen = true;
       if (subject.kind == Type::OneOf && subject.named < checked_.sums.size() &&
           out.which < checked_.sums[subject.named].fields.size())
         out.bound = checked_.sums[subject.named].fields[out.which].type;
@@ -304,6 +311,7 @@ private:
     case StmtKind::LoopRange:
       out->kind = TypedStmtKind::LoopRange;
       out->keepsCounter = chainSays(s.chain, "perm");
+      out->noItmt = chainSays(s.chain, "no-itmt");
       if (s.value.values.size() == 2) {
         if (!s.value.values[0].items.empty())
           out->from = expr_(*s.value.values[0].items[0]);
@@ -314,6 +322,7 @@ private:
       break;
     case StmtKind::LoopWhile:
       out->kind = TypedStmtKind::LoopWhile;
+      out->noItmt = chainSays(s.chain, "no-itmt");
       if (s.condition) {
         out->condition = expr_(*s.condition);
         out->bound = typeOf(*s.condition).within();
@@ -371,6 +380,9 @@ private:
       out.answers = said->second;
     out.answersSpan = item.chain.span;
     out.loan = loanOf(item.chain);
+    out.generic = chainSays(item.chain, "any");
+    for (const Param &param : item.params)
+      out.generic = out.generic || chainSays(param.chain, "any");
     switch (item.kind) {
     case ItemKind::Function:
       out.kind = TypedItemKind::Function;
@@ -417,6 +429,16 @@ private:
       out_ << "  ";
   }
 
+  // How it is held is part of what a node carries, and a `Ty` spells itself
+  // without it — so the word goes on here, where a reader is looking to see
+  // whether the answer on the node is the right one.
+  static std::string spelled(Ty type) {
+    const char *lent = type.held == Held::Loan      ? "loan "
+                       : type.held == Held::LoanMut ? "loanmut "
+                                                    : "";
+    return lent + name(type);
+  }
+
   static const char *named(TypedKind kind) {
     switch (kind) {
     case TypedKind::Name: return "name";
@@ -446,9 +468,10 @@ private:
       out_ << ' ' << e.text;
     if (!e.name.empty())
       out_ << ' ' << e.name;
-    if (e.kind == TypedKind::Case || e.kind == TypedKind::Field)
+    if (e.kind == TypedKind::Case || e.kind == TypedKind::Field ||
+        e.kind == TypedKind::Made)
       out_ << " #" << e.which;
-    out_ << " : " << name(e.type) << '\n';
+    out_ << " : " << spelled(e.type) << '\n';
     for (const TypedPtr &child : e.children)
       expr(*child, deep + 1);
     for (const std::vector<TypedPtr> &given : e.args)
@@ -465,13 +488,13 @@ private:
     pad(deep);
     switch (s.kind) {
     case TypedStmtKind::Declare:
-      out_ << "declare '" << s.name << "' : " << name(s.type) << '\n';
+      out_ << "declare '" << s.name << "' : " << spelled(s.type) << '\n';
       break;
     case TypedStmtKind::Set: out_ << "set '" << s.name << "'\n"; break;
     case TypedStmtKind::Add: out_ << "add '" << s.name << "'\n"; break;
     case TypedStmtKind::If: out_ << "if\n"; break;
     case TypedStmtKind::LoopRange:
-      out_ << "loop.range '" << s.name << "' : " << name(s.type) << '\n';
+      out_ << "loop.range '" << s.name << "' : " << spelled(s.type) << '\n';
       break;
     case TypedStmtKind::LoopWhile: out_ << "loop.while\n"; break;
     case TypedStmtKind::When: out_ << "when\n"; break;
@@ -496,9 +519,11 @@ private:
       pad(deep + 1);
       out_ << "arm";
       if (!one.family.empty())
-        out_ << ' ' << one.family << " #" << one.which;
+        out_ << ' ' << one.family;
+      if (one.chosen)
+        out_ << " #" << one.which;
       if (!one.binds.empty())
-        out_ << " '" << one.binds << "' : " << name(one.bound);
+        out_ << " '" << one.binds << "' : " << spelled(one.bound);
       if (one.matchesNothing)
         out_ << " nothing";
       if (one.always)
@@ -514,10 +539,10 @@ private:
   void one(const TypedItem &item) {
     switch (item.kind) {
     case TypedItemKind::Function:
-      out_ << "fn " << item.name << " -> " << name(item.answers) << '\n';
+      out_ << "fn " << item.name << " -> " << spelled(item.answers) << '\n';
       break;
     case TypedItemKind::Const:
-      out_ << "const '" << item.name << "' : " << name(item.answers) << '\n';
+      out_ << "const '" << item.name << "' : " << spelled(item.answers) << '\n';
       break;
     case TypedItemKind::Start:
       out_ << "START\n";
@@ -525,7 +550,7 @@ private:
     }
     for (const TypedParam &param : item.params) {
       pad(1);
-      out_ << "param '" << param.name << "' : " << name(param.type) << '\n';
+      out_ << "param '" << param.name << "' : " << spelled(param.type) << '\n';
     }
     for (const TypedPtr &value : item.value)
       expr(*value, 1);

@@ -237,9 +237,20 @@ struct MirResult {
   bool ok() const { return !anyErrors(diagnostics); }
 };
 
+struct TypedProgram;
+
 // Lowering reads what the checker already worked out rather than working it out
 // again. Drops are placed where a scope ends; making them conditional on what
 // was moved is drop elaboration, which does not exist yet.
+//
+// It reads the typed tree, where the checker's answer is already on every node.
+// Before that it walked the tree as written and asked the same questions over,
+// spelling every type out and parsing it back — and two of the bugs that cost a
+// day were the answers disagreeing.
+MirResult build(const Source &source, const TypedProgram &program);
+
+// The same, given the tree as written and what the checker made of it. Builds
+// the typed tree and asks the one above.
 MirResult build(const Source &source, const Program &program,
                const CheckResult &checked);
 

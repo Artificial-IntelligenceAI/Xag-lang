@@ -33,15 +33,6 @@ std::string symbolFor(const std::string &name) {
   return out;
 }
 
-// A value handed over by being copied, which is everything but text and the
-// things that hold it.
-// What is left once the `or-nothing` is off it.
-// A type as the middle layer spells it, which is the one language both the
-// checker and this file already speak.
-std::string spellOf(Ty type) {
-  return type.kind == Type::Unknown ? std::string("?") : name(type);
-}
-
 // The same questions, asked of the type rather than of its spelling. The
 // spellings survive only where a string is genuinely wanted; everything that
 // used to pull one apart asks these.

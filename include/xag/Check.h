@@ -251,10 +251,21 @@ constexpr Ty elementOf(Ty array) {
     Ty inner = array;
     inner.deep = array.deep - 1;
     inner.orNothing = false;
+    // Growing is the outer array's, not a row's: `many-growing.many.int64` is a
+    // growing array of ordinary rows. Carried in, a row came out spelled
+    // `many-growing int64` and was laid out and let go of as something it is
+    // not. A borrow is the outer array's too — one place of a lent array is not
+    // itself lent.
+    inner.grows = false;
+    inner.held = Held::Owned;
     return inner;
   }
-  return array.element == Type::Struct ? structNamed(array.named)
-                                       : Ty{array.element};
+  // Which struct *or which `one-of`*: a `many` of a sum lost the number the
+  // same way a `many` of a struct once did, and came back as whichever sum was
+  // declared first.
+  return array.element == Type::Struct  ? structNamed(array.named)
+         : array.element == Type::OneOf ? sumTyped(array.named)
+                                        : Ty{array.element};
 }
 
 // `many int64`, spelled the way it is written apart from the dots — which is

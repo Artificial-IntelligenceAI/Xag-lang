@@ -2791,6 +2791,11 @@ private:
       break; // read before anything else, and it has no body to walk
 
     case ItemKind::Const:
+      // What it answers with, written down against it the way a function's is.
+      // A constant lowers to a body that answers with its value, so everything
+      // below wants the same answer for both — and nothing below the checker
+      // should be reading a chain to work one out.
+      result_.items[&item] = typeOfChain(item.chain);
       onlyValueChecked(item.value, typeOfChain(item.chain), item.span);
       break;
 
