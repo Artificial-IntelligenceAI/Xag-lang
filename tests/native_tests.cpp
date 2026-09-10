@@ -294,6 +294,25 @@ void dividingIsAnInstruction() {
 
 // A place shown to be one the `many` has is not asked about again while it
 // runs. Asking costs a compare and a branch in the middle of every loop.
+// A `one-of` is one run of memory: the room from the front, and the number
+// saying which case it is in just past where the widest case can reach. The
+// number in a field of its own cost a whole alignment unit, because the room
+// behind it had to start aligned.
+void aOneOfIsTheRoomAndTheNumberPastIt() {
+  // A `str` case wants twenty-four bytes at eight; a `deci128` case wants
+  // sixteen at sixteen. Thirty-two holds both and the number; a field in front
+  // made it forty-eight.
+  EMITS("one-of 'mixed' [str 'text', deci128 'd']\n"
+        "START { var.mixed 'c' = [text:*hi*];\n"
+        "  when 'c' { is text 'x' { print.stdout['x' \\n]; } is d 'y' { } } }\n",
+        "%xag.mixed = type { [2 x i128] }");
+  // Two small cases are two bytes, not a word and a word.
+  EMITS("one-of 'small' [bool 'yes', nothing 'no']\n"
+        "START { var.small 'a' = [yes:*true*];\n"
+        "  when 'a' { is yes 'x' { print.stdout['x' \\n]; } is no { } } }\n",
+        "%xag.small = type { [2 x i8] }");
+}
+
 void aSettledPlaceIsNotAskedAgain() {
   REJECTS("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
           "  print.stdout['xs'[*2*] \\n]; }\n",
@@ -455,6 +474,7 @@ int main() {
   itEmitsAGroupOfNamedThings();
   aStructLetsGoOfWhatItHolds();
   dividingIsAnInstruction();
+  aOneOfIsTheRoomAndTheNumberPastIt();
   aSettledPlaceIsNotAskedAgain();
   itWritesANumberIntoText();
   itLooksBehindALoan();

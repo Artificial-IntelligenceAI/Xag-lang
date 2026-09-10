@@ -921,22 +921,32 @@ per case that owns something. C makes you write that switch by hand; C++'s
 
 ### What it costs to keep one
 
+One run of memory: the room from the front, and the number saying which case it
+is in sitting just past where the widest case can reach.
+
 ```llvm
-%xag.small = type { i8, [1 x i8] }     ; two cases, one holding a `bool`
-%xag.mid   = type { i8, [1 x i64] }    ; an `int64` case
-%xag.wide  = type { i8, [1 x i128] }   ; a `deci128` case
+%xag.small = type { [2 x i8] }     ; a `bool` case and an empty one — 2 bytes
+%xag.mid   = type { [2 x i64] }    ; an `int64` case — 16
+%xag.mixed = type { [2 x i128] }   ; a `str` case and a `deci128` case — 32
 ```
 
-The tag is the smallest whole number that can tell the cases apart, and the room
-is as wide as the widest case, counted in units of the strictest alignment any
-case wants — so a `deci128` case gets its sixteen bytes and a choice between two
-small things is two bytes. Counting the room in `i128` regardless, which is what
-this did first, made every `one-of` at least twenty-four bytes: memory moved
-about for nothing.
+The number is the narrowest one that can tell the cases apart, and the room is
+as wide as the widest case, in units of the strictest alignment any case wants.
+Nothing writes past the widest case but the number itself: a case's value goes
+in at the front and is at most that wide.
 
-Rust packs the tag into the payload's own padding and can lose it entirely when
-a case has a value the others cannot have — `Option<&T>` is a pointer, with null
-for the absence. Nothing here does that yet.
+**Two things this was, and why neither is it.** Counting the room in `i128`
+whatever it held made every one of these at least twenty-four bytes. Then the
+number was a field of its own in front of the room — and a field costs a whole
+alignment unit, because what follows it has to start aligned, so `mixed` above
+was forty-eight bytes to hold thirty-two bytes' worth. Past the end of the
+widest case is space the alignment was going to round up to anyway.
+
+**Where Rust is still smaller.** It puts the tag inside a case's *own* padding,
+which needs the payload written field by field rather than in one go — writing
+it whole may clobber the padding the tag is living in. And it can lose the tag
+altogether where one case has a value no other case can have: `Option<&T>` is a
+pointer, with null for the absence. Neither is done here.
 
 `or-nothing` stays its own thing rather than becoming a two-case `one-of`. It is
 in the type chain rather than declared, it needs no name for its cases, and
@@ -1377,10 +1387,12 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **A tag packed where there is already room for it.** A `one-of` keeps its tag
-  in a field of its own, which the payload's alignment then pads around. Rust
-  puts it in that padding, and loses it altogether where a case has a value the
-  others cannot have. Nothing here does either.
+- **A tag inside a case's own padding, or gone.** A `one-of` keeps the number
+  saying which case just past the widest case. Rust puts it inside a case's own
+  padding, which wants the payload written field by field — written whole, it
+  would clobber the padding the number is in — and loses it altogether where one
+  case has a value no other can have, the way `Option<&T>` is a pointer with
+  null for the absence.
 - **Visibility.** `export` and `program` wait on there being more than one file.
 - **`wrapping` on a sum with no name.** The word is written where a name is
   declared, and a sum happens between values. `('n' x *4*)` inside a comparison
