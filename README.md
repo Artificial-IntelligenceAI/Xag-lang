@@ -51,7 +51,7 @@ and `XAG_RUNTIME` overrides it if you keep the runtime elsewhere.
 obviously correct rather than fast, which walks the IR as written and does nothing
 clever anywhere. When the engines disagree it is the one to look at first, which is
 not the same as the one to believe: on 2026-09-07 it and the native backend shared
-a mistake for months and the fast interpreter was the only one right. Three engines
+a two-day-old mistake and the fast interpreter was the only one right. Three engines
 say *that* they disagree and *which one stands apart*. Which is correct is a
 question for whoever reads the program.
 
