@@ -43,25 +43,38 @@ $lld -T "$here/bare.ld" "$out/start.o" "$out/decimal_unit.o" "$out/deci.o" \
 
 # Wait for the guest to say it is done rather than for a fixed count of
 # seconds: it prints a character per hypercall, so how long it takes depends on
-# how much it has to say.
+# how much it has to say — and, on a busy machine, on how much of the machine
+# it is given. So what is watched is progress and not the clock: the guest is
+# called stuck only when it has said nothing new for a long stretch, which a
+# machine under load does not cause. Load makes this test slower. It does not
+# make it fail.
+# Overridable so the giving-up can itself be tested.
+quiet_limit=${QUIET_LIMIT:-300}
 log="$out/said.txt"
 : > "$log"
 "$qemu" -M pseries -cpu POWER9 -m 1G -nographic -nodefaults \
         -serial mon:stdio -kernel "$out/decimal_unit.elf" > "$log" 2>/dev/null &
 pid=$!
-waited=0
-while [ $waited -lt 600 ]; do
+before=0
+quiet=0
+while [ $quiet -lt $quiet_limit ]; do
   if grep -q '^end' "$log" 2>/dev/null; then break; fi
   if ! kill -0 $pid 2>/dev/null; then break; fi
   sleep 1
-  waited=$((waited + 1))
+  now=$(wc -c < "$log" 2>/dev/null | tr -d ' ')
+  if [ "${now:-0}" -gt "$before" ]; then before=$now; quiet=0; else quiet=$((quiet + 1)); fi
 done
 kill -9 $pid 2>/dev/null || true
 wait $pid 2>/dev/null || true
 said=$(cat "$log")
 
 if ! echo "$said" | grep -q "^end"; then
-  echo "the guest did not finish; it said:" >&2
+  if [ $quiet -ge $quiet_limit ]; then
+    echo "the guest went quiet for $quiet seconds without finishing, so it is stuck;" >&2
+    echo "the last it said was:" >&2
+  else
+    echo "the guest did not finish; it said:" >&2
+  fi
   echo "$said" | tail -20 >&2
   exit 1
 fi

@@ -178,7 +178,11 @@ if(XAG_QEMU_PPC64 AND XAG_LLD AND XAG_CROSS_CLANG AND
            COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/power/run.sh)
   set_tests_properties(power_decimal_unit PROPERTIES
     ENVIRONMENT "CLANG=${XAG_CROSS_CLANG};LLD=${XAG_LLD};QEMU=${XAG_QEMU_PPC64};PATH=${LLVM_TOOLS_BINARY_DIR}:$ENV{PATH};COMPARE=$<TARGET_FILE:power_decimal_compare>"
-    TIMEOUT 180)
+    # An emulated machine goes as fast as the machine under it lets it, so a
+    # clock is the wrong thing to fail on: the script watches the guest for
+    # progress instead and gives up when it goes quiet. This is only a backstop
+    # for something hanging outside the guest.
+    TIMEOUT 1800)
 else()
   message(STATUS "no qemu-system-ppc64, ld.lld or PowerPC target, "
                  "so the decimal unit is not asked")
