@@ -312,22 +312,17 @@ void aSettledPlaceIsNotAskedAgain() {
 
   // A loop counting the places a `many` has reaches one it has every time
   // round, because a `many` is a fixed length once it is made. This is the
-  // shape every program that walks an array writes, and the check used to come
-  // out of it entirely.
+  // shape every program that walks an array writes.
   //
-  // It does not today, and this test says so rather than pretending otherwise.
-  // Counting from one made the difference: LLVM will only bound a counter it
-  // knows cannot come round, and Xag's `+` comes round like every other, so the
-  // step carries no `nsw`. Counting from zero it got there anyway, through the
-  // `nuw` it could infer for itself; counting from one, that is not enough.
-  // What is left is one compare and a branch per element — measured at about a
-  // fifth on a loop that does nothing else. Giving the step the flag needs a
-  // proof that the counter cannot reach its type's largest, which is a separate
-  // piece of work.
-  EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
-        "  loop.range.int64 'i' = [*1*, count[loan 'xs']] {\n"
-        "    print.stdout['xs'['i'] \\n]; } }\n",
-        "call void @xag_many_out_of_range");
+  // Counting from one nearly cost this. Two things had to be true before the
+  // optimiser could see it again: the counter has to be one it knows cannot
+  // come round, which is what asking before stepping bought, and the body has
+  // to hold no `alloca` — a `print` used to write one where it stood, and a
+  // loop holding one is a loop LLVM stops reasoning about.
+  REJECTS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
+          "  loop.range.int64 'i' = [*1*, count[loan 'xs']] {\n"
+          "    print.stdout['xs'['i'] \\n]; } }\n",
+          "call void @xag_many_out_of_range");
 
   // Counting one and reaching into another says nothing about the other.
   EMITS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"

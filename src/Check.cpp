@@ -659,23 +659,23 @@ private:
     return false;
   }
 
-  // The name a loop counts the places of: `[*0*, (count['xs'] - *1*)]`, however
-  // the counting is bracketed and whether it borrows or not.
+  // The name a loop counts the places of: `[*1*, count['xs']]`, however the
+  // counting is bracketed and whether it borrows or not.
+  //
+  // This read `[*0*, (count['xs'] - *1*)]` until places were counted from one,
+  // and went on reading it after — so it recognised a shape nobody writes any
+  // more, nothing was settled, and every walk over a `many` carried a check its
+  // own end had already answered. The shape a walk is written in is the shape
+  // this has to know.
   static std::string countedOver(const Stmt &s) {
     if (s.value.values.size() != 2)
       return {};
     __int128 from = 0;
-    if (!wholeItemOf1(s.value.values[0], from) || from != 0)
+    if (!wholeItemOf1(s.value.values[0], from) || from != 1)
       return {};
     if (s.value.values[1].items.size() != 1)
       return {};
-    const Expr &last = inside(*s.value.values[1].items[0]);
-    if (last.kind != ExprKind::Binary || last.text != "-" || last.children.size() != 2)
-      return {};
-    const Expr &one = inside(*last.children[1]);
-    if (one.kind != ExprKind::Written || one.text != "1")
-      return {};
-    const Expr &counting = inside(*last.children[0]);
+    const Expr &counting = inside(*s.value.values[1].items[0]);
     if (counting.kind != ExprKind::Call || counting.path.size() != 1 ||
         counting.path[0] != "count" || counting.args.values.size() != 1 ||
         counting.args.values[0].items.size() != 1)

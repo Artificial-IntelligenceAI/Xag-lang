@@ -522,7 +522,7 @@ private:
 
   llvm::Value *textOf(const std::string &bytes) {
     auto *global = builder_.CreateGlobalString(bytes, "text");
-    auto *slot = builder_.CreateAlloca(str_, nullptr, "written");
+    auto *slot = scratch(str_, "written");
     builder_.CreateCall(runtime_["xag_str_from"],
                         {slot, global, builder_.getInt64(bytes.size())});
     return builder_.CreateLoad(str_, slot);
@@ -635,7 +635,7 @@ private:
       if (isLoan(held))
         return builder_.CreateLoad(builder_.getPtrTy(), slots_[operand.local]);
     }
-    auto *slot = builder_.CreateAlloca(str_, nullptr, "piece");
+    auto *slot = scratch(str_, "piece");
     if (isText(type) || isLoan(type))
       builder_.CreateStore(read(operand), slot);
     else
@@ -783,6 +783,21 @@ private:
     return slots_[operand.local];
   }
 
+  // Scratch that lives for one statement, made where every alloca belongs: the
+  // top of the function.
+  //
+  // Written where the statement stands, an `alloca` inside a loop is one the
+  // optimiser will not move, and a loop holding one is a loop it stops
+  // reasoning about — a walk over a `many` with a `print` in it kept a bounds
+  // check the loop's own end had already answered. Nothing here outlives the
+  // statement that asks for it, so one at the top, reused every turn, is the
+  // same thing said in the place that costs nothing.
+  llvm::Value *scratch(llvm::Type *type, const char *name, llvm::Value *count = nullptr) {
+    llvm::BasicBlock &entry = builder_.GetInsertBlock()->getParent()->getEntryBlock();
+    llvm::IRBuilder<> top(&entry, entry.getFirstInsertionPt());
+    return top.CreateAlloca(type, count, name);
+  }
+
   // The address of one place.
   //
   // The rule lives in the runtime, and every engine asks it — but the half of
@@ -809,22 +824,11 @@ private:
     auto *outside = llvm::BasicBlock::Create(context_, "outside", function);
     // Each end on its own branch rather than both under one `and`, so that each
     // is a lone compare against something the loop around it may already have
-    // said. LLVM folds the first away by itself, down to the one case where
-    // taking one off would come round.
+    // said, and the optimiser can drop either without the other.
     //
-    // It does not fold the second, and counting from one is why. To bound the
-    // offset it has to bound the counter, and it will only bound a counter it
-    // knows cannot come round — which needs `nsw` on the step, which Xag cannot
-    // hand it, because `+` comes round here like everywhere else. Counting from
-    // zero it got there through the `nuw` it could work out for itself; from
-    // one, that is not enough. Every shape was tried: the offset compared
-    // unsigned, the place compared signed and unsigned, both ends joined and
-    // both apart. The same compare stays in each.
-    //
-    // So a loop walking a `many` pays one compare and a branch per element —
-    // about a fifth, measured on a loop that does nothing else. Getting it back
-    // means proving the counter cannot reach its type's largest, which is a
-    // piece of work of its own and not this one.
+    // The shape a walk over a `many` is written in does not reach here at all:
+    // the checker settles that one, and `settled` above writes the access with
+    // nothing in front of it.
     auto *within = llvm::BasicBlock::Create(context_, "within", function);
     builder_.CreateCondBr(builder_.CreateICmpSGE(index, one), within, outside);
     // Past that branch the place is one or more, so taking one off it cannot go
@@ -943,13 +947,13 @@ private:
 
     case RValueKind::Join: {
       const unsigned count = static_cast<unsigned>(value.operands.size());
-      auto *array = builder_.CreateAlloca(str_, builder_.getInt64(count), "pieces");
+      auto *array = scratch(str_, "pieces", builder_.getInt64(count));
       for (unsigned i = 0; i < count; ++i) {
         auto *at = builder_.CreateGEP(str_, array, builder_.getInt64(i));
         auto *piece = textPointer(value.operands[i]);
         builder_.CreateStore(builder_.CreateLoad(str_, piece), at);
       }
-      auto *out = builder_.CreateAlloca(str_, nullptr, "joined");
+      auto *out = scratch(str_, "joined");
       builder_.CreateCall(runtime_["xag_str_join"],
                           {out, array, builder_.getInt64(count)});
       return builder_.CreateLoad(str_, out);

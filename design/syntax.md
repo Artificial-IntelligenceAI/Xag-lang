@@ -697,21 +697,40 @@ the half of it that says *yes* as a compare and a branch, because a call the
 optimiser cannot see into is a call it cannot remove — and this one sits in the
 middle of every loop over a `many`.
 
-In a loop counting to `count['xs']` that used to buy the whole check: LLVM
-proved the index always fits and lifted it out, leaving a load, an add, an
-increment and the loop's own test.
+In the shape every walk over an array is written in, there is no compare at
+all, and that is settled where the program is read rather than left to the
+optimiser:
 
-**Counting from one costs that, for now.** LLVM will only bound a counter it
-knows cannot come round, and Xag's `+` comes round like every other, so the
-loop's step carries no `nsw`. Counting from zero it got there anyway, through
-the `nuw` it could work out for itself; counting from one, that is not enough,
-and one compare and a branch stay in the loop — about a fifth, measured on a
-loop that does nothing but walk an array and add.
+```
+loop.range.int64 'i' = [*1*, count['xs']] { … 'xs'['i'] … }
+```
 
-Getting it back means proving the counter cannot reach its type's largest.
-`E0531` already refuses a range written down as ending there; a range ending in
-`count[…]` needs the same said about a length, and neither proof is written
-down yet.
+A `many` is a fixed length once it is made, so `count[…]` does not move under
+the loop, and the counter never leaves what it counted. The checker says so,
+and native writes the access with nothing in front of it. This is the whole of
+a loop adding a `many` up, at `-O3`:
+
+```llvm
+%5 = getelementptr [8 x i8], ptr %places, i64 %i
+%6 = getelementptr i8, ptr %5, i64 -8
+%7 = load i64, ptr %6, align 8
+%8 = add i64 %7, %sum
+%exitcond = icmp eq i64 %i, %length
+%9 = add nuw i64 %i, 1
+```
+
+The address, the load, the add, the loop's own test and the step. The `-8` is
+counting from one, folded into the addressing where it costs nothing.
+
+Reaching into a *different* array with that counter, or with anything but the
+counter itself, is not the same question and keeps its check.
+
+That reading is written against the shape above, which is worth saying because
+it once was not: it went on looking for `[*0*, (count['xs'] - *1*)]` after
+places began counting from one, so it recognised nothing anybody writes and
+every walk carried a check its own end had already answered. Nothing was wrong
+with the program that came out — only slower, which is the kind of wrong that
+says nothing until somebody measures it.
 
 ## A type may say it holds nothing
 
