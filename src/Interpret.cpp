@@ -772,6 +772,22 @@ private:
     }
 
     if (value.callee == "arguments") {
+      // What a program was given is not a fact about the program. While the
+      // compiler is the one running it, this is as far as it goes, exactly as a
+      // read is: the compiler was started with its own arguments or with none,
+      // and neither is what this program will be given.
+      //
+      // Nothing said so until 2026-09-10, so `arguments[]` answered with
+      // whatever the compiler happened to hold. A program that printed its
+      // first argument was refused for reaching into a `many` that holds none,
+      // and one that counted them had the two engines disagreeing — this one
+      // saw the compiler's arguments and the built one, started with none, saw
+      // none.
+      if (watching_) {
+        wouldRead_ = true;
+        trouble_ = "it would look at what it was given here";
+        return Value{};
+      }
       XagMany given{nullptr, 0};
       xag_arguments(&given);
       std::vector<Value> held;

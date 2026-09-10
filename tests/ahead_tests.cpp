@@ -209,6 +209,23 @@ void aProgramThatReadsIsRunUpToTheRead() {
   CHECK(s.said.empty());
 }
 
+// What a program was given is not a fact about the program, so looking at it is
+// as far as a run at compile time goes — the same place a read stops.
+//
+// Nothing said so until 2026-09-10: `arguments[]` answered with whatever the
+// compiler was holding, so this program, which prints its first argument, was
+// refused for reaching into a `many` that holds none.
+void aProgramThatLooksAtWhatItWasGivenIsRunUpToThat() {
+  const std::string first = "START {\n"
+                            "    var.many.str 'given' = [arguments[]];\n"
+                            "    print.stdout['given'[*0*] \\n];\n}\n";
+  const Settled s = settle(first, agrees());
+  CHECK(s.ran);
+  CHECK(s.said.empty());
+  // And one engine on its own says nothing about it either.
+  CHECK(settle(first).said.empty());
+}
+
 // A run that stopped saw only part of the program, so it vouches for none of
 // it. This one never finishes, and the engine gives up counting.
 void aRunThatStoppedChangesNothing() {
@@ -523,6 +540,7 @@ int main() {
   aLoopThatFillsAnArrayIsNotWrittenAway();
   aNameIsChangedByMoreThanBeingAssignedTo();
   aProgramThatReadsIsRunUpToTheRead();
+  aProgramThatLooksAtWhatItWasGivenIsRunUpToThat();
   aProgramThatStopsIsSaidSo();
   aLoopWithAnAnswerIsWrittenAsItsAnswer();
   aRunThatStoppedChangesNothing();

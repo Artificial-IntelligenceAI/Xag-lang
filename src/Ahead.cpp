@@ -10,18 +10,6 @@
 namespace xag {
 namespace {
 
-// A program that reads has an answer that depends on what it is given, so there
-// is nothing to find out here. Asked of every body, because a function called
-// from the loop reads just as the loop does.
-bool readsInput(const Mir &mir) {
-  for (const Body &body : mir.bodies)
-    for (const BasicBlock &block : body.blocks)
-      for (const Statement &s : block.statements)
-        if (s.value.kind == RValueKind::Call && s.value.callee == "read.stdin")
-          return true;
-  return false;
-}
-
 // Everything a temporary file was written with, read back.
 std::string drain(std::FILE *file) {
   std::fflush(file);

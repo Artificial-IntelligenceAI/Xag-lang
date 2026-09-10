@@ -61,6 +61,14 @@ void emits(const std::string &program, const std::string &wanted, int line) {
 
 #define EMITS(program, wanted) emits(program, wanted, __LINE__)
 
+#define CHECK(cond)                                                                      \
+  do {                                                                                   \
+    if (!(cond)) {                                                                       \
+      std::cerr << "FAIL " << __FILE__ << ':' << __LINE__ << ": " #cond "\n";            \
+      ++failures;                                                                        \
+    }                                                                                    \
+  } while (false)
+
 // Some bugs are a call that should not be there rather than one that should.
 void rejects(const std::string &program, const std::string &unwanted, int line) {
   const xag::Source source("test.xag", xag::asFile(program));
@@ -395,6 +403,40 @@ void aLoanIsNotAlwaysOfText() {
         "readonly");
 }
 
+// The build the compiler runs while compiling stops where the program would
+// look at the world outside it. Reading a line has always stopped there;
+// looking at what the program was given did not, and answered with whatever
+// the compiler itself was holding.
+void aWatchedBuildStopsAtTheWorldOutside() {
+  const std::string reads = "START {\n"
+                            "    loop.while read.stdin[] holds 'line' {\n"
+                            "        print.stdout['line' \\n];\n"
+                            "    }\n}\n";
+  const std::string given = "START {\n"
+                            "    var.many.str 'given' = [arguments[]];\n"
+                            "    print.stdout[(count[loan 'given']) \\n];\n}\n";
+  for (const std::string &program : {reads, given}) {
+    const xag::Source source("test.xag", xag::asFile(program));
+    const xag::LexResult lexed = xag::lex(source);
+    const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+    const xag::CheckResult checked = xag::check(source, parsed.program);
+    const xag::OwnResult owned = xag::own(source, parsed.program);
+    CHECK(lexed.ok() && parsed.ok() && checked.ok() && owned.ok());
+    xag::MirResult built = xag::build(source, parsed.program, checked);
+    xag::elaborate(built.mir);
+    const xag::NativeResult watched =
+        xag::emitIr(built.mir, false, xag::Watching::Yes);
+    CHECK(watched.ok());
+    // The call, not the name: the runtime is declared in every module, so
+    // looking for the word alone finds the declaration and proves nothing.
+    CHECK(watched.ir.find("call void @xag_would_read") != std::string::npos);
+    // And the program a reader is handed does no such thing.
+    const xag::NativeResult handed = xag::emitIr(built.mir, false);
+    CHECK(handed.ok());
+    CHECK(handed.ir.find("call void @xag_would_read") == std::string::npos);
+  }
+}
+
 } // namespace
 
 int main() {
@@ -412,6 +454,7 @@ int main() {
   itWritesANumberIntoText();
   itLooksBehindALoan();
   aLoanIsNotAlwaysOfText();
+  aWatchedBuildStopsAtTheWorldOutside();
 
   if (failures == 0)
     std::cout << "all native tests passed\n";

@@ -1350,6 +1350,16 @@ private:
     }
 
     if (value.callee == "arguments") {
+      // Stops here while the compiler is the one running it, for the same
+      // reason a read does: what it answers is what somebody types after the
+      // program's name, and nobody has typed it yet.
+      if (watching_) {
+        builder_.CreateCall(runtime_["xag_would_read"], {});
+        builder_.CreateUnreachable();
+        builder_.SetInsertPoint(
+            llvm::BasicBlock::Create(context_, "ungiven",
+                                     builder_.GetInsertBlock()->getParent()));
+      }
       auto *out = builder_.CreateAlloca(many_, nullptr, "given");
       builder_.CreateCall(runtime_["xag_arguments"], {out});
       return builder_.CreateLoad(many_, out);
@@ -1527,9 +1537,9 @@ void optimiseModule(llvm::Module &module) {
 
 } // namespace
 
-NativeResult emitIr(const Mir &mir, bool optimise) {
+NativeResult emitIr(const Mir &mir, bool optimise, Watching watching) {
   NativeResult result;
-  Emitter emitter(mir);
+  Emitter emitter(mir, watching == Watching::Yes);
   if (!emitter.run(result.trouble))
     return result;
   if (optimise)

@@ -156,16 +156,30 @@ checker in `CheckResult::aboutSums` rather than reported: a refusal that has
 already stopped compilation cannot be overturned by a run that has not happened
 yet, and the first attempt at a test for this ran straight into that.
 
-### As far as the first read
+### As far as the first look outside
 
 A program that reads cannot be run to the end here — what it does on what it was
 given is not what it does on nothing. It can be run *up to* the read, and
 everything before that point actually happened.
 
+There are two ways of looking outside and both stop the run: `read.stdin[]`, and
+`arguments[]`. What a program is given on the line that starts it is no more a
+fact about the program than what it is handed on its input, and the compiler was
+started with its own arguments or with none.
+
 Both engines stop in the same place, or nothing they say can be compared. The
-interpreter stops when it meets `read.stdin` while watching; the built program
-calls `xag_would_read`, which says so and stops, because a watching build lowers
-a read that way. A reader's build reads.
+interpreter stops when it meets either while watching; the built program calls
+`xag_would_read`, which says so and stops, because a watching build lowers both
+that way. A reader's build reads.
+
+Only `read.stdin` said so until 2026-09-10. `arguments[]` answered with whatever
+the compiler happened to be holding, and two programs came apart on it: one that
+prints its first argument was refused for reaching into a `many` that holds none
+— true of the compiler's run and of nothing else — and one that counts them had
+the two engines disagree, the interpreter seeing the compiler's arguments and
+the built program, started with none, seeing none. The second is the shape the
+first should have taken: a `Mine`, loudly, rather than a refusal that reads like
+the reader's fault.
 
 What that adds over lifting a loop out is every loop before a read that *cannot*
 be lifted — one walking a `many`, or one that calls out:

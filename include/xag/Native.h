@@ -23,7 +23,7 @@ struct NativeResult {
 // how the compiler watches, not how the language behaves.
 enum class Watching { No, Yes };
 
-NativeResult emitIr(const Mir &mir, bool optimise);
+NativeResult emitIr(const Mir &mir, bool optimise, Watching watching = Watching::No);
 NativeResult emitObject(const Mir &mir, bool optimise, const std::string &path,
                         Watching watching = Watching::No);
 
