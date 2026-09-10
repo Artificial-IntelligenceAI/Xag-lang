@@ -92,11 +92,16 @@ MirType takeApart(std::string_view spelled, const Shapes &shapes,
 // Every struct's fields, said the way the middle layer says types. A `Shape`
 // holds what the checker worked out, and nothing after the checker can read
 // that — showing a struct walks its fields and has to know what each one is.
-std::vector<std::vector<MirType>> fieldsOfEveryShape(const Shapes &shapes,
+// `walk` is the list being described; `shapes` and `sums` are what a name in it
+// may resolve against. Handing the same list as both — which the `one-of` side
+// of this did — looks up a case's type in a table that does not hold it, and a
+// case holding a struct came back as a type of no size at all.
+std::vector<std::vector<MirType>> fieldsOfEveryShape(const Shapes &walk,
+                                                     const Shapes &shapes,
                                                      const Shapes &sums) {
   std::vector<std::vector<MirType>> out;
-  out.reserve(shapes.size());
-  for (const Shape &shape : shapes) {
+  out.reserve(walk.size());
+  for (const Shape &shape : walk) {
     std::vector<MirType> fields;
     fields.reserve(shape.fields.size());
     for (const Field &field : shape.fields)
@@ -432,7 +437,7 @@ private:
         std::vector<Operand> parts;
         if (!e.children.empty())
           parts.push_back(operandOf(*e.children[0]));
-        const unsigned into = temporary(typeRef(spelled), copiesNamed(spelled));
+        const unsigned into = owningTemporary(typeRef(spelled));
         emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                        RValue{RValueKind::Case, {}, {}, made->second,
                               std::move(parts), typeRef(spelled)}});
@@ -1287,8 +1292,9 @@ MirResult build(const Source &source, const Program &program,
   MirResult result = Builder(program, checked).run();
   result.mir.shapes = checked.shapes;
   result.mir.sums = checked.sums;
-  result.mir.fieldTypes = fieldsOfEveryShape(checked.shapes, checked.sums);
-  result.mir.caseTypes = fieldsOfEveryShape(checked.sums, checked.sums);
+  result.mir.fieldTypes =
+      fieldsOfEveryShape(checked.shapes, checked.shapes, checked.sums);
+  result.mir.caseTypes = fieldsOfEveryShape(checked.sums, checked.shapes, checked.sums);
   return result;
 }
 

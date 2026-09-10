@@ -147,6 +147,11 @@ public:
         partChains_[item.name] = std::move(written);
       }
     for (const Item &item : program_.items)
+      if (item.kind == ItemKind::OneOf)
+        for (const Param &one : item.params)
+          cases_[one.name] = holdsMany(one.chain) ? std::string("many")
+                                                  : one.chain.type().text;
+    for (const Item &item : program_.items)
       if (item.kind == ItemKind::Const)
         scopes_.back()[item.name] =
             Binding{Mode::Owned, copyChain(item.chain), copyType(item.chain.type().text),
@@ -168,6 +173,7 @@ private:
   // that one's question rather than the struct's.
   std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>>
       shapes_;
+  std::unordered_map<std::string, std::string> cases_;
   // The same fields, as they were written. The map above keeps only the type
   // word, which does not say how a thing is held.
   std::unordered_map<std::string, std::vector<std::pair<std::string, const Chain *>>>
@@ -479,6 +485,21 @@ private:
       return;
     }
 
+    case ExprKind::Typed: {
+      // `text:'s'` puts `'s'` into a `one-of`, which is a hand-over the same
+      // way putting it in a struct is: the case holds it afterwards, and the
+      // name it came from does not. Read as an ordinary read, both of them
+      // thought they had it and both let go of it.
+      const std::string *held = caseNamed(e.text);
+      if (held && !e.children.empty()) {
+        use(*e.children[0], Use::Consume, Mode::Owned, copyType(*held));
+        return;
+      }
+      for (const ExprPtr &child : e.children)
+        read(*child);
+      return;
+    }
+
     default:
       for (const ExprPtr &child : e.children)
         read(*child);
@@ -560,6 +581,15 @@ private:
   shapeNamed(const std::string &type) const {
     auto found = shapes_.find(type);
     return found == shapes_.end() ? nullptr : &found->second;
+  }
+
+  // The type a `one-of` case holds, or nothing when no case is called that.
+  // What goes into a case is handed over exactly as what goes into one of the
+  // things a struct holds is: the value lives in there afterwards, and the name
+  // it came from does not still have it.
+  const std::string *caseNamed(const std::string &word) const {
+    auto found = cases_.find(word);
+    return found == cases_.end() ? nullptr : &found->second;
   }
 
   // Whether what goes into one of the things a struct holds is copied there.

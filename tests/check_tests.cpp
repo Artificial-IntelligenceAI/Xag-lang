@@ -500,10 +500,9 @@ void aOneOfIsOneOfItsCases() {
             "    when 'a' { is ok 'n' { } is gave-up { } }\n}\n").ok());
   // A choice between one is that one.
   CHECK(run("one-of 'lonely' [int64 'only']\nSTART { }\n").code(0) == "E0527");
-  // One that can be itself has no size a machine could give it. `E0529` comes
-  // first, because a case holding one is not something a case may hold yet.
+  // One that can be itself has no size a machine could give it.
   CHECK(run("one-of 'tree' [int64 'leaf', tree 'branch']\nSTART { }\n")
-            .code(1) == "E0526");
+            .code(0) == "E0526");
   // Every case, once each, and only cases this type has.
   CHECK(run("one-of 'answer' [int64 'ok', nothing 'gave-up']\n"
             "START {\n    var.answer 'a' = [ok:*7*];\n"
@@ -542,9 +541,18 @@ void aOneOfIsOneOfItsCases() {
             "START {\n    var.answer 'a' = [ok:*7*];\n"
             "    var.answer 'b' = [ok:*7*];\n"
             "    if 'a' == 'b' { }\n}\n").code(0) == "E0506");
-  // What a case may hold, for now.
-  CHECK(run("one-of 'answer' [str 'text', nothing 'gave-up']\nSTART { }\n")
-            .code(0) == "E0529");
+  // A case holding something with an owner: what it holds goes when the value
+  // does, and which case is live is read where it ends.
+  CHECK(run("struct 'pair' [str 'a', int64 'b']\n"
+            "one-of 'thing' [str 'text', many.str 'words', pair 'both',\n"
+            "                int64 'n', nothing 'no']\n"
+            "START {\n    var.thing 't' = [both:pair[*p* *9*]];\n"
+            "    when 't' {\n"
+            "        is text 's'  { }\n"
+            "        is words 'w' { }\n"
+            "        is both 'p'  { print.stdout['p'.b \\n]; }\n"
+            "        is n 'x'     { }\n"
+            "        is no        { } }\n}\n").ok());
 }
 
 void showingSeveralThingsWritesEachOfThem() {

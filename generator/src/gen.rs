@@ -462,10 +462,11 @@ impl<'a> Writer<'a> {
         self.shapes.push(Shape { name, fields });
     }
 
-    /// `one-of 'v3' [int64 'v4', bool 'v5', nothing 'v6']` — two to four cases,
-    /// at least one of which carries something. Every case holds a value that
-    /// copies: one holding text or a `many` owns it, and letting go of what the
-    /// live case holds is not built yet.
+    /// `one-of 'v3' [int64 'v4', str 'v5', nothing 'v6']` — two to four cases,
+    /// at least one of which carries something. A case may hold text or a
+    /// struct, which is what makes the letting-go worth checking: what the live
+    /// case holds goes when the value does, and which case that is is read
+    /// where it ends.
     fn sum(&mut self) {
         let name = self.fresh();
         let count = self.rng.below(3) + 2;
@@ -480,9 +481,17 @@ impl<'a> Writer<'a> {
             // The last case carries nothing sometimes, and never the first —
             // a `one-of` of nothing but empties is a choice with no values in
             // it, which is a thing to write but a dull one to check.
-            let held = if i > 0 && self.rng.chance(30) {
+            // Text sometimes, which is what makes the letting-go worth
+            // checking: a case holding one owns it, and it goes when the value
+            // does. A case holding a struct or a `many` is the same walk one
+            // level further down, and is asked about by the tests rather than
+            // here — writing a struct value after a colon is a shape this file
+            // does not otherwise build.
+            let held = if i > 0 && self.rng.chance(25) {
                 None
-            } else if self.rng.chance(20) {
+            } else if self.rng.chance(25) {
+                Some(Ty::Str)
+            } else if self.rng.chance(15) {
                 Some(Ty::Bool)
             } else {
                 Some(self.pick_whole())
@@ -523,12 +532,26 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.out.push_str(&case);
         if let Some(ty) = held {
-            // Bracketed, because the colon takes one item and an expression is
-            // one item only when something says where it ends — `v6:*1* ^ *2*`
-            // reads as `(v6:*1*) ^ *2*`, which asks a power of a `one-of`.
-            self.out.push_str(":(");
-            self.expr(ty, 1);
-            self.out.push(')');
+            self.out.push(':');
+            if ty == Ty::Str {
+                // One item, and text is several of them joined — which inside
+                // brackets is a group, and a group holds one value.
+                // Written, not taken from another name: what goes into a case
+                // is handed over, so a name would have to say `move` and then
+                // be gone — bookkeeping this file would have to carry for a
+                // value it can write in place instead.
+                self.out.push('*');
+                self.word();
+                self.out.push('*');
+            } else {
+                // Bracketed, because the colon takes one item and an expression
+                // is one item only when something says where it ends —
+                // `v6:*1* ^ *2*` reads as `(v6:*1*) ^ *2*`, which asks a power
+                // of a `one-of`.
+                self.out.push('(');
+                self.expr(ty, 1);
+                self.out.push(')');
+            }
         }
         self.out.push_str("];\n");
         self.declare(Var {

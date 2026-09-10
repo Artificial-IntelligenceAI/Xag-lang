@@ -197,6 +197,14 @@ private:
           return true;
       return false;
     }
+    // A `one-of` owns something when any of the things it may be does. Which of
+    // them it is is not known until it runs, so the asking is where it ends.
+    if (bare.held == Type::OneOf) {
+      for (const MirType &one : mir_.caseTypes[bare.named])
+        if (ownsAnything(one))
+          return true;
+      return false;
+    }
     return bare.held == Type::Str;
   }
 
@@ -252,6 +260,37 @@ private:
       for (unsigned i = 0; i < shape.fields.size(); ++i)
         letGo(asMirType(shape.fields[i].type),
               builder_.CreateStructGEP(typeFor(bare), at, i));
+      return;
+    }
+    // A `one-of` lets go of whatever the case it is in holds, and nothing else
+    // — the room is one thing at a time, and the other cases were never in it.
+    // Which case that is is read from the value, so this is an ask at the end
+    // of the value's life and nowhere else: the same shape an `or-nothing`
+    // already pays, with as many arms as the type has cases that own something.
+    if (bare.held == Type::OneOf) {
+      auto *shell = typeFor(bare);
+      llvm::Function *function = builder_.GetInsertBlock()->getParent();
+      auto *after = llvm::BasicBlock::Create(context_, "letgone", function);
+      auto *tag = builder_.CreateLoad(shell->getStructElementType(0),
+                                      builder_.CreateStructGEP(shell, at, 0));
+      auto *room = builder_.CreateStructGEP(shell, at, 1);
+      const auto &cases = mir_.caseTypes[bare.named];
+      for (unsigned i = 0; i < cases.size(); ++i) {
+        if (!ownsAnything(cases[i]))
+          continue;
+        auto *mine = llvm::BasicBlock::Create(context_, "letgocase", function);
+        auto *next = llvm::BasicBlock::Create(context_, "orelse", function);
+        builder_.CreateCondBr(
+            builder_.CreateICmpEQ(
+                tag, llvm::ConstantInt::get(shell->getStructElementType(0), i)),
+            mine, next);
+        builder_.SetInsertPoint(mine);
+        letGo(cases[i], room);
+        builder_.CreateBr(after);
+        builder_.SetInsertPoint(next);
+      }
+      builder_.CreateBr(after);
+      builder_.SetInsertPoint(after);
     }
   }
 
@@ -317,11 +356,21 @@ private:
     return typeFor(type.held);
   }
 
+  // The smallest whole number that can tell this many cases apart. A `one-of`
+  // of three does not need eight bytes to say which of three it is.
+  llvm::IntegerType *tagFor(unsigned cases) {
+    return cases <= 256 ? builder_.getInt8Ty()
+           : cases <= 65536 ? builder_.getInt16Ty()
+                            : builder_.getInt32Ty();
+  }
+
   // Which of the things it may be, and room for whichever that is.
   //
-  // The room is counted in `i128` rather than in bytes, so that it is aligned
-  // for anything a case could hold — a `deci128` wants sixteen bytes of
-  // alignment, and a run of bytes gives one.
+  // The room is as wide as the widest case and no wider, in units of the
+  // strictest alignment any case wants — so a `deci128` case gets its sixteen
+  // bytes and a `one-of` of small numbers is small. Counting the room in `i128`
+  // regardless made every one of these at least twenty-four bytes, which is
+  // memory moved about for nothing.
   llvm::Type *sumFor(unsigned which) {
     const Shape &sum = mir_.sums[which];
     auto found = sums_.find(sum.name);
@@ -329,18 +378,20 @@ private:
       return found->second;
     auto *made = llvm::StructType::create(context_, "xag." + sum.name);
     sums_[sum.name] = made;
-    uint64_t widest = 1;
-    const auto &held = mir_.caseTypes[which];
-    for (const MirType &one : held) {
+    uint64_t widest = 0;
+    uint64_t strictest = 1;
+    for (const MirType &one : mir_.caseTypes[which]) {
       if (one.held == Type::Nothing)
         continue;
-      const uint64_t size = module_.getDataLayout().getTypeAllocSize(typeFor(one));
+      auto *held = typeFor(one);
+      const uint64_t size = module_.getDataLayout().getTypeAllocSize(held);
+      const uint64_t align = module_.getDataLayout().getABITypeAlign(held).value();
       widest = size > widest ? size : widest;
+      strictest = align > strictest ? align : strictest;
     }
-    auto *wide = builder_.getInt128Ty();
-    const uint64_t each = module_.getDataLayout().getTypeAllocSize(wide);
-    made->setBody({builder_.getInt64Ty(),
-                   llvm::ArrayType::get(wide, (widest + each - 1) / each)});
+    auto *each = builder_.getIntNTy(static_cast<unsigned>(strictest) * 8);
+    made->setBody({tagFor(static_cast<unsigned>(sum.fields.size())),
+                   llvm::ArrayType::get(each, (widest + strictest - 1) / strictest)});
     return made;
   }
 
@@ -1218,9 +1269,12 @@ private:
       auto *where = isLoan(of) ? builder_.CreateLoad(builder_.getPtrTy(),
                                                     slots_[value.operands[0].local])
                                : slots_[value.operands[0].local];
-      return builder_.CreateLoad(
-          builder_.getInt64Ty(),
-          builder_.CreateStructGEP(typeFor(withoutLoan(of)), where, 0));
+      auto *shell = typeFor(withoutLoan(of));
+      auto *tag = builder_.CreateLoad(shell->getStructElementType(0),
+                                      builder_.CreateStructGEP(shell, where, 0));
+      // Answered as an `int64` whatever it is kept as, because that is what the
+      // asks the `when` lowers to are written in.
+      return builder_.CreateZExt(tag, builder_.getInt64Ty());
     }
 
     case RValueKind::Case: {
@@ -1229,8 +1283,9 @@ private:
       auto *shell = typeFor(typing(value.type));
       auto *made = scratch(shell, "made");
       builder_.CreateStore(llvm::Constant::getNullValue(shell), made);
-      builder_.CreateStore(builder_.getInt64(value.local),
-                           builder_.CreateStructGEP(shell, made, 0));
+      builder_.CreateStore(
+          llvm::ConstantInt::get(shell->getStructElementType(0), value.local),
+          builder_.CreateStructGEP(shell, made, 0));
       if (!value.operands.empty())
         builder_.CreateStore(read(value.operands[0]),
                              builder_.CreateStructGEP(shell, made, 1));

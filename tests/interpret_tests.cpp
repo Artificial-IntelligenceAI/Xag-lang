@@ -549,6 +549,44 @@ void itHoldsOneOfSeveralThings() {
        "none\n");
 }
 
+// A case may hold something with an owner. What the live case holds goes when
+// the value does, and which case that is is read where it ends — so the letting
+// go is an ask at the end of a value's life and nowhere else.
+void aCaseMayHoldSomethingWithAnOwner() {
+  SAYS("one-of 'thing' [str 'text', int64 'n', nothing 'no']\n"
+       "START { var.thing 't' = [text:*hello*];\n"
+       "  when 't' { is text 's' { print.stdout['s' \\n]; }\n"
+       "             is n 'x' { } is no { } } }\n",
+       "hello\n");
+  // A `many` of text, a struct holding text, and a struct case reached into.
+  SAYS("one-of 'thing' [many.str 'words', int64 'n']\n"
+       "START { var.thing 't' = [words:[*a* *b* *c*]];\n"
+       "  when 't' { is words 'w' { print.stdout['w' \\n]; } is n 'x' { } } }\n",
+       "abc\n");
+  SAYS("struct 'pair' [str 'a', int64 'b']\n"
+       "one-of 'thing' [pair 'both', int64 'n']\n"
+       "START { var.thing 't' = [both:pair[*p* *9*]];\n"
+       "  when 't' { is both 'p' { print.stdout['p'.a str:* * 'p'.b \\n]; }\n"
+       "             is n 'x' { } } }\n",
+       "p 9\n");
+  // Written over, which lets go of what was there before.
+  SAYS("one-of 'thing' [str 'text', nothing 'no']\n"
+       "START { var.mut.thing 't' = [text:*first*];\n"
+       "  set 't' = [text:*second*];\n"
+       "  when 't' { is text 's' { print.stdout['s' \\n]; } is no { } }\n"
+       "  set 't' = [no];\n"
+       "  when 't' { is text 's' { } is no { print.stdout[str:*gone* \\n]; } } }\n",
+       "second\ngone\n");
+  // Handed over, and made again every turn of a loop.
+  SAYS("one-of 'thing' [str 'text', nothing 'no']\n"
+       "fn.nothing 'say' [thing 't'] {\n"
+       "  when 't' { is text 's' { print.stdout['s' \\n]; } is no { } } }\n"
+       "START { loop.range.int64 'i' = [*1*, *3*] {\n"
+       "  var.thing 'c' = [text:*round*];\n"
+       "  say[move 'c']; } }\n",
+       "round\nround\nround\n");
+}
+
 void itShowsWhatSeveralThingsHold() {
   SAYS("START { var.many.int64 'xs' = [*1* *2* *3*];\n"
        "  print.stdout['xs' \\n]; }\n", "123\n");
@@ -816,6 +854,7 @@ int main() {
   itHoldsSomethingOrNothing();
   itHoldsAGroupOfNamedThings();
   itHoldsOneOfSeveralThings();
+  aCaseMayHoldSomethingWithAnOwner();
   itShowsWhatSeveralThingsHold();
   itWritesANumberIntoText();
   itLooksBehindALoan();

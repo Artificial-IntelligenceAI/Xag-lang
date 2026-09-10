@@ -1154,19 +1154,7 @@ private:
         // A case holding nothing is the case itself and no value, which is
         // exactly what `nothing` says. A struct field cannot say it, because a
         // field is something the struct holds; a case is something it may be.
-        const Ty held = typeOfChain(one.chain);
-        // Everything a case may hold, for now. What owns something has to be
-        // let go of when the value is, and which case is live is not known
-        // until it runs — so dropping one is a choice made while the program
-        // runs, and that is a piece of work of its own.
-        if (held != Ty{} && held != Ty{Type::Nothing} && !isNumber(held) &&
-            held != Ty{Type::Bool})
-          complain(one.nameSpan, "E0529",
-                   "a case cannot hold a `" + name(held) + "` yet.",
-                   {"a `one-of` holds one of its cases, and letting go of it means "
-                    "knowing which"},
-                   {"a number, a `bool` or `nothing` is what a case holds today."});
-        sum.fields.push_back(Field{one.name, held, one.nameSpan});
+        sum.fields.push_back(Field{one.name, typeOfChain(one.chain), one.nameSpan});
       }
       if (sum.fields.size() < 2)
         complain(item.nameSpan, "E0527",

@@ -314,6 +314,27 @@ void whatGoesIntoAFieldIsTheFieldsQuestion() {
 
 // Its items go into places of their own, so each one is handed over — reading
 // them as pieces of a joined value let an owning one be let go twice.
+// What goes into a case of a `one-of` is handed over, the same as what goes
+// into one of the things a struct holds. Read as an ordinary read, the case and
+// the name it came from both thought they had it, and both let go of it — which
+// the built program said with an abort and the interpreters did not say at all.
+void aCaseIsHandedWhatItHolds() {
+  CHECK(run("one-of 'thing' [str 'text', int64 'n']\n"
+            "START {\n    var.str 's' = [*hello*];\n"
+            "    var.thing 't' = [text:'s'];\n"
+            "    when 't' { is text 'x' { } is n 'y' { } }\n}\n")
+            .reports("E0406"));
+  CHECK(run("one-of 'thing' [str 'text', int64 'n']\n"
+            "START {\n    var.str 's' = [*hello*];\n"
+            "    var.thing 't' = [text:move 's'];\n"
+            "    when 't' { is text 'x' { } is n 'y' { } }\n}\n").ok());
+  // A number copies into one, so nothing is said about it.
+  CHECK(run("one-of 'thing' [int64 'n', nothing 'no']\n"
+            "START {\n    var.int64 'k' = [*7*];\n"
+            "    var.thing 't' = [n:'k'];\n"
+            "    when 't' { is n 'x' { } is no { } }\n}\n").ok());
+}
+
 void aStructIsFilledRatherThanJoined() {
   const char *kPair = "struct 'tag' [str 'name']\nstruct 'pair' [tag 'one', tag 'two']\n";
   CHECK(run(std::string(kPair) + "START {\n"
@@ -355,6 +376,7 @@ int main() {
   lendingAnElementLendsTheWholeArray();
   whatHoldsLendsIsNotYoursToGiveAway();
   oneOfWhatAStructHoldsGoesOnItsOwn();
+  aCaseIsHandedWhatItHolds();
   aStructIsFilledRatherThanJoined();
   whatGoesIntoAFieldIsTheFieldsQuestion();
 

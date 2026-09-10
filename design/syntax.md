@@ -890,10 +890,53 @@ value is, without asking which of the things it is. `when` is the asking, and
 inside an arm the case's own value can be shown, written and compared like
 anything else.
 
-**What a case may hold, for now**, is a number, a `bool` or `nothing`
-(`E0529`). A case holding text or a `many` owns something, and letting go of it
-means knowing which case is live where the value ends — which is a choice made
-while the program runs. That is the next piece of this.
+### A case may hold something with an owner
+
+Text, a `many`, a struct holding either — a case holds whatever a name could.
+What the live case holds goes when the value does, and which case that is is
+read where it ends:
+
+```
+one-of 'thing' [str 'text', many.str 'words', pair 'both', int64 'n', nothing 'no']
+```
+
+**The letting go is an ask at the end of a value's life and nowhere else.**
+Making one, reading one and a `when` are unchanged. Where the value ends —
+a scope closing, a `set` writing over it, a hand-over — the tag is read and the
+case that has something to give back gives it. A `one-of` whose cases all copy
+emits nothing at all, because there is nothing to let go of.
+
+That is the shape an `or-nothing` has always paid, which is one branch in front
+of the free:
+
+```llvm
+br i1 %is-it-there, label %letgo, label %kept
+letgo:
+  call void @xag_str_drop(ptr %text)
+```
+
+A `one-of` is the same with a compare on the tag instead of a truth, and an arm
+per case that owns something. C makes you write that switch by hand; C++'s
+`std::variant` and Rust's enums generate it, and this generates it.
+
+### What it costs to keep one
+
+```llvm
+%xag.small = type { i8, [1 x i8] }     ; two cases, one holding a `bool`
+%xag.mid   = type { i8, [1 x i64] }    ; an `int64` case
+%xag.wide  = type { i8, [1 x i128] }   ; a `deci128` case
+```
+
+The tag is the smallest whole number that can tell the cases apart, and the room
+is as wide as the widest case, counted in units of the strictest alignment any
+case wants — so a `deci128` case gets its sixteen bytes and a choice between two
+small things is two bytes. Counting the room in `i128` regardless, which is what
+this did first, made every `one-of` at least twenty-four bytes: memory moved
+about for nothing.
+
+Rust packs the tag into the payload's own padding and can lose it entirely when
+a case has a value the others cannot have — `Option<&T>` is a pointer, with null
+for the absence. Nothing here does that yet.
 
 `or-nothing` stays its own thing rather than becoming a two-case `one-of`. It is
 in the type chain rather than declared, it needs no name for its cases, and
@@ -1334,11 +1377,10 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
 
 ## Open
 
-- **A case that holds something with an owner.** A `one-of` case holds a number,
-  a `bool` or `nothing` today (`E0529`). Text, a `many` or a struct would mean
-  letting go of whatever the live case holds when the value ends, and which case
-  is live is not known until it runs — so the drop is a choice made while the
-  program runs, in three engines.
+- **A tag packed where there is already room for it.** A `one-of` keeps its tag
+  in a field of its own, which the payload's alignment then pads around. Rust
+  puts it in that padding, and loses it altogether where a case has a value the
+  others cannot have. Nothing here does either.
 - **Visibility.** `export` and `program` wait on there being more than one file.
 - **`wrapping` on a sum with no name.** The word is written where a name is
   declared, and a sum happens between values. `('n' x *4*)` inside a comparison

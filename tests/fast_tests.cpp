@@ -249,6 +249,29 @@ void onBeingOneOfSeveralThings() {
         "  print.stdout[\\n]; }\n");
 }
 
+void onACaseThatOwnsSomething() {
+  AGREE("one-of 'thing' [str 'text', int64 'n', nothing 'no']\n"
+        "START { var.thing 't' = [text:*hello*];\n"
+        "  when 't' { is text 's' { print.stdout['s' \\n]; }\n"
+        "             is n 'x' { } is no { } } }\n");
+  AGREE("one-of 'thing' [many.str 'words', int64 'n']\n"
+        "START { var.thing 't' = [words:[*a* *b* *c*]];\n"
+        "  when 't' { is words 'w' { print.stdout['w' \\n]; } is n 'x' { } } }\n");
+  AGREE("struct 'pair' [str 'a', int64 'b']\n"
+        "one-of 'thing' [pair 'both', int64 'n']\n"
+        "START { var.thing 't' = [both:pair[*p* *9*]];\n"
+        "  when 't' { is both 'p' { print.stdout['p'.a str:* * 'p'.b \\n]; }\n"
+        "             is n 'x' { } } }\n");
+  AGREE("one-of 'thing' [str 'text', nothing 'no']\n"
+        "fn.nothing 'say' [thing 't'] {\n"
+        "  when 't' { is text 's' { print.stdout['s' \\n]; } is no { } } }\n"
+        "START { var.mut.thing 't' = [text:*first*];\n"
+        "  set 't' = [text:*second*];\n"
+        "  loop.range.int64 'i' = [*1*, *3*] {\n"
+        "    var.thing 'c' = [text:*round*];\n"
+        "    say[move 'c']; } }\n");
+}
+
 void onShowingWhatSeveralThingsHold() {
   AGREE("struct 'point' [int64 'x', int64 'y']\n"
         "START { var.point 'p' = [*1* *2*];\n"
@@ -557,6 +580,7 @@ int main() {
   onHoldingNothing();
   onChoosingBetweenCases();
   onBeingOneOfSeveralThings();
+  onACaseThatOwnsSomething();
   onShowingWhatSeveralThingsHold();
   onGroupingNamedThings();
   onTurningNumbersIntoText();
