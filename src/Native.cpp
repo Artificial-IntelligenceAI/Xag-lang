@@ -802,32 +802,20 @@ private:
     if (settled)
       return builder_.CreateGEP(typeFor(element), base, index);
     llvm::Function *function = builder_.GetInsertBlock()->getParent();
-    llvm::BasicBlock *asked = builder_.GetInsertBlock();
     auto *inside = llvm::BasicBlock::Create(context_, "inside", function);
     auto *outside = llvm::BasicBlock::Create(context_, "outside", function);
     builder_.CreateCondBr(builder_.CreateICmpULT(index, length), inside, outside);
 
+    // Out of range does not come back, which is what lets the optimiser lift
+    // the compare out of a loop or drop it altogether: a check whose failure
+    // carries on is a value in the middle of the body, and a check whose
+    // failure stops is control flow.
     builder_.SetInsertPoint(outside);
-    llvm::Value *wrapped = nullptr;
-    if (mir_.settings.wrapsOutOfRange) {
-      wrapped = builder_.CreateCall(runtime_["xag_many_place"],
-                                    {index, length, builder_.getInt32(1)});
-      builder_.CreateBr(inside);
-    } else {
-      builder_.CreateCall(runtime_["xag_many_out_of_range"], {index, length});
-      builder_.CreateUnreachable();
-    }
-    llvm::BasicBlock *wentAround = builder_.GetInsertBlock();
+    builder_.CreateCall(runtime_["xag_many_out_of_range"], {index, length});
+    builder_.CreateUnreachable();
 
     builder_.SetInsertPoint(inside);
-    llvm::Value *at = index;
-    if (wrapped) {
-      auto *both = builder_.CreatePHI(builder_.getInt64Ty(), 2);
-      both->addIncoming(index, asked);
-      both->addIncoming(wrapped, wentAround);
-      at = both;
-    }
-    return builder_.CreateGEP(typeFor(element), base, at);
+    return builder_.CreateGEP(typeFor(element), base, index);
   }
 
   // An index arrives as whatever width it was written at; the runtime asks in

@@ -636,19 +636,31 @@ nothing new to learn.
 
 ### Out of range
 
-Reaching past the end changes what a program answers, so it is a setting, and
-both values are real languages every engine has to agree under:
+Reaching past either end stops: which index, how long the array was, and where,
+the same in every engine. An empty `many` stops whatever is asked of it, because
+it has no places at all.
 
-```toml
-out-of-range = "stops"   # or "wraps"
-```
+Most of the time nothing gets that far. An index written down against a length
+written down is `E0532` and never builds, and one a counted loop walks off the
+end of is `E0538`, found by running the program at build — see
+`design/compile-time.md`. What stops at runtime is what nothing could know: an
+index worked out from what the program was given.
 
-`stops` says which index, how long the array was, and where, and stops there in
-every engine. `wraps` takes the index around the length, so `*-1*` is the last
-place and nothing ever stops.
+**There was a second answer and it is gone.** `out-of-range = "wraps"` in
+`Xag-Config.toml` took the index around the length instead, so that `*-1*` was
+the last place and nothing ever stopped. It went out on 2026-09-10. Compile-time
+running had taken the half of its job that was worth having; what was left was
+reading the wrong element in silence where stopping would have said which index
+and how long the array was. It also sat in a file away from the code and changed
+what every `'xs'['i']` in the program meant, which is the one thing this
+language otherwise refuses to do — a property belongs in the spelling of the
+declaration it is about. Nothing ever tested it and the oracle never once turned
+it on.
 
-An empty `many` stops under both, because wrapping needs somewhere to land and
-there is nowhere.
+Wanting a ring is a real thing to want, and it can be written where anybody can
+see it: `'xs'[('i' mod count['xs']) + *1*]`. If that earns a word of its own it
+belongs on the declaration — `var.many.wrapping.int64 'ring'` — and going from
+cannot to can breaks nothing written before it.
 
 ### What it costs
 

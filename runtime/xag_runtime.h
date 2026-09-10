@@ -35,13 +35,9 @@ typedef struct {
   uint64_t length;
 } XagMany;
 
-// Which place an index names, or a stop. `wraps` is the `out-of-range` setting,
-// handed in rather than looked up so that native code has it as a constant and
-// the branch folds away where the index provably fits.
-//
-// An empty `many` stops under both settings: wrapping needs somewhere to land,
-// and there is nowhere.
-uint64_t xag_many_place(int64_t index, uint64_t length, int32_t wraps);
+// Which place an index names, or a stop. Reaching past either end stops, and an
+// empty `many` stops whatever is asked of it, because it has no places at all.
+uint64_t xag_many_place(int64_t index, uint64_t length);
 
 // The half of that which stops, on its own, so that native code can write the
 // half that does not as a compare and a branch the optimiser can see through.

@@ -210,16 +210,8 @@ struct Body {
   std::vector<MirType> typed;
 };
 
-// What this project decided, once, for every file in it. Only the settings that
-// change what a program *answers* live here, because those are the ones every
-// engine has to agree under.
-struct Settings {
-  bool wrapsOutOfRange = false; // out-of-range = "stops" (false) or "wraps"
-};
-
 struct Mir {
   std::vector<Body> bodies;
-  Settings settings;
   // What each struct is made of, carried through so that nothing after the
   // checker has to read it out of the tree again.
   std::vector<Shape> shapes;
@@ -235,7 +227,7 @@ struct MirResult {
 // again. Drops are placed where a scope ends; making them conditional on what
 // was moved is drop elaboration, which does not exist yet.
 MirResult build(const Source &source, const Program &program,
-               const CheckResult &checked, Settings settings = {});
+               const CheckResult &checked);
 
 // Drops arrive from lowering placed at every scope end, whether or not anything
 // is still there to drop. Elaboration reads the graph and settles each one: gone

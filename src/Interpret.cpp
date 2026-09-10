@@ -226,16 +226,13 @@ private:
   // answers the same way — including by stopping in the same place.
   bool placeOf(const Value &array, const Value &index, uint64_t &at) {
     const uint64_t length = array.places ? array.places->size() : 0;
-    if (length == 0 || (!mir_.settings.wrapsOutOfRange &&
-                        (index.number < 0 ||
-                         static_cast<uint64_t>(index.number) >= length))) {
+    if (length == 0 || index.number < 0 ||
+        static_cast<uint64_t>(index.number) >= length) {
       // The runtime says so and stops, which is the whole point of asking it.
-      xag_many_place(static_cast<int64_t>(index.number), length,
-                     mir_.settings.wrapsOutOfRange ? 1 : 0);
+      xag_many_place(static_cast<int64_t>(index.number), length);
       return false;
     }
-    at = xag_many_place(static_cast<int64_t>(index.number), length,
-                        mir_.settings.wrapsOutOfRange ? 1 : 0);
+    at = xag_many_place(static_cast<int64_t>(index.number), length);
     return true;
   }
 

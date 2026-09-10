@@ -476,19 +476,12 @@ void xag_many_out_of_range(int64_t index, uint64_t length) {
   xag_stop(why);
 }
 
-uint64_t xag_many_place(int64_t index, uint64_t length, int32_t wraps) {
+uint64_t xag_many_place(int64_t index, uint64_t length) {
   if (length == 0)
     xag_stop("a place was asked for in a `many` that holds none");
-  if (index >= 0 && static_cast<uint64_t>(index) < length)
-    return static_cast<uint64_t>(index);
-  if (!wraps)
+  if (index < 0 || static_cast<uint64_t>(index) >= length)
     xag_many_out_of_range(index, length);
-  // Around, in the direction that makes `*-1*` the last place.
-  const int64_t span = static_cast<int64_t>(length);
-  int64_t at = index % span;
-  if (at < 0)
-    at += span;
-  return static_cast<uint64_t>(at);
+  return static_cast<uint64_t>(index);
 }
 
 void xag_many_new(XagMany *out, uint64_t length, uint64_t stride) {

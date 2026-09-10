@@ -839,8 +839,8 @@ private:
 
 class Machine {
 public:
-  Machine(std::vector<Routine> routines, Settings settings)
-      : routines_(std::move(routines)), settings_(settings) {
+  explicit Machine(std::vector<Routine> routines)
+      : routines_(std::move(routines)) {
     stack_.resize(kStack);
   }
 
@@ -869,7 +869,6 @@ private:
   std::vector<Slot> stack_;
   std::vector<XagStr> pieces_; // the texts a join is putting side by side
   std::string trouble_;
-  Settings settings_;
   uint64_t steps_ = 0;
   unsigned depth_ = 0;
 
@@ -970,8 +969,7 @@ private:
 
   [[gnu::noinline]] void elementAt(Slot &to, const Slot &of, XagInt index) {
     const uint64_t length = of.places ? of.places->size() : 0;
-    const uint64_t at = xag_many_place(static_cast<int64_t>(index), length,
-                                       settings_.wrapsOutOfRange ? 1 : 0);
+    const uint64_t at = xag_many_place(static_cast<int64_t>(index), length);
     Slot seen = (*of.places)[at];
     seen.owns = false; // a view, and no claim on what it sees
     end(to);
@@ -990,8 +988,7 @@ private:
 
   [[gnu::noinline]] void storeAt(Slot &of, XagInt index, Slot &given) {
     const uint64_t length = of.places ? of.places->size() : 0;
-    const uint64_t at = xag_many_place(static_cast<int64_t>(index), length,
-                                       settings_.wrapsOutOfRange ? 1 : 0);
+    const uint64_t at = xag_many_place(static_cast<int64_t>(index), length);
     Slot kept = given;
     if (given.owns)
       given = Slot{};
@@ -1594,7 +1591,7 @@ private:
 
 FastResult runFast(const Mir &mir) {
   Builder builder(mir);
-  return Machine(builder.run(), mir.settings).run();
+  return Machine(builder.run()).run();
 }
 
 } // namespace xag

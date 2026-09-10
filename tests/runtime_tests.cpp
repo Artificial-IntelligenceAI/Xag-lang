@@ -305,14 +305,7 @@ void aPlaceIsFoundOrItStops() {
   // checked where a program can be run and its exit read, because stopping is
   // the whole process and not a value.
   for (int64_t i = 0; i < 4; ++i)
-    CHECK(xag_many_place(i, 4, 0) == static_cast<uint64_t>(i));
-
-  // Around, in the direction that makes `*-1*` the last place.
-  CHECK(xag_many_place(-1, 4, 1) == 3);
-  CHECK(xag_many_place(-4, 4, 1) == 0);
-  CHECK(xag_many_place(-5, 4, 1) == 3);
-  CHECK(xag_many_place(4, 4, 1) == 0);
-  CHECK(xag_many_place(9, 4, 1) == 1);
+    CHECK(xag_many_place(i, 4) == static_cast<uint64_t>(i));
 }
 
 void aManyTakesAndGivesBackItsPlaces() {

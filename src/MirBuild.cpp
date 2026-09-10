@@ -1130,10 +1130,9 @@ private:
 } // namespace
 
 MirResult build(const Source &source, const Program &program,
-                const CheckResult &checked, Settings settings) {
+                const CheckResult &checked) {
   (void)source; // spans in the IR already carry everything a diagnostic needs
   MirResult result = Builder(program, checked).run();
-  result.mir.settings = settings;
   result.mir.shapes = checked.shapes;
   return result;
 }

@@ -293,8 +293,7 @@ void dividingIsAnInstruction() {
 }
 
 // A place shown to be one the `many` has is not asked about again while it
-// runs. Asking costs a compare and a branch in the middle of every loop, and
-// `out-of-range` is the one default that costs anything at all.
+// runs. Asking costs a compare and a branch in the middle of every loop.
 void aSettledPlaceIsNotAskedAgain() {
   REJECTS("START { var.many.int64 'xs' = [*10* *20* *30*];\n"
           "  print.stdout['xs'[*1*] \\n]; }\n",

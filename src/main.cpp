@@ -52,8 +52,8 @@ void usage() {
                "    xagc --help         this\n\n"
                "    <file> -- a b c              what follows `--` is the\n"
                "                                 program's, not xagc's\n\n"
-               "    --out-of-range=stops|wraps   for this run only, over what\n"
-               "    --decimal=software|hardware  Xag-Config.toml decided\n\n"
+               "    --decimal=software|hardware  for this run only, over what\n"
+               "                                 Xag-Config.toml decided\n\n"
                "    --no-itmt                    (check only) do not run the\n"
                "                                 program while checking it. Faster\n"
                "                                 by far, and it stops looking for\n"
@@ -73,7 +73,6 @@ void usage() {
 // The file is read where the source is, and then upward, so a project decides
 // for every file under it without any of them saying so.
 struct Chosen {
-  xag::Settings answers;               // [defaults]
   bool wantsHardwareDecimal = false;   // [build]
 };
 
@@ -106,9 +105,7 @@ Chosen settingsFor(const std::string &sourcePath) {
         };
         trim(key);
         trim(said);
-        if (key == "out-of-range")
-          settings.answers.wrapsOutOfRange = said == "wraps";
-        else if (key == "decimal")
+        if (key == "decimal")
           settings.wantsHardwareDecimal = said == "hardware";
       }
       return settings;
@@ -130,7 +127,6 @@ Chosen chosenFor(const std::string &path) {
   return asked ? *asked : settingsFor(path);
 }
 
-xag::Settings settingsUsed(const std::string &path) { return chosenFor(path).answers; }
 
 // A program asking for a decimal this build has none of. There is nothing to
 // fall back to quietly: the two encode differently, and answering with the one
@@ -597,7 +593,7 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   const xag::OwnResult owned = xag::own(source, *program);
   if (report(source, owned.diagnostics) != 0)
     return false;
-  built = xag::build(source, *program, checked, settingsUsed(path));
+  built = xag::build(source, *program, checked);
   if (report(source, built.diagnostics) != 0)
     return false;
   xag::elaborate(built.mir);
@@ -757,12 +753,6 @@ int main(int argc, char **argv) {
   std::vector<char *> args(argv, argv + argc);
   for (unsigned i = 1; i < args.size();) {
     const std::string one = args[i];
-    if (one.rfind("--out-of-range=", 0) == 0) {
-      overridden.answers.wrapsOutOfRange = one.substr(15) == "wraps";
-      asked = &overridden;
-      args.erase(args.begin() + i);
-      continue;
-    }
     if (one.rfind("--decimal=", 0) == 0) {
       overridden.wantsHardwareDecimal = one.substr(10) == "hardware";
       asked = &overridden;

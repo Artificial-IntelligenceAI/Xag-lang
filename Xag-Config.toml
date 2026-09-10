@@ -23,9 +23,7 @@
 # asking about clusters. A cost paid by the operation that wanted it is not a
 # tax on everything else.
 #
-# Where no value is free, the rule still says take the safest: `out-of-range`
-# costs a compare under `stops` and a modulo under `wraps`, so `stops` wins on
-# safety with nothing given up.
+# Where no value is free, the rule still says take the safest.
 #
 # The rule exists because defaults drift one reasonable-looking commit at a
 # time, and each step is easy to argue for on its own.
@@ -76,19 +74,6 @@ characters = "clusters"
 # narrower than the type you named.
 no-number = "carries-on"
 
-# Also changes what a program answers. What reaching past the end of a `many`
-# does. `stops` says which place was asked for and how many there are, and stops
-# there in every engine; `wraps` takes the index around the length, so `*-1*` is
-# the last place and nothing ever stops.
-#
-# An empty `many` stops under both, because wrapping needs somewhere to land.
-#
-# Under `stops` an access is a compare and a branch. Native code writes that
-# compare out rather than calling the runtime for it, because a call the
-# optimiser cannot see into is one it cannot remove — and in a loop counting to
-# `count[…]`, LLVM proves the index fits and lifts the check out of the loop.
-out-of-range = "stops"
-
 [build]
 # Changes what gets delivered, never what a program answers — every level has to
 # produce the same number, which is what the oracle checks. `none`, `speed`.
@@ -131,9 +116,11 @@ decimal = "software"
 # `fast-interpreter` runs bytecode. `native` is compiled ahead of time.
 engine = "test-interpreter"
 
-# `out-of-range` and `decimal` are read; the rest are decided but not yet asked
-# about, because nothing branches on them yet. The file is looked for beside the
-# source and then upward, so a project decides for every file under it. A single
-# run may say otherwise — `xagc --out-of-range=wraps`, `xagc --decimal=hardware`
-# — which is how the oracle asks two languages the same questions, and how a
-# build that has both decimals is asked for each in turn.
+# `decimal` is read; the rest are decided but not yet asked about, because
+# nothing branches on them yet. The file is looked for beside the source and
+# then upward, so a project decides for every file under it. A single run may
+# say otherwise — `xagc --decimal=hardware` — which is how a build that has both
+# decimals is asked for each in turn.
+#
+# `out-of-range` was here and is gone: reaching past the end of a `many` stops,
+# and there is no second answer to pick. See `design/syntax.md`.

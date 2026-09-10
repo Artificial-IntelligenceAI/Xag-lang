@@ -120,7 +120,7 @@ vote between them proves nothing. Keep it that way.
   as part of this.
 - **`include/xag/Mir.h`** — the other two engines read the same shapes.
 - Semantics of any kind. `Xag-Config.toml` records the decisions (`division`,
-  `overflow`, `logic`, `characters`, `no-number`, `out-of-range`); none of them
+  `overflow`, `logic`, `characters`, `no-number`); none of them
   are yours to reinterpret.
 
 ## House style
