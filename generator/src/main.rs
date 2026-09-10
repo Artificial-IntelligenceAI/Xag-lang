@@ -31,6 +31,12 @@ struct Settings {
 #[derive(Debug)]
 struct Answer {
     said: String,
+    /// What it wrote to standard error, kept apart. A `print` says which of the
+    /// two streams it goes to, so the same text on the wrong one is a different
+    /// answer — and folded into one string, as these were, it is no answer at
+    /// all: an engine writing every print to standard output would agree with
+    /// one that split them.
+    complained: String,
     status: i32,
 }
 
@@ -66,6 +72,7 @@ fn oddOneOut(answers: &[(&'static str, Answer)]) -> Option<&'static str> {
         let mut agrees = 0;
         for j in 0..answers.len() {
             if i != j && answers[i].1.said == answers[j].1.said
+                && answers[i].1.complained == answers[j].1.complained
                 && answers[i].1.status == answers[j].1.status
             {
                 agrees += 1;
@@ -76,6 +83,7 @@ fn oddOneOut(answers: &[(&'static str, Answer)]) -> Option<&'static str> {
             let others: Vec<usize> = (0..answers.len()).filter(|&j| j != i).collect();
             let all = others.windows(2).all(|w| {
                 answers[w[0]].1.said == answers[w[1]].1.said
+                    && answers[w[0]].1.complained == answers[w[1]].1.complained
                     && answers[w[0]].1.status == answers[w[1]].1.status
             });
             if all && others.len() >= 2 {
@@ -274,6 +282,9 @@ fn main() {
         }
         for (name, answer) in &finding.answers {
             println!("{name} (status {}):\n{}", answer.status, answer.said);
+            if !answer.complained.is_empty() {
+                println!("{name} (standard error):\n{}", answer.complained);
+            }
         }
     }
     println!("\n{} disagreement(s).", found.len());
@@ -300,31 +311,30 @@ enum Verdict {
 
 /// An answer with the compiler's own diagnostics cut out of it.
 ///
-/// Not off the front: what a program writes goes to stdout and what the
-/// compiler says goes to stderr, and the two are joined with stderr last — so
-/// the block sits at the *end*, after the program's output, and taking
-/// everything before it away threw the answer out instead of the noise.
+/// The compiler says what it has to say on standard error, and so, now, may the
+/// program — `print.stderr` writes there. Both are in `complained`, so the
+/// blocks are cut out of that and what is left is the program's own voice.
 ///
 /// A block opens with the greeting and closes with the line offering the issue
-/// tracker. Anything the program itself put on stderr — `the program stopped:`
-/// most of all — is outside those bounds and stays.
+/// tracker. Anything the program itself put on standard error — `the program
+/// stopped:` most of all — is outside those bounds and stays.
 fn withoutTheCompilersVoice(mut answer: Answer) -> Answer {
     const OPENING: &str = "Hello, ";
     const CLOSING: &str = "please tell me: ";
     loop {
-        let opened = match answer.said.find(OPENING) {
+        let opened = match answer.complained.find(OPENING) {
             Some(at) => at,
             None => break,
         };
-        let closed = match answer.said[opened..].find(CLOSING) {
+        let closed = match answer.complained[opened..].find(CLOSING) {
             Some(at) => opened + at,
             None => break,
         };
-        let end = match answer.said[closed..].find('\n') {
+        let end = match answer.complained[closed..].find('\n') {
             Some(at) => closed + at + 1,
-            None => answer.said.len(),
+            None => answer.complained.len(),
         };
-        answer.said.replace_range(opened..end, "");
+        answer.complained.replace_range(opened..end, "");
     }
     answer
 }
@@ -337,23 +347,24 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
     }
 
     let interpreted = run(Command::new(&settings.xagc).arg("run").arg(&source));
-    if interpreted.status != 0 && interpreted.said.contains("Rule(s) broken") {
-        return Verdict::Refused(interpreted.said);
+    if interpreted.status != 0 && interpreted.complained.contains("Rule(s) broken") {
+        return Verdict::Refused(interpreted.complained);
     }
     // A case that outstays its welcome, or that runs past what an engine will
     // follow, says nothing about whether they agree.
-    if interpreted.status == -2 || interpreted.said.contains("longer than this engine") {
+    if interpreted.status == -2 || interpreted.complained.contains("longer than this engine")
+    {
         return Verdict::Skipped;
     }
 
     let quick = run(Command::new(&settings.xagc).arg("fast").arg(&source));
-    if quick.status == -2 || quick.said.contains("longer than this engine") {
+    if quick.status == -2 || quick.complained.contains("longer than this engine") {
         return Verdict::Skipped;
     }
 
     let built = run(Command::new(&settings.xagc).arg("build").arg(&source));
     if built.status != 0 {
-        return Verdict::Broke("xagc build", built.said);
+        return Verdict::Broke("xagc build", built.complained);
     }
     let binary = room.join("case");
     let native = run(&mut Command::new(&binary));
@@ -375,7 +386,11 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
     ];
     let alike = answers
         .windows(2)
-        .all(|w| w[0].1.said == w[1].1.said && w[0].1.status == w[1].1.status);
+        .all(|w| {
+            w[0].1.said == w[1].1.said
+                && w[0].1.complained == w[1].1.complained
+                && w[0].1.status == w[1].1.status
+        });
     if alike {
         Verdict::Agreed
     } else {
@@ -414,7 +429,9 @@ const PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
 fn run(command: &mut Command) -> Answer {
     let mut child = match command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(child) => child,
-        Err(trouble) => return Answer { said: trouble.to_string(), status: -1 },
+        Err(trouble) => {
+            return Answer { said: trouble.to_string(), complained: String::new(), status: -1 }
+        }
     };
 
     // Read both pipes on their own threads: a child that fills one and is never
@@ -448,12 +465,10 @@ fn run(command: &mut Command) -> Answer {
         }
     };
 
-    let mut said = String::from_utf8_lossy(&reading.join().unwrap_or_default()).into_owned();
-    let stderr = reading_err.join().unwrap_or_default();
-    if !stderr.is_empty() {
-        said.push_str(&String::from_utf8_lossy(&stderr));
-    }
-    Answer { said, status }
+    let said = String::from_utf8_lossy(&reading.join().unwrap_or_default()).into_owned();
+    let complained =
+        String::from_utf8_lossy(&reading_err.join().unwrap_or_default()).into_owned();
+    Answer { said, complained, status }
 }
 
 fn read_settings() -> Result<Settings, String> {

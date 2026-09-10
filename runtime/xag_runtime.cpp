@@ -11,9 +11,43 @@ namespace {
 
 int64_t live = 0;
 std::FILE *out = nullptr;
+std::FILE *err = nullptr;
 std::FILE *in = nullptr;
+// Which stream the print in hand named. Said by every print statement, so it is
+// never read having been left over from an earlier one.
+int32_t stream = 0;
 
-std::FILE *output() { return out ? out : stdout; }
+std::FILE *output() {
+  if (stream == 1)
+    return err ? err : stderr;
+  return out ? out : stdout;
+}
+
+// Where the compiler's own markers go — where a sum came round, that a read was
+// reached — as against what the program itself writes. They shared standard
+// error until a program could write there too, and then a program's complaint
+// and the compiler talking to itself were one stream with no way to tell them
+// apart. `XAG_NOTES` names a file while the compiler is running the program to
+// see what it does; with nothing named they go to standard error as before,
+// which is what a reader running their own built program should see.
+std::FILE *notes() {
+  static std::FILE *file = nullptr;
+  static bool asked = false;
+  if (!asked) {
+    asked = true;
+    if (const char *path = std::getenv("XAG_NOTES"); path && *path)
+      file = std::fopen(path, "w");
+  }
+  return file ? file : stderr;
+}
+
+// Said as it happens rather than at the end: a program that stops is one whose
+// last marker matters most, and there is no tidy exit to flush it in.
+void note(const char *line) {
+  std::FILE *where = notes();
+  std::fputs(line, where);
+  std::fflush(where);
+}
 std::FILE *input() { return in ? in : stdin; }
 
 char *take(uint64_t bytes) {
@@ -254,6 +288,8 @@ uint64_t xag_bool_writes(char *out, uint64_t room, int truth) {
 void xag_print_bool(int truth) { std::fputs(truth ? "true" : "false", output()); }
 
 void xag_set_output(void *file) { out = static_cast<std::FILE *>(file); }
+void xag_set_error(void *file) { err = static_cast<std::FILE *>(file); }
+void xag_writes_to(int32_t which) { stream = which; }
 
 void *xag_output_file(void) { return output(); }
 
@@ -598,13 +634,13 @@ void xag_forget_allocations(int64_t backTo) { live = backTo; }
 
 void xag_would_read(void) {
   std::fflush(output());
-  std::fprintf(stderr, "xag-would-read\n");
+  note("xag-would-read\n");
   std::exit(0);
 }
 
 void xag_would_take_time(void) {
   std::fflush(output());
-  std::fprintf(stderr, "xag-would-take-time\n");
+  note("xag-would-take-time\n");
   std::exit(0);
 }
 int xag_balance_is_clear(void) { return live == 0 ? 1 : 0; }
@@ -785,7 +821,9 @@ void xag_note_taken(void) { ++live; }
 void xag_note_given(void) { --live; }
 
 void xag_came_round(uint32_t at) {
-  std::fprintf(stderr, "xag-came-round %u\n", static_cast<unsigned>(at));
+  char line[64];
+  std::snprintf(line, sizeof(line), "xag-came-round %u\n", static_cast<unsigned>(at));
+  note(line);
 }
 
 namespace {
@@ -802,12 +840,20 @@ void xag_stop(const char *why) {
   // program stops the way it would have.
   if (handsBackTo)
     handsBackTo(reason);
-  std::fflush(output());
-  std::fprintf(stderr, "\nthe program stopped: %s\n", reason);
+  // Both streams, not whichever the last print named: a program that wrote to
+  // one and then stopped while the other still held something would lose it.
+  std::fflush(out ? out : stdout);
+  std::fflush(err ? err : stderr);
+  char line[256];
+  std::snprintf(line, sizeof(line), "\nthe program stopped: %s\n", reason);
+  note(line);
   // Only the build that was asked to keep track has anything to say here, and
   // that build is one nobody but the compiler ever runs.
-  if (xag_where != 0)
-    std::fprintf(stderr, "xag-stopped-at %u\n", static_cast<unsigned>(xag_where));
+  if (xag_where != 0) {
+    std::snprintf(line, sizeof(line), "xag-stopped-at %u\n",
+                  static_cast<unsigned>(xag_where));
+    note(line);
+  }
   std::exit(1);
 }
 

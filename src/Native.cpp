@@ -553,6 +553,7 @@ private:
     add("xag_str_push", voidTy, {ptr, ptr});
     add("xag_print", voidTy, {ptr});
     add("xag_print_bool", voidTy, {i32});
+    add("xag_writes_to", voidTy, {i32});
     auto *i128 = builder_.getInt128Ty();
     add("xag_print_int", voidTy, {i128, i32, i32});
     auto *f64 = builder_.getDoubleTy();
@@ -1662,7 +1663,11 @@ private:
   }
 
   llvm::Value *call(const RValue &value) {
-    if (value.callee == "print.stdout") {
+    if (value.callee == "print.stdout" || value.callee == "print.stderr") {
+      // Which stream, said in front of the pieces and said by every print, so
+      // that no statement writes where the one before it was writing.
+      builder_.CreateCall(runtime_["xag_writes_to"],
+                          {builder_.getInt32(value.callee == "print.stderr" ? 1 : 0)});
       for (const Operand &operand : value.operands) {
         // What is behind the loan, not the loan: a borrowed number is a number,
         // and asking `loan int64` what type it is answers nothing at all.

@@ -528,7 +528,7 @@ private:
         return into;
       }
       std::vector<Operand> arguments;
-      if (e.name == "print.stdout") {
+      if (e.name == "print.stdout" || e.name == "print.stderr") {
         // Showing is not joining: a print writes one piece after another and
         // builds nothing, so its pieces stay pieces and are never welded into
         // a value first. And it reads them, so they stay where they were.

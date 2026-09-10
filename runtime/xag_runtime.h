@@ -100,11 +100,21 @@ void xag_print(const XagStr *text);
 void xag_print_bool(int truth);
 
 // Where printing goes. One implementation for every engine, so that what a
-// program says cannot depend on which of them said it.
+// program says cannot depend on which of them said it. Two of them, because a
+// `print` says which — `print.stdout` and `print.stderr` — and naming the
+// destination only earns its place because there is more than one.
 void xag_set_output(void *file);
+void xag_set_error(void *file);
 
-// Where printing goes, as a `FILE *`. Shared so that every part of the runtime
-// writes to the same place, whoever redirected it.
+// Which of the two the prints after this go to: 0 is standard output, 1 is
+// standard error. Every print statement says it, so there is no state left over
+// from the last one to be wrong about — the flag is not remembered between
+// statements, it is re-said by each.
+void xag_writes_to(int32_t stream);
+
+// Where printing goes right now, as a `FILE *`. Shared so that every part of the
+// runtime writes to the same place, whoever redirected it and whichever stream
+// the print in hand named.
 void *xag_output_file(void);
 
 // Every whole number travels in one carrier, however wide it was written, with

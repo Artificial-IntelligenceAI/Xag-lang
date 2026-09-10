@@ -446,9 +446,15 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   // Its own output, read back. Whatever it writes to the terminal it would
   // write when the reader ran it, and that is not this moment.
   const std::string said = stem + ".out";
+  const std::string complained = stem + ".err";
   const std::string noticed = stem + ".round";
-  const std::string start =
-      "\"" + stem + "\" > \"" + said + "\" 2> \"" + noticed + "\"";
+  // Three destinations, because there are three different things being said: what
+  // the program answers, what the program complains about, and what the compiler
+  // is telling itself. The last two shared standard error until a program could
+  // write there itself, and then a `print.stderr` and a came-round marker were
+  // one stream with nothing to tell them apart.
+  const std::string start = "XAG_NOTES=\"" + noticed + "\" \"" + stem + "\" > \"" +
+                            said + "\" 2> \"" + complained + "\"";
   const int status = std::system(start.c_str());
   std::remove(stem.c_str());
 
@@ -456,6 +462,12 @@ xag::Compiled buildAndStart(const xag::Mir &mir) {
   out.said.assign(std::istreambuf_iterator<char>(reading), std::istreambuf_iterator<char>());
   reading.close();
   std::remove(said.c_str());
+
+  std::ifstream grumbling(complained, std::ios::binary);
+  out.complained.assign(std::istreambuf_iterator<char>(grumbling),
+                        std::istreambuf_iterator<char>());
+  grumbling.close();
+  std::remove(complained.c_str());
 
   // Where it said a sum came round, one line each, in the order they happened.
   // Kept apart from what the program wrote, because a program's own output is

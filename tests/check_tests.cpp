@@ -32,6 +32,16 @@ struct Checked {
   xag::CheckResult checked;
 
   bool ok() const { return lexed.ok() && parsed.ok() && checked.ok(); }
+  // Everything the first complaint offered as a tip, joined, so a test can ask
+  // whether it named the thing a reader needed to hear.
+  std::string tip() const {
+    std::string out;
+    if (checked.diagnostics.empty())
+      return out;
+    for (const std::string &one : checked.diagnostics.front().tips)
+      out += one + " ";
+    return out;
+  }
   std::string code(unsigned i) const {
     return i < checked.diagnostics.size() ? checked.diagnostics[i].code : "(none)";
   }
@@ -215,6 +225,26 @@ void callsAreChecked() {
   CHECK(run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
             "START { var.str 's' = [*x*]; var.int64 'a' = [twice['s']]; }\n").code(0) == "E0506");
   CHECK(inStart("nosuch[*1*];").code(0) == "E0504");
+}
+
+// A `print` says where it goes, and there are two places for it to go.
+void bothStreamsArePrintedTo() {
+  CHECK(inStart("print.stdout[str:*a* \\n];").ok());
+  CHECK(inStart("print.stderr[str:*a* \\n];").ok());
+  // Everything showable goes to either of them, and either takes as many items
+  // as are written.
+  CHECK(run("struct 'point' [int64 'x', int64 'y']\n"
+            "START { var.point 'p' = [*1* *2*];\n"
+            "  print.stderr['p' str:* * 'p'.x \\n]; }\n").ok());
+
+  // And a name near one of them is told what the family holds, rather than
+  // about quote marks — which is what the tip used to say to everybody who
+  // named a function that is not there, whatever they had written.
+  const Checked missed = inStart("print.stdlog[str:*a* \\n];");
+  CHECK(missed.code(0) == "E0504");
+  CHECK(missed.tip().find("`stdout` and `stderr`") != std::string::npos);
+  const Checked reading = inStart("var.str 's' = [read.stdlog[]];");
+  CHECK(reading.tip().find("`read.stdin`") != std::string::npos);
 }
 
 void signaturesAreReadBeforeBodies() {
@@ -1580,6 +1610,7 @@ int main() {
   anImmutableNameDoesNotChange();
   aBorrowSaysWhetherItWrites();
   callsAreChecked();
+  bothStreamsArePrintedTo();
   signaturesAreReadBeforeBodies();
   giveAnswersItsFunction();
   aFunctionAnswersEveryWayOut();

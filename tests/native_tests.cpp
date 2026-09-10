@@ -100,6 +100,13 @@ void rejects(const std::string &program, const std::string &unwanted, int line) 
 
 #define REJECTS(program, unwanted) rejects(program, unwanted, __LINE__)
 
+// A `print` says where it goes, and the backend has to say so too — one call
+// naming the stream in front of the pieces, per print statement.
+void itSaysWhichStreamAPrintGoesTo() {
+  EMITS("START { print.stderr[str:*complaint* \n]; }\n", "xag_writes_to");
+  EMITS("START { print.stdout[str:*answer* \n]; }\n", "xag_writes_to");
+}
+
 void itEmitsWholePrograms() {
   EMITS("START { print.stdout[str:*hello* \\n]; }\n", "xag_print");
   EMITS("START { var.int64 'n' = [*2* + *3*]; print.stdout['n' \\n]; }\n", "xag_print_int");
@@ -478,6 +485,7 @@ void aWatchedBuildStopsAtTheWorldOutside() {
 } // namespace
 
 int main() {
+  itSaysWhichStreamAPrintGoesTo();
   itEmitsWholePrograms();
   itEmitsFunctionsAndLoans();
   itEmitsControlFlow();

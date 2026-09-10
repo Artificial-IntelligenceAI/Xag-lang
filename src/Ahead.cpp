@@ -98,6 +98,13 @@ bool worthRunning(const Mir &mir) {
       for (const Statement &s : block.statements) {
         if (s.kind == StatementKind::Store)
           return true;
+        // Which of the two streams a print goes to is a thing an engine can get
+        // wrong, and getting it wrong is silent to anyone comparing output
+        // alone — the two answers are the same text on different streams. So a
+        // program that writes to standard error is worth running, where one
+        // that only writes to standard output still is not.
+        if (s.value.kind == RValueKind::Call && s.value.callee == "print.stderr")
+          return true;
         if (s.value.kind == RValueKind::Element || s.value.kind == RValueKind::Fill)
           return true;
         if (s.value.kind != RValueKind::Binary)
@@ -163,17 +170,25 @@ Diagnostic confirmed(Diagnostic bound) {
 // The compiler contradicting itself. No code, because a code names a rule the
 // reader's code broke and no rule was broken; what stands in its place is the
 // two answers, which is the thing worth having in the report.
-Diagnostic disagreed(const std::string &interpreted, const Compiled &twice) {
+Diagnostic disagreed(const std::string &interpreted, const std::string &grumbled,
+                     const Compiled &twice) {
   std::vector<std::string> both;
   if (!twice.ran) {
     both.push_back("Reading it, I ran it to the end. Built and started, it did not: " +
                    (twice.trouble.empty() ? std::string("it stopped.") : twice.trouble));
   } else {
-    const size_t at = upToTheDifference(interpreted, twice.said).size();
-    both.push_back("They agreed for " + std::to_string(at) +
-                   " character(s), and then did not.");
-    both.push_back("  reading it:  " + firstLineFrom(interpreted, at));
-    both.push_back("  running it:  " + firstLineFrom(twice.said, at));
+    // Whichever stream they parted on. Saying "standard output" when what
+    // differed was standard error would send a reader looking at the half that
+    // matched.
+    const bool onOutput = twice.said != interpreted;
+    const std::string &mine = onOutput ? interpreted : grumbled;
+    const std::string &theirs = onOutput ? twice.said : twice.complained;
+    const size_t at = upToTheDifference(mine, theirs).size();
+    both.push_back(std::string("They agreed for ") + std::to_string(at) +
+                   " character(s) of standard " + (onOutput ? "output" : "error") +
+                   ", and then did not.");
+    both.push_back("  reading it:  " + firstLineFrom(mine, at));
+    both.push_back("  running it:  " + firstLineFrom(theirs, at));
   }
   return Diagnostic{Span{}, "", "the two ways I have of running this do not agree.",
                     "here", both, {}, {}, Severity::Mine};
@@ -204,13 +219,23 @@ struct Both {
 Both runBothWays(const Mir &mir, const Building &building) {
   Both out;
   std::FILE *sink = std::tmpfile();
-  if (!sink)
+  std::FILE *grumbles = std::tmpfile();
+  if (!sink || !grumbles) {
+    if (sink)
+      std::fclose(sink);
+    if (grumbles)
+      std::fclose(grumbles);
     return out;
+  }
   xag_set_output(sink);
+  xag_set_error(grumbles);
   const InterpretResult reading = interpretWatching(mir);
   xag_set_output(nullptr);
+  xag_set_error(nullptr);
   const std::string said = drain(sink);
+  const std::string complained = drain(grumbles);
   std::fclose(sink);
+  std::fclose(grumbles);
   if (!reading.ran)
     return out;
 
@@ -220,6 +245,7 @@ Both runBothWays(const Mir &mir, const Building &building) {
     return out;
   const Compiled twice = building(mir);
   if (!twice.asked || !twice.ran || twice.said != said ||
+      twice.complained != complained ||
       !samePlaces(reading.cameRound, twice.cameRound))
     return out;
 
@@ -335,11 +361,17 @@ AheadResult ahead(const Source &source, const Mir &mir,
     out.diagnostics = aboutSums;
     return out;
   }
+  std::FILE *grumbles = std::tmpfile();
   xag_set_output(sink);
+  xag_set_error(grumbles);
   const InterpretResult result = interpretWatching(mir);
   xag_set_output(nullptr);
+  xag_set_error(nullptr);
   const std::string said = drain(sink);
+  const std::string complained = grumbles ? drain(grumbles) : std::string();
   std::fclose(sink);
+  if (grumbles)
+    std::fclose(grumbles);
 
   // A program that stopped is a program that breaks, and saying so before it is
   // ever run is the whole point of running it. Nothing else is settled: the run
@@ -367,8 +399,9 @@ AheadResult ahead(const Source &source, const Mir &mir,
     const bool bothStoppedTheSameWay = twice.wouldRead == result.wouldRead &&
                                       twice.wouldTakeTime == result.wouldTakeTime &&
                                       twice.ran == !partly;
-    if (!bothStoppedTheSameWay || twice.said != said) {
-      out.diagnostics.push_back(disagreed(said, twice));
+    if (!bothStoppedTheSameWay || twice.said != said ||
+        twice.complained != complained) {
+      out.diagnostics.push_back(disagreed(said, complained, twice));
       return out;
     }
     // Both wrote the same thing, and both were asked where a sum came round.

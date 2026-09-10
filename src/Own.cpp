@@ -161,6 +161,7 @@ private:
 
   void collect() {
     functions_["print.stdout"] = FnInfo{{}, Mode::Owned, true};
+    functions_["print.stderr"] = FnInfo{{}, Mode::Owned, true};
     functions_["count"] = FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false};
     functions_["read.stdin"] = FnInfo{{}, Mode::Owned, false};
     functions_["arguments"] = FnInfo{{}, Mode::Owned, false};

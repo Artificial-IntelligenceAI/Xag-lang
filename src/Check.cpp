@@ -1233,7 +1233,12 @@ private:
   }
 
   void collect() {
+    // A `print` says where it goes, and there is no default. Naming the
+    // destination only earns its place because there is more than one, so there
+    // are two — a program's answer and a program's complaint are different
+    // things, and a reader piping one should not catch the other.
     functions_["print.stdout"] = Signature{{}, Type::Nothing, true, Span{}};
+    functions_["print.stderr"] = Signature{{}, Type::Nothing, true, Span{}};
     // A line, or nothing left to read. The end of the input is not an empty
     // line: an empty line is something a program may legitimately read, and
     // telling the two apart is what the type is for.
@@ -1930,9 +1935,20 @@ private:
 
     auto found = functions_.find(path);
     if (found == functions_.end()) {
+      // What the language has, where the name written is nearly one of them.
+      // The tip that was here said a variable wears marks and a bare word does
+      // not, which is about a different mistake entirely — somebody who wrote
+      // `print.stderr` was told about quote marks and never told what the
+      // `print` family holds.
+      std::vector<std::string> tips = {
+          "a variable is a name and wears marks; a bare word is a function."};
+      if (path.rfind("print.", 0) == 0)
+        tips = {"a `print` says where it goes, and there is `stdout` and `stderr`."};
+      else if (path.rfind("read.", 0) == 0)
+        tips = {"the only `read` is `read.stdin`."};
       complain(e.span, "E0504", "`" + path + "` is not a function.",
                {"a word followed by `[` is a call, and a call needs something to call"},
-               {"a variable is a name and wears marks; a bare word is a function."});
+               tips);
       for (const Value &value : e.args.values)
         for (const ExprPtr &item : value.items)
           expr(*item, Type::Unknown);

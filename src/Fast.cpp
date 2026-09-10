@@ -64,6 +64,10 @@ enum class Op : uint8_t {
   // Argument is data laid out as code, never a step of its own.
   Argument,
   Call, PrintWhole, PrintReal, PrintWide, PrintDeci, PrintText, PrintBool,
+  // Where the prints after it go: `aux` is 0 for standard output and 1 for
+  // standard error. One of these stands in front of every print statement's
+  // pieces, so a statement never inherits where the last one was writing.
+  WritesTo,
   // A `many` or a struct, a value at a time. How many places there are is not
   // known until it runs, so this is one op that walks rather than a print per
   // place worked out here. `TextOfAll` is the same walk into a `str`.
@@ -802,7 +806,8 @@ private:
 
   void call(const Statement &s, unsigned &scratch, bool through) {
     const RValue &value = s.value;
-    if (value.callee == "print.stdout") {
+    if (value.callee == "print.stdout" || value.callee == "print.stderr") {
+      emit(Code{Op::WritesTo, 0, 0, 0, value.callee == "print.stderr" ? 1u : 0u});
       for (const Operand &operand : value.operands) {
         const MirType type = typing(operand.type).lent();
         const Type named = plainly(type);
@@ -1670,6 +1675,7 @@ private:
       case Op::PrintDeci: xag_print_deci(one.aux >> 1, read(one.a).whole); break;
       case Op::PrintText: xag_print(&read(one.a).text); break;
       case Op::PrintBool: xag_print_bool(read(one.a).whole != 0); break;
+      case Op::WritesTo: xag_writes_to(static_cast<int32_t>(one.aux)); break;
       case Op::ShowAll: show(read(one.a), routine.shown[one.aux]); break;
       [[unlikely]] case Op::TextOfAll: {
         end(to);

@@ -28,6 +28,7 @@ struct Said {
   bool ran = false;
   std::string trouble;
   std::string out;
+  std::string err;   // and what it wrote to standard error, which a print names
   int64_t leaked = 0;
 };
 
@@ -35,7 +36,9 @@ Said capture(const xag::Mir &mir, bool quick) {
   Said said;
   const int64_t before = xag_live_allocations();
   std::FILE *sink = std::tmpfile();
+  std::FILE *grumbles = std::tmpfile();
   xag_set_output(sink);
+  xag_set_error(grumbles);
   if (quick) {
     const xag::FastResult result = xag::runFast(mir);
     said.ran = result.ran;
@@ -46,6 +49,7 @@ Said capture(const xag::Mir &mir, bool quick) {
     said.trouble = result.trouble;
   }
   xag_set_output(nullptr);
+  xag_set_error(nullptr);
   said.leaked = xag_live_allocations() - before;
 
   std::fflush(sink);
@@ -54,6 +58,12 @@ Said capture(const xag::Mir &mir, bool quick) {
   const size_t got = std::fread(buffer, 1, sizeof(buffer), sink);
   said.out.assign(buffer, got);
   std::fclose(sink);
+
+  std::fflush(grumbles);
+  std::rewind(grumbles);
+  const size_t grumbled = std::fread(buffer, 1, sizeof(buffer), grumbles);
+  said.err.assign(buffer, grumbled);
+  std::fclose(grumbles);
   return said;
 }
 
@@ -74,12 +84,15 @@ void agree(const std::string &text, int line) {
   const Said slow = capture(built.mir, false);
   const Said quick = capture(built.mir, true);
 
-  if (slow.out != quick.out || slow.ran != quick.ran) {
+  // Both streams, not just the one. Writing every print to standard output is
+  // an engine getting the destination wrong, and comparing the two engines'
+  // output alone they would agree about it perfectly.
+  if (slow.out != quick.out || slow.err != quick.err || slow.ran != quick.ran) {
     std::cerr << "FAIL line " << line << ": the engines disagree\n"
-              << "    test: \"" << slow.out << "\" (" << (slow.ran ? "ran" : slow.trouble)
-              << ")\n"
-              << "    fast: \"" << quick.out << "\" (" << (quick.ran ? "ran" : quick.trouble)
-              << ")\n";
+              << "    test: \"" << slow.out << "\" / err \"" << slow.err << "\" ("
+              << (slow.ran ? "ran" : slow.trouble) << ")\n"
+              << "    fast: \"" << quick.out << "\" / err \"" << quick.err << "\" ("
+              << (quick.ran ? "ran" : quick.trouble) << ")\n";
     ++failures;
   }
   if (quick.leaked != 0) {
@@ -283,6 +296,18 @@ void onShowingWhatSeveralThingsHold() {
         "START { var.str 'name' = [*ada*];\n"
         "  var.held 'h' = [loan 'name' *1.25*];\n"
         "  print.stdout['h' \\n]; }\n");
+}
+
+// A `print` says where it goes, and both engines have to send it there.
+void onSayingWhereAPrintGoes() {
+  AGREE("START { print.stderr[str:*complaint* \\n]; }\n");
+  AGREE("START { print.stdout[str:*a* \\n]; print.stderr[str:*b* \\n];\n"
+        "  print.stdout[str:*c* \\n]; }\n");
+  AGREE("struct 'point' [int64 'x', int64 'y']\n"
+        "START { var.point 'p' = [*1* *2*];\n"
+        "  print.stderr['p' str:* * 'p'.y \\n]; }\n");
+  AGREE("START { var.many.int64 'ns' = [*1* *2* *3*];\n"
+        "  print.stderr['ns' \\n]; print.stdout[(count[str:*ab*]) \\n]; }\n");
 }
 
 void onGroupingNamedThings() {
@@ -594,6 +619,7 @@ int main() {
   onBeingOneOfSeveralThings();
   onACaseThatOwnsSomething();
   onShowingWhatSeveralThingsHold();
+  onSayingWhereAPrintGoes();
   onGroupingNamedThings();
   onTurningNumbersIntoText();
 

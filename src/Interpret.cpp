@@ -828,7 +828,10 @@ private:
   }
 
   Value callByName(const RValue &value) {
-    if (value.callee == "print.stdout") {
+    if (value.callee == "print.stdout" || value.callee == "print.stderr") {
+      // Where it goes is said by the statement, every time, so nothing is left
+      // over from the last one for this one to be wrong about.
+      xag_writes_to(value.callee == "print.stderr" ? 1 : 0);
       for (const Operand &operand : value.operands) {
         Value piece = read(operand);
         show(piece, shapeOf(operand.type).lent());

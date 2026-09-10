@@ -20,7 +20,12 @@ namespace xag {
 struct Compiled {
   bool asked = false;   // whether building was even attempted
   bool ran = false;     // it was built, started, and finished on its own
-  std::string said;     // everything it wrote
+  std::string said;     // everything it wrote to standard output
+  // And everything it wrote to standard error, kept apart. A `print` says which
+  // of the two it goes to, so the two are different answers and folding them
+  // into one would let a program that writes to the wrong stream still look
+  // right — which is exactly the disagreement worth catching.
+  std::string complained;
   // Where it said a sum came round. The build it was made by is the only one
   // with checked arithmetic in it, so this is the second opinion about an
   // overflow — the thing that makes standing a bound up more than one engine's

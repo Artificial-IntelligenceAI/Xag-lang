@@ -1784,7 +1784,16 @@ impl<'a> Writer<'a> {
 
     fn print(&mut self) {
         self.pad();
-        self.out.push_str("print.stdout[");
+        // Which of the two streams, chosen per statement. The same text on the
+        // wrong one is a different answer, and it is an answer only running the
+        // program finds — comparing what a program wrote without asking where
+        // it wrote it, three engines writing everything to standard output
+        // would agree perfectly.
+        self.out.push_str(if self.rng.chance(20) {
+            "print.stderr["
+        } else {
+            "print.stdout["
+        });
         // The whole of something that holds several values, sometimes: every
         // value it holds, one after another. Both ways of writing it, because
         // `convert-to-str` promises the same characters and the promise is

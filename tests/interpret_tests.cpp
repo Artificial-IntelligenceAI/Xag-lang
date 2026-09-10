@@ -29,7 +29,8 @@ struct Ran {
   bool compiled = false;
   bool ran = false;
   std::string trouble;
-  std::string said;
+  std::string said;        // what it wrote to standard output
+  std::string complained;  // and to standard error, which a `print` may name
   int64_t leaked = 0;
 };
 
@@ -59,6 +60,7 @@ Ran run(const std::string &text) {
 
   const int64_t before = xag_live_allocations();
   std::FILE *sink = std::tmpfile();
+  std::FILE *grumbles = std::tmpfile();
   std::FILE *reading = std::tmpfile();
   if (!given.empty()) {
     std::fwrite(given.data(), 1, given.size(), reading);
@@ -66,9 +68,11 @@ Ran run(const std::string &text) {
     std::rewind(reading);
   }
   xag_set_output(sink);
+  xag_set_error(grumbles);
   xag_set_input(reading);
   const xag::InterpretResult result = xag::interpret(built.mir);
   xag_set_output(nullptr);
+  xag_set_error(nullptr);
   xag_set_input(nullptr);
   std::fclose(reading);
   out.leaked = xag_live_allocations() - before;
@@ -79,6 +83,12 @@ Ran run(const std::string &text) {
   size_t got = std::fread(buffer, 1, sizeof(buffer), sink);
   out.said.assign(buffer, got);
   std::fclose(sink);
+
+  std::fflush(grumbles);
+  std::rewind(grumbles);
+  got = std::fread(buffer, 1, sizeof(buffer), grumbles);
+  out.complained.assign(buffer, got);
+  std::fclose(grumbles);
 
   out.ran = result.ran;
   out.trouble = result.trouble;
@@ -137,11 +147,52 @@ void checkSays(const std::string &program, const std::string &expected, int line
 
 #define SAYS(program, expected) checkSays(program, expected, __LINE__)
 
+// The same, about the other stream. A `print` says where it goes, so what a
+// program wrote is two answers rather than one, and a test that asks only about
+// standard output would pass an engine that wrote everything there.
+void checkComplains(const std::string &program, const std::string &onOut,
+                    const std::string &onErr, int line) {
+  const Ran r = run(program);
+  if (!r.compiled || !r.ran) {
+    std::cerr << "FAIL line " << line << ": it did not run: " << r.trouble << '\n';
+    ++failures;
+    return;
+  }
+  if (r.said != onOut) {
+    std::cerr << "FAIL line " << line << ": on output said \"" << r.said
+              << "\", wanted \"" << onOut << "\"\n";
+    ++failures;
+  }
+  if (r.complained != onErr) {
+    std::cerr << "FAIL line " << line << ": on error said \"" << r.complained
+              << "\", wanted \"" << onErr << "\"\n";
+    ++failures;
+  }
+}
+
+#define STREAMS(program, onOut, onErr)                                                   \
+  checkComplains(program, onOut, onErr, __LINE__)
+
 void itPrints() {
   SAYS("START { print.stdout[str:*hello* \\n]; }\n", "hello\n");
   SAYS("START { var.str 'who' = [*world*];\n"
        "  print.stdout[str:*Hello, * 'who' str:*!* \\n]; }\n",
        "Hello, world!\n");
+}
+
+// A `print` says where it goes, and the two streams stay apart. Naming the
+// destination only earns its place because there is more than one.
+void itSaysWhereEachPrintGoes() {
+  STREAMS("START { print.stdout[str:*answer* \\n]; }\n", "answer\n", "");
+  STREAMS("START { print.stderr[str:*complaint* \\n]; }\n", "", "complaint\n");
+  // Alternating, because where a print goes is said by that print and not
+  // inherited from the one before it.
+  STREAMS("START { print.stdout[str:*a* \\n]; print.stderr[str:*b* \\n];\n"
+          "  print.stdout[str:*c* \\n]; print.stderr[str:*d* \\n]; }\n",
+          "a\nc\n", "b\nd\n");
+  // Everything showable goes to either of them the same way.
+  STREAMS("START { var.int64 'n' = [*7*]; var.bool 'b' = [*true*];\n"
+          "  print.stderr['n' str:* * 'b' \\n]; }\n", "", "7 true\n");
 }
 
 void itCounts() {
@@ -887,6 +938,7 @@ void aStopComesBackRatherThanEndingEverything() {
 
 int main() {
   itPrints();
+  itSaysWhereEachPrintGoes();
   itCounts();
   itWrapsAtTheWidthItWasWritten();
   itComparesAsTheTypeSaysToCompare();
