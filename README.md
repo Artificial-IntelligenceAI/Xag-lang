@@ -1,6 +1,7 @@
 # Xag coding language
 
-Official domains: [xag-lang.com](https://xag-lang.com), and [xag-lang.org](https://xag-lang.org) **only**
+Official domains: [xag-lang.com](https://xag-lang.com), [xag-lang.org](https://xag-lang.org), 
+[xag-lang.dev](https://xag-lang.dev) **only**
 
 A programming language built around high performance, helpful error messages,
 and Rust-style memory management. A size is always written: there is no `int`
