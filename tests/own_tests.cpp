@@ -339,6 +339,26 @@ void aGrowingManyIsHandedOverTheSameWay() {
             .reports("E0406"));
 }
 
+// One place of a `many.many.int64` holds a whole `many.int64`, which owns its
+// own places — so putting a row into a grid hands it over. Asked of the type at
+// the end of the chain, the answer came back about the `int64` at the bottom,
+// the row went in without a word, and both names let go of the same places.
+void aRowPutIntoAGridIsHandedOver() {
+  CHECK(run("START {\n    var.mut.many.many.int64 'g' = [[*1* *2*] [*3* *4*]];\n"
+            "    var.many.int64 'row' = [*7* *8*];\n"
+            "    set 'g'[*1*] = ['row'];\n}\n")
+            .reports("E0406"));
+  CHECK(run("START {\n    var.mut.many.many.int64 'g' = [[*1* *2*] [*3* *4*]];\n"
+            "    var.many.int64 'row' = [*7* *8*];\n"
+            "    set 'g'[*1*] = [move 'row'];\n"
+            "    print.stdout['g'[*1*][*1*] \\n];\n}\n").ok());
+  // One place of a plain `many.int64` holds a number, and a number copies.
+  CHECK(run("START {\n    var.mut.many.int64 'xs' = [*1* *2*];\n"
+            "    var.int64 'n' = [*7*];\n"
+            "    set 'xs'[*1*] = ['n'];\n"
+            "    print.stdout['xs'[*1*] \\n];\n}\n").ok());
+}
+
 void aCaseIsHandedWhatItHolds() {
   CHECK(run("one-of 'thing' [str 'text', int64 'n']\n"
             "START {\n    var.str 's' = [*hello*];\n"
@@ -398,6 +418,7 @@ int main() {
   whatHoldsLendsIsNotYoursToGiveAway();
   oneOfWhatAStructHoldsGoesOnItsOwn();
   aGrowingManyIsHandedOverTheSameWay();
+  aRowPutIntoAGridIsHandedOver();
   aCaseIsHandedWhatItHolds();
   aStructIsFilledRatherThanJoined();
   whatGoesIntoAFieldIsTheFieldsQuestion();

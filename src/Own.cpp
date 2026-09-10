@@ -33,13 +33,25 @@ bool copyType(std::string_view type) {
 // handed over, so a second name took it without a word and both let go of the
 // places. The built program aborted; the interpreters, which end a value once
 // however many names think they hold it, said nothing.
-bool holdsMany(const Chain &chain) {
+unsigned manyDeep(const Chain &chain) {
+  unsigned deep = 0;
   for (std::size_t at = 0; at + 1 < chain.segments.size(); ++at) {
     const ChainSegment &seg = chain.segments[at];
     if (!seg.isName && (seg.text == "many" || seg.text == "many-growing"))
-      return true;
+      ++deep;
   }
-  return false;
+  return deep;
+}
+
+bool holdsMany(const Chain &chain) { return manyDeep(chain) > 0; }
+
+// Whether what one place of it holds is copied into that place. One place of a
+// `many.many.int64` holds a whole `many.int64`, which owns its own places and
+// is handed over rather than copied — asked of the type at the end of the chain
+// instead, it answered for the `int64` at the bottom, so putting a row into a
+// grid took it without a word and both names let go of the same places.
+bool placeCopies(const Chain &chain) {
+  return manyDeep(chain) <= 1 && copyType(chain.type().text);
 }
 
 bool copyChain(const Chain &chain) {
@@ -165,7 +177,7 @@ public:
     for (const Item &item : program_.items)
       if (item.kind == ItemKind::Const)
         scopes_.back()[item.name] =
-            Binding{Mode::Owned, copyChain(item.chain), copyType(item.chain.type().text),
+            Binding{Mode::Owned, copyChain(item.chain), placeCopies(item.chain),
                     holdsMany(item.chain), false, item.nameSpan, false, {}};
     for (const Item &item : program_.items)
       body(item);
@@ -740,10 +752,10 @@ private:
       const bool copies = copyChain(s.chain);
       const std::string fills =
           holdsMany(s.chain) || mode != Mode::Owned ? std::string() : s.chain.type().text;
-      consumeInto(s.value, mode, copies, holdsMany(s.chain),
-                  copyType(s.chain.type().text), fills);
+      consumeInto(s.value, mode, copies, holdsMany(s.chain), placeCopies(s.chain),
+                  fills);
       scopes_.back()[s.name] =
-          Binding{mode, copies, copyType(s.chain.type().text), holdsMany(s.chain),
+          Binding{mode, copies, placeCopies(s.chain), holdsMany(s.chain),
                   changeable(s.chain), s.nameSpan, false, {}, {}, {}, fills};
       break;
     }
@@ -866,7 +878,7 @@ private:
         scopes_.back()[s.holds] = heldBinding(s.holdsSpan);
       if (s.kind == StmtKind::LoopRange)
         scopes_.back()[s.name] =
-            Binding{Mode::Owned, copyChain(s.chain), copyType(s.chain.type().text),
+            Binding{Mode::Owned, copyChain(s.chain), placeCopies(s.chain),
                     holdsMany(s.chain), false, s.nameSpan, false, {}};
       for (const StmtPtr &inner : s.body.stmts)
         statement(*inner);
@@ -985,7 +997,7 @@ private:
       for (const Param &param : item.params)
         scopes_.back()[param.name] =
             Binding{modeOfChain(param.chain), copyChain(param.chain),
-                    copyType(param.chain.type().text), holdsMany(param.chain),
+                    placeCopies(param.chain), holdsMany(param.chain),
                     changeable(param.chain), param.nameSpan, false, {}};
     } else {
       giving_ = Mode::Owned;
