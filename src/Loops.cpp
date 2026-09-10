@@ -124,14 +124,20 @@ void readsOf(const RValue &value, std::vector<unsigned> &out) {
 
 // Whether a statement could change what a local holds.
 //
-// Three ways, and only the first is an assignment. Writing one place of a
-// `many` is a `Store` and leaves the name alone. Lending a name out for writing
-// hands the changing to somebody else, and what comes back is not what went in.
-// Counting only assignments meant both of those were invisible: a `many` filled
-// in before a loop was taken out as it was first written, and a loop writing
-// through a loan was answered as though it had written nothing.
+// Four ways, and only the first is an assignment. Writing one place of a `many`
+// is a `Store` and leaves the name alone. Growing one is a `Grow` and leaves it
+// alone too, and there is one more of it afterwards. Lending a name out for
+// writing hands the changing to somebody else, and what comes back is not what
+// went in.
+//
+// Every one of those has been missing from this list at some point, and every
+// time the answer was the same: a loop whose only visible work was the missing
+// one was taken to be a loop that only counts, and replaced by its effect on
+// the counter. The work went with it, in the built program alone, because that
+// is the one given rewritten middle layer.
 bool couldChange(const Statement &s, unsigned id) {
-  if ((s.kind == StatementKind::Assign || s.kind == StatementKind::Store) &&
+  if ((s.kind == StatementKind::Assign || s.kind == StatementKind::Store ||
+       s.kind == StatementKind::Grow) &&
       s.place == id)
     return true;
   return s.value.kind == RValueKind::Ref && s.value.op == "loanmut" &&
@@ -209,7 +215,7 @@ std::vector<Lifted> loopsThatStandAlone(const Mir &mir) {
           // filled in still says `copy _0`, and reading those had every loop
           // touching the answer slot — which is a `nothing`, so nothing ever
           // stood alone.
-          if (s.kind == StatementKind::Assign)
+          if (s.kind == StatementKind::Assign || s.kind == StatementKind::Grow)
             readsOf(s.value, read);
           if (s.kind == StatementKind::Store) {
             readsOf(s.value, read);
@@ -217,7 +223,13 @@ std::vector<Lifted> loopsThatStandAlone(const Mir &mir) {
           }
           if (s.conditional)
             read.push_back(s.flag);
-          if (s.kind == StatementKind::Drop || s.kind == StatementKind::Store)
+          // Growing one reaches into it, the same as writing a place of it or
+          // letting it go. Left out, a loop whose only work was growing
+          // something touched nothing anybody could see — so it read as a loop
+          // that just counts, and was replaced by its effect on the counter.
+          // What it grew went with it, in the built program alone.
+          if (s.kind == StatementKind::Drop || s.kind == StatementKind::Store ||
+              s.kind == StatementKind::Grow)
             read.push_back(s.place);
           for (unsigned one : read) {
             touched.insert(one);

@@ -295,6 +295,21 @@ void onTurningNumbersIntoText() {
   AGREE("struct 'holder' [loan.int64 'x']\n"
         "START { var.int64 'n' = [*7*]; var.holder 'h' = [loan 'n'];\n"
         "  print.stdout['h'.x \\n]; }\n");
+  // Growing inside a loop, where the loop is one the compiler can run on its own
+  // and write the answer in for. Growing was invisible to the pass that decides
+  // what a loop touches, so a loop whose only work was growing something read as
+  // a loop that just counts — and was replaced by its effect on the counter,
+  // taking the growth with it. In the built program alone, which is the only one
+  // given a rewritten middle layer.
+  AGREE("START { var.mut.many-growing.int64 'g' = [*1* *2*];\n"
+        "  var.mut.uint128 'i' = [*0*];\n"
+        "  loop.while 'i' < *1* { add 'g' = [*22*]; set 'i' = ['i' + *1*]; }\n"
+        "  var.mut.many.uint128 'm' = [*248* 'i'];\n"
+        "  print.stdout[(count[loan 'g']) \\n]; }\n");
+  AGREE("START { var.mut.many-growing.str 'w' = [];\n"
+        "  loop.range.int64 'i' = [*1*, *4*] { add 'w' = [*x*]; }\n"
+        "  print.stdout[(count[loan 'w']) str:*|* 'w'[*3*] \\n]; }\n");
+
   // A `many` that grows. A second type, because growing may move every place it
   // has — so it keeps room it is not using yet, and the room is the last field,
   // which is why counting one, reaching into one and letting one go all read it
