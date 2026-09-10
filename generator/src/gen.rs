@@ -95,6 +95,10 @@ struct Var {
     /// Which struct it is, when it is one. Like `many`, a struct never stands
     /// where one of the things it holds would.
     group: Option<usize>,
+    /// Which `one-of` it is, when it is one. Nothing may be done with one but
+    /// ask which case it is in: showing it, writing it out and comparing two
+    /// are all the same impossible question, and all refused.
+    sum: Option<usize>,
     /// Which of the things it holds have gone on their own. A field is known
     /// where it is written, so this is tracked one at a time — which is the
     /// whole of what a struct's ownership has that an array's does not.
@@ -130,6 +134,13 @@ struct Shape {
     fields: Vec<(String, Held)>,
 }
 
+/// A `one-of` the program declared, and what it may be. `None` is a case that
+/// carries nothing, which is written bare where a value goes.
+struct Sum {
+    name: String,
+    cases: Vec<(String, Option<Ty>)>,
+}
+
 struct Fun {
     name: String,
     params: Vec<Ty>,
@@ -142,6 +153,7 @@ pub struct Writer<'a> {
     scopes: Vec<Vec<Var>>,
     funs: Vec<Fun>,
     shapes: Vec<Shape>,
+    sums: Vec<Sum>,
     consts: Vec<Var>,
     next_name: u32,
     /// What the file was written from, so that what it says can say so.
@@ -175,6 +187,7 @@ pub fn generate(seed: u64, size: u32, out: &mut String) {
         scopes: Vec::new(),
         funs: Vec::new(),
         shapes: Vec::new(),
+        sums: Vec::new(),
         consts: Vec::new(),
         next_name: 0,
         seed,
@@ -207,7 +220,8 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<&Var> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == ty && var.many.is_none() && var.group.is_none() && !var.moved && !var.lent &&
+                if var.ty == ty && var.many.is_none() && var.group.is_none()
+                   && var.sum.is_none() && !var.moved && !var.lent &&
                    (!want_mutable || var.mutable) {
                     seen.push(var);
                 }
@@ -215,7 +229,7 @@ impl<'a> Writer<'a> {
         }
         if !want_mutable {
             for var in &self.consts {
-                if var.ty == ty && var.many.is_none() && var.group.is_none() {
+                if var.ty == ty && var.many.is_none() && var.group.is_none() && var.sum.is_none() {
                     seen.push(var);
                 }
             }
@@ -242,13 +256,13 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<Ty> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() && !var.moved && !var.lent {
+                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() && var.sum.is_none() && !var.moved && !var.lent {
                     seen.push(var.ty);
                 }
             }
         }
         for var in &self.consts {
-            if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() {
+            if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() && var.sum.is_none() {
                 seen.push(var.ty);
             }
         }
@@ -340,7 +354,7 @@ impl<'a> Writer<'a> {
             self.out.push_str("' = [");
             self.literal(ty);
             self.out.push_str("];\n");
-            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false });
+            self.consts.push(Var { name, ty, mutable: false, many: None, moved: false, lent: false, group: None, sum: None, parts_moved: Vec::new(), inner: None, grows: false });
         }
         if constants > 0 {
             self.out.push('\n');
@@ -354,6 +368,17 @@ impl<'a> Writer<'a> {
             self.shape();
         }
         if shapes > 0 {
+            self.out.push('\n');
+        }
+
+        // A type that is one of several things, sometimes. Not every program:
+        // one that declares one and never asks which case it is in says less
+        // about the type than a shorter program that does.
+        let sums = if self.rng.chance(45) { self.rng.below(2) + 1 } else { 0 };
+        for _ in 0..sums {
+            self.sum();
+        }
+        if sums > 0 {
             self.out.push('\n');
         }
 
@@ -437,6 +462,150 @@ impl<'a> Writer<'a> {
         self.shapes.push(Shape { name, fields });
     }
 
+    /// `one-of 'v3' [int64 'v4', bool 'v5', nothing 'v6']` — two to four cases,
+    /// at least one of which carries something. Every case holds a value that
+    /// copies: one holding text or a `many` owns it, and letting go of what the
+    /// live case holds is not built yet.
+    fn sum(&mut self) {
+        let name = self.fresh();
+        let count = self.rng.below(3) + 2;
+        let mut cases: Vec<(String, Option<Ty>)> = Vec::new();
+        self.out.push_str("one-of '");
+        self.out.push_str(&name);
+        self.out.push_str("' [");
+        for i in 0..count {
+            if i > 0 {
+                self.out.push_str(", ");
+            }
+            // The last case carries nothing sometimes, and never the first —
+            // a `one-of` of nothing but empties is a choice with no values in
+            // it, which is a thing to write but a dull one to check.
+            let held = if i > 0 && self.rng.chance(30) {
+                None
+            } else if self.rng.chance(20) {
+                Some(Ty::Bool)
+            } else {
+                Some(self.pick_whole())
+            };
+            let case = self.fresh();
+            self.out.push_str(match held {
+                Some(ty) => ty.written(),
+                None => "nothing",
+            });
+            self.out.push_str(" '");
+            self.out.push_str(&case);
+            self.out.push('\'');
+            cases.push((case, held));
+        }
+        self.out.push_str("]\n");
+        self.sums.push(Sum { name, cases });
+    }
+
+    /// `var.v3 'v7' = [v4:*12*];` — one of the things it may be, said where the
+    /// value is made.
+    fn sum_declaration(&mut self) {
+        if self.sums.is_empty() {
+            self.declaration();
+            return;
+        }
+        let which = self.rng.below(self.sums.len() as u32) as usize;
+        let at = self.rng.below(self.sums[which].cases.len() as u32) as usize;
+        let (case, held) = self.sums[which].cases[at].clone();
+        let type_name = self.sums[which].name.clone();
+        let name = self.fresh();
+        // Never `mut`: nothing here writes over a `one-of` afterwards, and a
+        // `mut` nothing uses is `W0003`.
+        self.pad();
+        self.out.push_str("var.");
+        self.out.push_str(&type_name);
+        self.out.push_str(" '");
+        self.out.push_str(&name);
+        self.out.push_str("' = [");
+        self.out.push_str(&case);
+        if let Some(ty) = held {
+            // Bracketed, because the colon takes one item and an expression is
+            // one item only when something says where it ends — `v6:*1* ^ *2*`
+            // reads as `(v6:*1*) ^ *2*`, which asks a power of a `one-of`.
+            self.out.push_str(":(");
+            self.expr(ty, 1);
+            self.out.push(')');
+        }
+        self.out.push_str("];\n");
+        self.declare(Var {
+            name,
+            ty: Ty::Bool, // never asked: nothing picks a `one-of` by its type
+            mutable: false,
+            many: None,
+            moved: false,
+            lent: false,
+            group: None,
+            sum: Some(which),
+            parts_moved: Vec::new(),
+            inner: None,
+            grows: false,
+        });
+    }
+
+    /// `when 'v7' { is v4 'v9' { … } … }` — every case, once each, which is
+    /// what the compiler insists on and the only way to reach what is inside.
+    fn sum_when(&mut self) {
+        let mut seen: Vec<(String, usize)> = Vec::new();
+        for scope in &self.scopes {
+            for var in scope {
+                if let Some(which) = var.sum {
+                    if !var.moved && !var.lent {
+                        seen.push((var.name.clone(), which));
+                    }
+                }
+            }
+        }
+        if seen.is_empty() {
+            self.print();
+            return;
+        }
+        let at = self.rng.below(seen.len() as u32) as usize;
+        let (name, which) = seen[at].clone();
+        let cases = self.sums[which].cases.clone();
+        self.pad();
+        self.out.push_str("when '");
+        self.out.push_str(&name);
+        self.out.push_str("' {\n");
+        self.indent += 1;
+        for (case, held) in &cases {
+            self.pad();
+            self.out.push_str("is ");
+            self.out.push_str(case);
+            match held {
+                Some(ty) => {
+                    let bound = self.fresh();
+                    self.out.push_str(" '");
+                    self.out.push_str(&bound);
+                    self.out.push_str("' {\n");
+                    self.indent += 1;
+                    // Lent for the arm, so it is read and nothing else.
+                    self.pad();
+                    self.out.push_str("print.stdout['");
+                    self.out.push_str(&bound);
+                    self.out.push_str("' \\n];\n");
+                    self.indent -= 1;
+                    let _ = ty;
+                }
+                None => {
+                    self.out.push_str(" {\n");
+                    self.indent += 1;
+                    self.pad();
+                    self.out.push_str("print.stdout[str:*none* \\n];\n");
+                    self.indent -= 1;
+                }
+            }
+            self.pad();
+            self.out.push_str("}\n");
+        }
+        self.indent -= 1;
+        self.pad();
+        self.out.push_str("}\n");
+    }
+
     /// Names holding a struct that nobody is using for anything else.
     fn groups(&mut self, want_mutable: bool, whole: bool) -> Vec<(String, usize)> {
         let mut seen = Vec::new();
@@ -505,7 +674,7 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<String> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == ty && var.many.is_none() && var.group.is_none() && !var.moved
+                if var.ty == ty && var.many.is_none() && var.group.is_none() && var.sum.is_none() && !var.moved
                     && !self.stepped.contains(&var.name)
                 {
                     seen.push(var.name.clone());
@@ -529,7 +698,7 @@ impl<'a> Writer<'a> {
                     let mut found = false;
                     for scope in &self.scopes {
                         for var in scope {
-                            if var.ty == *ty && var.many.is_none() && var.group.is_none()
+                            if var.ty == *ty && var.many.is_none() && var.group.is_none() && var.sum.is_none()
                                 && !var.moved
                                 && !self.stepped.contains(&var.name)
                             {
@@ -614,7 +783,7 @@ impl<'a> Writer<'a> {
             many: None,
             moved: false,
             lent: false,
-            group: Some(which),
+            group: Some(which), sum: None,
             parts_moved: Vec::new(),
             inner: None,
             grows: false,
@@ -775,7 +944,7 @@ impl<'a> Writer<'a> {
             self.out.push_str(&param);
             self.out.push('\'');
             params.push(ty);
-            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false });
+            self.declare(Var { name: param, ty, mutable: false, many: None, moved: false, lent: false, group: None, sum: None, parts_moved: Vec::new(), inner: None, grows: false });
         }
         self.out.push_str("] {\n");
         self.indent = 1;
@@ -836,6 +1005,17 @@ impl<'a> Writer<'a> {
     }
 
     fn statement(&mut self) {
+        // A `one-of` only where the program declared one, and then often: the
+        // point of writing one is asking which case it is in, and a value
+        // nobody asks about says nothing about the type.
+        if !self.sums.is_empty() && self.rng.chance(14) {
+            if self.rng.chance(45) {
+                self.sum_declaration();
+            } else {
+                self.sum_when();
+            }
+            return;
+        }
         match self.rng.below(25) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
@@ -873,7 +1053,8 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<String> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if !var.moved && !var.lent && var.parts_moved.is_empty() {
+                if !var.moved && !var.lent && var.parts_moved.is_empty()
+                   && var.sum.is_none() {
                     seen.push(var.name.clone());
                 }
             }
@@ -970,7 +1151,7 @@ impl<'a> Writer<'a> {
                     many: None,
                     moved: false,
                     lent: false,
-                    group: None,
+                    group: None, sum: None,
                     parts_moved: Vec::new(),
                     inner: None,
                     grows: false,
@@ -1002,7 +1183,7 @@ impl<'a> Writer<'a> {
             many: None,
             moved: false,
             lent: false,
-            group: None,
+            group: None, sum: None,
             parts_moved: Vec::new(),
             inner: None,
             grows: false,
@@ -1014,7 +1195,7 @@ impl<'a> Writer<'a> {
         let mut seen: Vec<String> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if var.ty == Ty::Str && var.many.is_none() && var.group.is_none() && !var.moved && !var.lent
+                if var.ty == Ty::Str && var.many.is_none() && var.group.is_none() && var.sum.is_none() && !var.moved && !var.lent
                     && (!writable || var.mutable) {
                     seen.push(var.name.clone());
                 }
@@ -1059,7 +1240,7 @@ impl<'a> Writer<'a> {
                 // LLVM to invert a pointer — the compiler fell over rather than
                 // the program.
                 if (Self::numeric(var.ty) || var.ty == Ty::Bool)
-                    && var.many.is_none() && var.group.is_none()
+                    && var.many.is_none() && var.group.is_none() && var.sum.is_none()
                     && !var.moved && !var.lent {
                     seen.push((var.name.clone(), var.ty));
                     mutable.push(var.mutable);
@@ -1308,7 +1489,7 @@ impl<'a> Writer<'a> {
             }
         }
         self.out.push_str("];\n");
-        self.declare(Var { name: name.clone(), ty, mutable, many: Some(length), moved: false, lent: false, group: None, parts_moved: Vec::new(), inner, grows });
+        self.declare(Var { name: name.clone(), ty, mutable, many: Some(length), moved: false, lent: false, group: None, sum: None, parts_moved: Vec::new(), inner, grows });
         // The same again: a `many` asked to be writable, and then written.
         if mutable && length > 0 && self.rng.chance(80) {
             self.set_a_place(&name, ty, length, inner);
@@ -1498,7 +1679,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' = [");
         self.expr(ty, 2);
         self.out.push_str("];\n");
-        self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false });
+        self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, sum: None, parts_moved: Vec::new(), inner: None, grows: false });
 
         // `mut` asks for something, and asking without doing it is the whole of
         // what `W0003` is for. Most of the time it is done here, where the name
@@ -1523,7 +1704,7 @@ impl<'a> Writer<'a> {
         let mut choices: Vec<(String, Ty)> = Vec::new();
         for scope in &self.scopes {
             for var in scope {
-                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() && var.mutable
+                if Self::numeric(var.ty) && var.many.is_none() && var.group.is_none() && var.sum.is_none() && var.mutable
                     && !var.moved && !var.lent {
                     choices.push((var.name.clone(), var.ty));
                 }
@@ -1685,7 +1866,7 @@ impl<'a> Writer<'a> {
             many: None,
             moved: false,
             lent: false,
-            group: None,
+            group: None, sum: None,
             parts_moved: Vec::new(),
             inner: None,
             grows: false,
@@ -1740,7 +1921,7 @@ impl<'a> Writer<'a> {
         // Stepped by the loop, the same as a `while`'s own counter: a borrow of
         // one held across a turn points at what the next turn changes.
         self.stepped.push(counter.clone());
-        let held = Var { name: counter.clone(), ty, mutable: false, many: None, moved: false, lent: false, group: None, parts_moved: Vec::new(), inner: None, grows: false };
+        let held = Var { name: counter.clone(), ty, mutable: false, many: None, moved: false, lent: false, group: None, sum: None, parts_moved: Vec::new(), inner: None, grows: false };
         if keeps {
             self.declare(held.clone());
             self.scopes.push(Vec::new());
