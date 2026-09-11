@@ -150,29 +150,48 @@ public:
   Parser(const Source &source, const std::vector<Token> &tokens)
       : source_(source), tokens_(tokens) {}
 
-  // A file is three blocks, in this order, and all three are written whether or
-  // not there is anything in them:
+  // A file is one of two shapes, and every block in the shape is written
+  // whether or not there is anything in it:
   //
-  //     READ_ME { }      what it says, in prose
-  //     PREP { }         everything that lasts the whole program
-  //     START { }        the part that runs
+  //     READ_ME { }      what it says, in prose        READ_ME { }
+  //     PREP { }         what lasts the whole program  LIBRARY { }   what it offers
+  //     START { }        the part that runs            ITMT { }
+  //     ITMT { }         what is run while building
+  //
+  // A program on the left, a library on the right. The second block says which:
+  // `PREP` or `LIBRARY`. A library has no `START` because it has no moment of its
+  // own — everything in it is a declaration, and what runs is what a program
+  // calls. Both have `ITMT`, which is run two ways while building and never
+  // ships; it is how a library is exercised on its own.
   //
   // Written even when empty, because a shape that is sometimes there is a shape
   // a reader has to look for. This one is always in the same place.
   ParseResult run() {
     readMeBlock();
-    prepBlock();
-    startBlock();
+    if (checkWord("LIBRARY")) {
+      result_.program.library = true;
+      libraryBlock();
+    } else {
+      prepBlock();
+      startBlock();
+    }
+    itmtBlock();
 
-    // Nothing stands outside the three.
+    // Nothing stands outside the blocks.
     while (!atEnd()) {
       const unsigned before = at_;
       complain(peek().span, "E0110",
-               "a file is `READ_ME`, `PREP` and `START`, and this is outside all "
-               "three.",
-               {"a file is three blocks, in that order"},
-               {"what lasts the whole program goes in `PREP`; what runs goes in "
-                "`START`."},
+               result_.program.library
+                   ? "a library is `READ_ME`, `LIBRARY` and `ITMT`, and this is "
+                     "outside all three."
+                   : "a program is `READ_ME`, `PREP`, `START` and `ITMT`, and this "
+                     "is outside all four.",
+               {"a file is its blocks, in that order"},
+               {result_.program.library
+                    ? "what the library offers goes in `LIBRARY`; what exercises it "
+                      "while building goes in `ITMT`."
+                    : "what lasts the whole program goes in `PREP`; what runs goes in "
+                      "`START`; what is only run while building goes in `ITMT`."},
                std::string("found ") + describe(peek().kind));
       advance();
       if (at_ == before)
@@ -202,7 +221,19 @@ public:
       missing("PREP", "what the program is made of, which may be nothing yet");
       return;
     }
-    advance();
+    advance(); // PREP
+    declarations();
+  }
+
+  // `LIBRARY { … }` — the same declarations, in a file that offers them to
+  // programs rather than running anything itself.
+  void libraryBlock() {
+    advance(); // LIBRARY, already seen
+    declarations();
+  }
+
+  // The braces and what is inside them, after the word that named the block.
+  void declarations() {
     if (!expect(TokenKind::LBrace, "`{`"))
       return;
     while (!check(TokenKind::RBrace) && !atEnd()) {
@@ -212,6 +243,24 @@ public:
         ++at_;
     }
     expect(TokenKind::RBrace, "`}`");
+  }
+
+  // `ITMT { … }` — statements the compiler runs while building, two ways, and
+  // refuses the build if they disagree. Never shipped. A program's `START` is
+  // run the same way and does ship; this is for what should only ever run here.
+  void itmtBlock() {
+    if (!checkWord("ITMT")) {
+      missing("ITMT", "what is run while building and never shipped, which may be "
+                      "nothing yet");
+      return;
+    }
+    Item out;
+    out.kind = ItemKind::Itmt;
+    out.span.begin = peek().span.begin;
+    advance(); // ITMT
+    out.body = block();
+    out.span.end = previous().span.end;
+    result_.program.items.push_back(std::move(out));
   }
 
   void startBlock() {
@@ -229,10 +278,12 @@ public:
   void missing(const char *word, const char *what) {
     complain(peek().span, "E0111",
              std::string("this file has no `") + word + "`.",
-             {"a file is `READ_ME`, then `PREP`, then `START`"},
+             {result_.program.library
+                  ? "a library is `READ_ME`, then `LIBRARY`, then `ITMT`"
+                  : "a program is `READ_ME`, then `PREP`, then `START`, then `ITMT`"},
              {std::string("`") + word + " { }` says " + what +
-              ". All three are written whether or not there is anything in "
-              "them, so a reader finds them in the same place every time."},
+              ". Every block is written whether or not there is anything in it, "
+              "so a reader finds them in the same place every time."},
              std::string("found ") + describe(peek().kind));
   }
 
@@ -1307,11 +1358,40 @@ private:
     out.span.begin = peek().span.begin;
 
     if (!check(TokenKind::Word)) {
-      complain(peek().span, "E0104", "a `PREP` holds structs, constants and functions.",
-               {"what lasts the whole program is written in `PREP`"},
-               {"a `var` belongs inside something that runs, and that is `START`."},
+      complain(peek().span, "E0104",
+               result_.program.library
+                   ? "a `LIBRARY` holds structs, constants and functions."
+                   : "a `PREP` holds structs, constants and functions.",
+               {result_.program.library
+                    ? "what a library offers is written in `LIBRARY`"
+                    : "what lasts the whole program is written in `PREP`"},
+               {"a `var` belongs inside something that runs, and that is `START` — "
+                "or `ITMT`, if it should only ever run while building."},
                std::string("found ") + describe(peek().kind));
       advance();
+      return;
+    }
+
+    // `import 'text';` — this file uses a unit the manifest knows by that name.
+    // Marks on the name because it is one: it comes back as the prefix on every
+    // name reached through it.
+    if (checkWord("import")) {
+      out.kind = ItemKind::Import;
+      advance();
+      if (check(TokenKind::Name)) {
+        const Token name = advance();
+        out.name = name.text;
+        out.nameSpan = name.span;
+      } else {
+        complain(peek().span, "E0101", "`import` names the unit it brings in.",
+                 {"a name wears marks where it is given, and a word does not"},
+                 {"`import 'text';` — the name is the one the library's manifest "
+                  "gives it."},
+                 std::string("found ") + describe(peek().kind));
+      }
+      expect(TokenKind::Semicolon, "`;`");
+      out.span.end = previous().span.end;
+      result_.program.items.push_back(std::move(out));
       return;
     }
 

@@ -17,8 +17,9 @@ public:
     result_.program.shapes = checked_.shapes;
     result_.program.sums = checked_.sums;
     for (const Item &item : program_.items) {
-      if (item.kind == ItemKind::Struct || item.kind == ItemKind::OneOf)
-        continue; // a type declares a shape, not something to walk
+      if (item.kind == ItemKind::Struct || item.kind == ItemKind::OneOf ||
+          item.kind == ItemKind::Import)
+        continue; // a type declares a shape, and an import names a unit; neither walks
       result_.program.items.push_back(item_(item));
     }
     (void)source_;
@@ -396,6 +397,9 @@ private:
       out.kind = TypedItemKind::Const;
       out.value = valueOf(item.value);
       return out;
+    case ItemKind::Itmt:
+      out.kind = TypedItemKind::Itmt;
+      break;
     default:
       out.kind = TypedItemKind::Start;
       break;
@@ -558,6 +562,9 @@ private:
       break;
     case TypedItemKind::Const:
       out_ << "const '" << item.name << "' : " << spelled(item.answers) << '\n';
+      break;
+    case TypedItemKind::Itmt:
+      out_ << "ITMT\n";
       break;
     case TypedItemKind::Start:
       out_ << "START\n";

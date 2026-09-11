@@ -44,3 +44,5 @@ START {
     var.str 'spare' = [*spare*];
     keep[move 'spare'];
 }
+ITMT {
+}

@@ -18,3 +18,5 @@ START {
     var.int64 's' = [sum-to['LIMIT']];
     print.stdout[str:*sum to * 'LIMIT' str:* = * 's' \n];
 }
+ITMT {
+}

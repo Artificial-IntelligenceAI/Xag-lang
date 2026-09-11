@@ -134,7 +134,11 @@ struct TypedStmt {
   const Stmt *wrote = nullptr;
 };
 
-enum class TypedItemKind { Function, Const, Start };
+// `Itmt` is the block run while building and never shipped; below the checker
+// it is a body like `START`, told apart only so it can be named and so a build
+// knows which one ships. An `import` never reaches here — it is resolved before
+// the tree is built and has no body.
+enum class TypedItemKind { Function, Const, Start, Itmt };
 
 struct TypedParam {
   Span span;

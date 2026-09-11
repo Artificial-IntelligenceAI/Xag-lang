@@ -175,6 +175,21 @@ struct Printer {
       out << "START\n";
       block(i.body, 1);
       break;
+    case ItemKind::Itmt:
+      out << "ITMT\n";
+      block(i.body, 1);
+      break;
+    case ItemKind::Import:
+      out << "import '" << i.name << "'\n";
+      return;
+    case ItemKind::OneOf:
+      out << "one-of " << i.name << '\n';
+      for (const Param &field : i.params) {
+        indent(1);
+        chain(field.chain);
+        out << " '" << field.name << "'\n";
+      }
+      return;
     case ItemKind::Const:
       out << "const ";
       chain(i.chain);

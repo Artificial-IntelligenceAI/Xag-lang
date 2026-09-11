@@ -41,3 +41,5 @@ START {
     var.str 'taken' = [move 'r'.name];
     print.stdout[str:*took * 'taken' str:*, kept * 'r'.at.x \n];
 }
+ITMT {
+}

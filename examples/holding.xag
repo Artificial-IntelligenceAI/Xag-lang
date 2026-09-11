@@ -35,3 +35,5 @@ START {
     print.stdout[str:*and * (count[loan 'zeroes']) str:* zeroes adding to *
                  (total[loan 'zeroes']) \n];
 }
+ITMT {
+}

@@ -32,3 +32,5 @@ START {
         is nothing { print.stdout[str:*that was not a number* \n]; }
     }
 }
+ITMT {
+}

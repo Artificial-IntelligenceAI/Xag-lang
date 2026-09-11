@@ -1578,25 +1578,50 @@ Tip(s): with one borrowed parameter there is only one loan the answer could be
   Twenty million rounds with a branch in them: nine seconds of build without it,
   three hundredths with. The same program either way, and the same answer.
 
-## A file is three blocks
+## A file is one of two shapes
 
 ```
-READ_ME {
+READ_ME {                  READ_ME {
 
-}
+}                          }
 
-PREP {
+PREP {                     LIBRARY {
 
-}
+}                          }
 
-START {
+START {                    ITMT {
+
+}                          }
+
+ITMT {
 
 }
 ```
 
-All three are written, in that order, whether or not there is anything in them.
-A shape that is sometimes there is a shape a reader has to look for; this one is
-always in the same place.
+A program on the left, a library on the right. Every block in the shape is
+written, in that order, whether or not there is anything in it. A shape that is
+sometimes there is a shape a reader has to look for; this one is always in the
+same place. The second block says which shape it is.
+
+**A library has no `START`** because it has no moment of its own. Everything in
+it is a declaration, and what runs is what a program that imports it calls. A
+library that needed something done before it was used — a table built, a file
+opened — would want a `START`; that is initialisation, and it was left out on
+purpose. Three libraries each with one, and one depending on another's having
+run first, is a problem C++ has a name for. A table that depends on nothing is a
+`const`; a file that has to be opened is opened by a function the program calls,
+where a reader sees it.
+
+**`ITMT` is run while building and never ships.** Both shapes have one. A
+program's `START` is run while building too, and does ship; `ITMT` is for what
+should only ever run here — and it is the whole of what a library can run, which
+is how `xagc build` on a library alone means something. Everything in it goes
+through the same two engines as everything else, and a disagreement refuses the
+build.
+
+**`import 'text';`** in `PREP` or `LIBRARY` says this file uses a unit the
+manifest knows by that name. Marks on the name because it is one: it comes back
+as the prefix on every name reached through it. See `design/units.md`.
 
 **`PREP` is everything outside `START`** — the structs, the constants, the
 functions. It reads like a recipe: what the dish is made of, then the method.
@@ -1624,9 +1649,9 @@ prose ends the block early, fenced code included. Indent it by one space and it
 is prose again. The alternative was a delimiter nothing else in the language
 uses, and a second thing to remember is worse than a rule with one edge.
 
-Errors: `E0111` when one of the three is missing, and it says which; `E0110` for
-anything standing outside all three; `E0104` when a `var` is written in `PREP`,
-which is the one mistake the split invites.
+Errors: `E0111` when a block is missing, and it says which and for which shape;
+`E0110` for anything standing outside the blocks; `E0104` when a `var` is written
+in `PREP` or `LIBRARY`, which is the one mistake the split invites.
 
 ## The tree with the questions answered
 

@@ -72,9 +72,11 @@ const char *kKeep = "fn.nothing 'keep' [str 'text'] { print.stdout['text' \n]; }
 void everyBodyBecomesBlocks() {
   const Built b = run("fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\nSTART { }\n");
   CHECK(b.clean());
-  CHECK(b.built.mir.bodies.size() == 2);
+  // `twice`, `START`, and the `ITMT` every file has.
+  CHECK(b.built.mir.bodies.size() == 3);
   CHECK(b.has("fn twice -> int64"));
   CHECK(b.has("fn START -> nothing"));
+  CHECK(b.has("fn ITMT -> nothing"));
   CHECK(b.body(0).parameters == 1);
   // Local 0 is the answer, so a one-parameter body has at least two named slots.
   CHECK(b.body(0).locals.size() >= 2);

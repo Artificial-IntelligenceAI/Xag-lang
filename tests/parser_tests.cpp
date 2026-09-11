@@ -452,8 +452,8 @@ void aValueOnItsOwnIsSaidSoOnce() {
   // What must still be its own answer.
   CHECK(inStart("print.stdout[str:*hi* \\n];").ok());
   CHECK(inStart("var.int64 'n' = [*1*]\n    var.int64 'm' = [*2*];").code(0) == "E0103");
-  // Nothing stands outside the three blocks a file is.
-  CHECK(run("START { }\n}\n").code(0) == "E0110");
+  // Nothing stands outside the blocks a file is.
+  CHECK(run("READ_ME { }\nPREP { }\nSTART { }\nITMT { }\n}\n").code(0) == "E0110");
 }
 
 // A clone is faithful when the printer cannot tell the two apart. The printer
@@ -565,7 +565,49 @@ void theBlankIsFilledEverywhereAChainIs() {
 
 } // namespace
 
+// A file is one of two shapes. A program is `READ_ME`, `PREP`, `START`, `ITMT`;
+// a library is `READ_ME`, `LIBRARY`, `ITMT` — no `START`, because a library has
+// no moment of its own. Every block in the shape is written, empty or not.
+void aFileIsOneOfTwoShapes() {
+  const Parsed program = run("READ_ME { }\nPREP { }\nSTART { }\nITMT { }\n");
+  CHECK(program.ok());
+  CHECK(!program.parsed.program.library);
+  CHECK(program.has("START"));
+  CHECK(program.has("ITMT"));
+
+  const Parsed library = run("READ_ME { }\nLIBRARY {\n"
+                             "  fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
+                             "}\nITMT { }\n");
+  CHECK(library.ok());
+  CHECK(library.parsed.program.library);
+  CHECK(library.has("fn fn.int64 twice"));
+  CHECK(!library.has("START"));
+
+  // Each shape is missed by its own blocks.
+  CHECK(run("READ_ME { }\nPREP { }\nSTART { }\n").code(0) == "E0111");
+  CHECK(run("READ_ME { }\nLIBRARY { }\n").code(0) == "E0111");
+  CHECK(run("READ_ME { }\nLIBRARY { }\nSTART { }\nITMT { }\n").code(0) == "E0111");
+  // `ITMT` holds statements, like `START`.
+  CHECK(run("READ_ME { }\nPREP { }\nSTART { }\n"
+            "ITMT { var.int64 'n' = [*1*]; print.stdout['n' \\n]; }\n").ok());
+}
+
+// `import 'text';` names the unit this file uses, with marks because it is a
+// name — it comes back as the prefix on everything reached through it.
+void anImportNamesAUnit() {
+  const Parsed p = run("READ_ME { }\nPREP {\n  import 'text';\n}\nSTART { }\nITMT { }\n");
+  CHECK(p.ok());
+  CHECK(p.has("import 'text'"));
+  // In a library too, which may use other libraries.
+  CHECK(run("READ_ME { }\nLIBRARY {\n  import 'text';\n}\nITMT { }\n").ok());
+  // A bare word is not a name.
+  CHECK(run("READ_ME { }\nPREP {\n  import text;\n}\nSTART { }\nITMT { }\n").code(0) ==
+        "E0101");
+}
+
 int main() {
+  aFileIsOneOfTwoShapes();
+  anImportNamesAUnit();
   aCloneIsIndistinguishable();
   theBlankIsFilledEverywhereAChainIs();
   aValueOnItsOwnIsSaidSoOnce();

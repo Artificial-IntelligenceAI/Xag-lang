@@ -96,3 +96,5 @@ START {
     print.stdout[(held['counter']) str:*, * (held[loan 'counter'])
                  str:*, * (held[loanmut 'counter']) \n];
 }
+ITMT {
+}

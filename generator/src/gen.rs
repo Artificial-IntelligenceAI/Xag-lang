@@ -395,7 +395,11 @@ impl<'a> Writer<'a> {
         self.body(statements);
         self.finish_scope();
         self.scopes.pop();
-        self.out.push_str("}\n");
+        // Every file has an `ITMT`, run while building and never shipped. Empty
+        // here: what this generator is asking about is what ships, and a
+        // program whose build-time block did anything would be one whose built
+        // binary says less than its `xagc run` — a disagreement about nothing.
+        self.out.push_str("}\n\nITMT {\n}\n");
     }
 
     /// `struct 'v3' [int64 'v4', str 'v5']` — two or three things, of types the

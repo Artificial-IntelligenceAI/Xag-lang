@@ -2907,10 +2907,17 @@ private:
       break;
 
     case ItemKind::Start:
+    case ItemKind::Itmt:
+      // Both are a body that runs and answers nothing. `ITMT` runs while
+      // building only, which is not this pass's business — it is read exactly
+      // as `START` is.
       inFunction_ = false;
       giving_ = Type::Nothing;
       block(item.body);
       break;
+
+    case ItemKind::Import:
+      break; // resolved against the manifest, which is not this pass's either
 
     case ItemKind::Function: {
       inFunction_ = true;

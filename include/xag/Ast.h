@@ -146,7 +146,14 @@ struct Stmt {
 // of its own — where a `Struct` is all of its fields at once. They are declared
 // the same way and held the same way here, because what is written is the same:
 // a name, then a list of typed names.
-enum class ItemKind { Function, Const, Start, Struct, OneOf };
+//
+// `Itmt` is the block of that name: statements the compiler runs while building,
+// two ways, and never ships. A program has one beside its `START`; a library has
+// one and no `START`, which is how a library is exercised on its own.
+//
+// `Import` is `import 'text';` — this file uses the unit the program's manifest
+// knows by that name. Held as an item so it sits where it was written.
+enum class ItemKind { Function, Const, Start, Struct, OneOf, Itmt, Import };
 
 struct Param {
   Span span;
@@ -164,7 +171,7 @@ struct Item {
   std::string name;         // the function's word, or the constant's name
   std::vector<Param> params;// Function, and the fields of a Struct
   ValueList value;          // Const
-  Block body;               // Function, Start
+  Block body;               // Function, Start, Itmt
 };
 
 struct Program {
@@ -172,6 +179,10 @@ struct Program {
   // What the file's `READ_ME` says, exactly as written. Nothing reads it: it is
   // there so that what a file is for lives in the file rather than beside it.
   std::string readMe;
+  // Whether the file is a library — `LIBRARY` where a program has `PREP` and
+  // `START`. A library has no moment of its own: everything in it is a
+  // declaration, and what runs is what a program that imports it calls.
+  bool library = false;
 };
 
 } // namespace xag

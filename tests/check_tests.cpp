@@ -999,8 +999,11 @@ void aGenericIsWrittenOutPerType() {
   const xag::CheckResult checked3 = xag::check(third, parsed3.program);
   xag::Program none;
   CHECK(xag::expand(parsed3.program, checked3, none));
-  CHECK(none.items.size() == 1);
+  // What is left is the two blocks that run — `START` and `ITMT` — and nothing
+  // of the generic.
+  CHECK(none.items.size() == 2);
   CHECK(none.items.front().kind == xag::ItemKind::Start);
+  CHECK(none.items.back().kind == xag::ItemKind::Itmt);
 }
 
 // One generic calling another, and one calling itself. Neither call is read

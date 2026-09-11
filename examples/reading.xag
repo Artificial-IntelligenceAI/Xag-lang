@@ -39,3 +39,5 @@ START {
     print.stdout[str:*added * 'counted' str:*, refused * 'refused' \n];
     print.stdout[str:*total * 'total' \n];
 }
+ITMT {
+}

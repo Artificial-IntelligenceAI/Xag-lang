@@ -137,7 +137,9 @@ public:
       if (item.generic)
         continue;
 
-      newBody(item.kind == TypedItemKind::Start ? "START" : item.name);
+      newBody(item.kind == TypedItemKind::Start  ? "START"
+              : item.kind == TypedItemKind::Itmt ? "ITMT"
+                                                 : item.name);
 
       const Ty result =
           item.kind == TypedItemKind::Function ? item.answers : Ty{Type::Nothing};

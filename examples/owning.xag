@@ -29,3 +29,5 @@ START {
 
     # 'greeting' holds nothing from here on, and asking for it is an error.
 }
+ITMT {
+}

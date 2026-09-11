@@ -32,3 +32,5 @@ START {
     var.int64 'cube' = [*2* ^ *3*];
     print.stdout[str:*area * 'area' str:*, cube * 'cube' \n];
 }
+ITMT {
+}
