@@ -171,6 +171,7 @@ struct TypedItem {
 
 struct TypedProgram {
   std::vector<TypedItem> items;
+  bool library = false;
   // Carried through so nothing after this has to read them out of the tree.
   std::vector<Shape> shapes;
   std::vector<Shape> sums;

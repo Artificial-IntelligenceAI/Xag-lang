@@ -1148,6 +1148,7 @@ MirResult build(const Source &source, const TypedProgram &program) {
   MirResult result = Builder(program).run();
   result.mir.shapes = program.shapes;
   result.mir.sums = program.sums;
+  result.mir.library = program.library;
   result.mir.fieldTypes = fieldsOfEveryShape(program.shapes);
   result.mir.caseTypes = fieldsOfEveryShape(program.sums);
   return result;

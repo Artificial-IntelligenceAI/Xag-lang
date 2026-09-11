@@ -150,6 +150,14 @@ struct Fun {
 pub struct Writer<'a> {
     rng: &'a mut Rng,
     out: &'a mut String,
+    /// Whether the value being written goes into a name that said `wrapping`.
+    /// A whole sum that comes round anywhere else stops the program, and a
+    /// stop where nothing said it was meant is a refusal — so `+`, `-` and `x`
+    /// on whole numbers are only written where they can come round: into a
+    /// declared `wrapping` name. Everywhere else — a comparison, an argument, a
+    /// `give`, a place in a `many` — a whole number is a name, a literal, a
+    /// count, or a division, none of which can overflow.
+    may_wrap: bool,
     scopes: Vec<Vec<Var>>,
     funs: Vec<Fun>,
     shapes: Vec<Shape>,
@@ -183,6 +191,7 @@ pub fn generate(seed: u64, size: u32, out: &mut String) {
     let mut rng = Rng::from_seed(seed);
     let mut writer = Writer {
         rng: &mut rng,
+        may_wrap: false,
         out,
         scopes: Vec::new(),
         funs: Vec::new(),
@@ -1704,7 +1713,9 @@ impl<'a> Writer<'a> {
         self.out.push_str(" '");
         self.out.push_str(&name);
         self.out.push_str("' = [");
+        self.may_wrap = matches!(ty, Ty::Whole(_));
         self.expr(ty, 2);
+        self.may_wrap = false;
         self.out.push_str("];\n");
         self.declare(Var { name: name.clone(), ty, mutable, many: None, moved: false, lent: false, group: None, sum: None, parts_moved: Vec::new(), inner: None, grows: false });
 
@@ -1721,7 +1732,9 @@ impl<'a> Writer<'a> {
             self.out.push_str("set '");
             self.out.push_str(&name);
             self.out.push_str("' = [");
+            self.may_wrap = matches!(ty, Ty::Whole(_));
             self.expr(ty, 2);
+            self.may_wrap = false;
             self.out.push_str("];\n");
         }
     }
@@ -1747,7 +1760,10 @@ impl<'a> Writer<'a> {
         self.out.push_str("set '");
         self.out.push_str(&name);
         self.out.push_str("' = [");
+        // Every whole number this generator declares says `wrapping`.
+        self.may_wrap = matches!(ty, Ty::Whole(_));
         self.expr(ty, 2);
+        self.may_wrap = false;
         self.out.push_str("];\n");
     }
 
@@ -2092,9 +2108,14 @@ impl<'a> Writer<'a> {
             }
             return;
         }
+        // A whole sum with nowhere to come round is not written at all: where
+        // the value is not going into a `wrapping` name, what would have been
+        // `+`, `-`, `x` or `^` is a name or a literal instead.
+        let sums = self.may_wrap || !matches!(ty, Ty::Whole(_));
         match self.rng.below(10) {
             0..=2 => self.expr(ty, 0),
             3 => self.literal(ty),
+            4..=6 if !sums => self.expr(ty, 0),
             4..=6 => {
                 self.expr(ty, depth - 1);
                 self.out.push(' ');

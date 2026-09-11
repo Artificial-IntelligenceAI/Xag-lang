@@ -501,6 +501,21 @@ it.** What that costs is real, and is the trade this language already says it is
 making. A loop long enough to notice says so — and the compiler says so first,
 before the wait rather than after it.
 
+## `ITMT`, the block
+
+Every file has one. It is statements, run the way `START` is run while
+building — two engines, a disagreement refuses — and never shipped. A program's
+`START` runs at build time too and does ship; `ITMT` is for what should only
+ever run here. A library has no `START`, so its `ITMT` is the whole of what it
+can run, and `xagc build` on a library alone is: read it, check it, run its
+`ITMT` both ways. That is how a library gets the two-engine check without a
+program importing it.
+
+A sum that comes round in `ITMT` refuses the build like one in `START` would.
+That is the point: a library's `ITMT` calling its own exported function with a
+value that overflows it is caught when the library is built, not when somebody
+else's program stops.
+
 ## A loop that says not to bother
 
 Decided and built 2026-09-08. See `design/syntax.md` for the spelling. A loop marked `no-itmt`, inside an `UNSAFE` block, is one ITMT

@@ -224,6 +224,11 @@ struct Body {
 };
 
 struct Mir {
+  // Whether this came from a library. A library has no `START`; what it can
+  // run is its `ITMT`, and only the compiler runs that. `xagc run` on one has
+  // nothing to do and says so; `xagc build` checks it, exercises it, and makes
+  // no binary, because there is no program to make one of.
+  bool library = false;
   std::vector<Body> bodies;
   // What each struct is made of, carried through so that nothing after the
   // checker has to read it out of the tree again.

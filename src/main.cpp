@@ -353,6 +353,16 @@ int checkFile(const std::string &path) {
   return status;
 }
 
+// A library reached the end of everything the compiler does to a file — read,
+// checked, and its `ITMT` run two ways — and there is no program in it to run.
+int nothingToRun(const std::string &path) {
+  std::cerr << "xagc: `" << path << "` is a library, and a library has nothing to run "
+               "on its own.\n"
+               "      It was read, checked, and its `ITMT` was run both ways and "
+               "agreed. A program that imports it is what runs it.\n";
+  return 0;
+}
+
 int runFile(const std::string &path) {
   if (!decimalIsThere(path))
     return 1;
@@ -371,6 +381,8 @@ int runFile(const std::string &path) {
   if (!ready(path, text, built, status))
     return status;
 
+  if (built.mir.library)
+    return nothingToRun(path);
   const xag::InterpretResult ran = xag::interpret(built.mir);
   if (!ran.ran) {
     std::cerr << "\nthe program stopped: " << ran.trouble << '\n';
@@ -388,6 +400,8 @@ int fastFile(const std::string &path) {
   if (!ready(path, text, built, status))
     return status;
 
+  if (built.mir.library)
+    return nothingToRun(path);
   const xag::FastResult ran = xag::runFast(built.mir);
   if (!ran.ran) {
     std::cerr << "\nthe program stopped: " << ran.trouble << '\n';
@@ -804,6 +818,10 @@ int buildFile(const std::string &path) {
   int status = 0;
   if (!ready(path, text, built, status, xag::Rewriting::Yes))
     return status;
+  // A library is built by being read, checked and exercised, all of which has
+  // happened by here. There is no program in it to make a binary of.
+  if (built.mir.library)
+    return nothingToRun(path);
 
   const std::string stem = path.substr(0, path.rfind('.'));
   const std::string object = stem + ".o";

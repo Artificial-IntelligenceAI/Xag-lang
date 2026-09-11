@@ -165,3 +165,17 @@ one type, and `t.uer:*…*` as one type before a `:`. A `struct` or `one-of` say
   call name, and compiled with the program. `t.twice[…]`, `var.t.point 'p'`,
   `struct.export`. Private names are unreachable. All three engines agree on
   `tests/units/program`, which is now a test.
+- **2026-09-11, slice 4** — `ITMT` runs. The watched run — interpreter and
+  built binary both — runs `START` and then `ITMT`; a reader's `xagc run` and a
+  shipped binary run `START` only. `xagc build` on a library reads it, checks
+  it, runs its `ITMT` two ways, and makes no binary. Building a library whose
+  `ITMT` trips an overflow inside an exported function is refused, which is
+  what `ITMT` is for and is now a test.
+
+  Found on the way: a sum that comes round somewhere with no name — inside a
+  `give`, a call, a comparison — was neither reported (`E0537` only fired for
+  sums into a named slot) nor stopped (the watched run carries on by design),
+  so a build passed and the shipped program would have stopped. Every sum the
+  watchers see come round is now a refusal, with a tip that says whether
+  `wrapping` can be written or the sum needs a name first. The watchers no
+  longer notice a `wrapping` sum at all — it is doing what it was declared to.

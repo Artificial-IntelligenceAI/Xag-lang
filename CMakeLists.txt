@@ -213,6 +213,16 @@ add_test(NAME units_program_agrees
                  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/program/main.xag
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/example_agrees.cmake)
 
+# A library built on its own: read, checked, and its ITMT run both ways. No
+# binary comes out, and that is the answer.
+add_test(NAME units_library_builds_alone
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/text/counting.xag)
+# And one whose ITMT trips an overflow inside an exported function is refused
+# — which is the whole point of a library having an ITMT.
+add_test(NAME units_library_itmt_refuses
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/overflowing/a.xag)
+set_tests_properties(units_library_itmt_refuses PROPERTIES WILL_FAIL TRUE)
+
 # The decimal knob, asked of the compiler itself rather than of a library: what
 # a build has is a fact about the build, and the only way to ask it is to run it.
 add_test(NAME decimal_software

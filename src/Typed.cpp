@@ -16,6 +16,7 @@ public:
   TypedResult run() {
     result_.program.shapes = checked_.shapes;
     result_.program.sums = checked_.sums;
+    result_.program.library = program_.library;
     for (const Item &item : program_.items) {
       if (item.kind == ItemKind::Struct || item.kind == ItemKind::OneOf ||
           item.kind == ItemKind::Import)

@@ -1735,9 +1735,11 @@ private:
     // and says so when the answer did not fit. Nothing a reader runs is built
     // this way.
     if (op == "+" || op == "-" || op == "x") {
-      // Meant to come round, so nothing looks. The machine's own instruction is
-      // exactly the answer and the optimiser can see straight through it.
-      if (value.wraps && !watching_) {
+      // Meant to come round, so nothing looks — not the build that ships and
+      // not the one the compiler watches, since there is nothing to report. The
+      // machine's own instruction is exactly the answer and the optimiser can
+      // see straight through it.
+      if (value.wraps) {
         if (op == "+") return builder_.CreateAdd(left, right);
         if (op == "-") return builder_.CreateSub(left, right);
         return builder_.CreateMul(left, right);
@@ -2051,9 +2053,15 @@ private:
     auto *past = builder_.CreateGEP(builder_.getPtrTy(), values, builder_.getInt64(1));
     builder_.CreateCall(runtime_["xag_set_arguments"], {without, past});
 
+    // `START`, and — in the build the compiler runs while compiling — `ITMT`
+    // after it. A reader's build calls only `START`: `ITMT` never ships, and
+    // the optimiser takes the uncalled body away.
     auto found = functions_.find("START");
     if (found != functions_.end())
       builder_.CreateCall(found->second, {});
+    if (watching_)
+      if (auto itmt = functions_.find("ITMT"); itmt != functions_.end())
+        builder_.CreateCall(itmt->second, {});
     builder_.CreateRet(builder_.getInt32(0));
   }
 };

@@ -92,9 +92,11 @@ bool samePlaces(const std::vector<Span> &a, const std::vector<Span> &b) {
 // `+`, `-` or `x` on whole numbers; a stop needs a divide, a remainder, a power,
 // or reaching into a `many`. A program with none of those has nothing to learn
 // about, and building and starting it costs half a second to find that out.
+// Something to run: a `START`, or an `ITMT`, which is the whole of what a
+// library has.
 bool hasStart(const Mir &mir) {
   for (const Body &body : mir.bodies)
-    if (body.name == "START")
+    if (body.name == "START" || body.name == "ITMT")
       return true;
   return false;
 }
@@ -409,18 +411,30 @@ AheadResult ahead(const Source &source, const Mir &mir,
   // agreed about it: this refuses a program, and one engine may not do that.
   if (out.compared) {
     for (const Span &came : result.cameRound) {
-      // Only where the answer becomes a name that did not say `wrapping`. A
-      // sum inside a comparison, or handed straight to something, has nowhere
-      // for the reader to have written the word — so it is not their fault and
-      // is not put to them.
-      if (!inside2(came, intoPlainNames) || inside2(came, spansOf(aboutSums)))
-        continue;
+      if (inside2(came, spansOf(aboutSums)))
+        continue; // said already, by the bounds
+      // Every one of these is a sum the shipped program would stop on: the
+      // watchers notice only where nothing said `wrapping`, and a sum nothing
+      // said could come round stops when it does. So every one is a refusal.
+      // What differs is what can be done about it. A sum written into a name
+      // can have `wrapping` on that name; one inside a comparison, or handed
+      // straight to a call or a `give`, has no name to carry the word, and the
+      // way to say it is meant is to give it one.
+      const bool named = inside2(came, intoPlainNames);
       out.diagnostics.push_back(Diagnostic{
           came, "E0537", "a sum comes round here.", "here",
           {"a sum that does not fit comes round, and that is rarely what was wanted"},
-          {"nothing worked this out. I ran the program both ways I have of running "
-           "it, watching, and both saw this one come round. `wrapping` on the "
-           "declaration says it is meant to."}});
+          {named ? std::string("nothing worked this out. I ran the program both ways I "
+                               "have of running it, watching, and both saw this one "
+                               "come round. `wrapping` on the declaration says it is "
+                               "meant to; without it the program stops here.")
+                 : std::string("nothing worked this out. I ran the program both ways I "
+                               "have of running it, watching, and both saw this one "
+                               "come round. It goes nowhere that could say `wrapping`, "
+                               "so the program stops here. A sum that is meant to come "
+                               "round is given a name that says so: "
+                               "`var.wrapping.int8 'sum' = […]`, and then the name is "
+                               "what is handed on.")}});
     }
   }
 

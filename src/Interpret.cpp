@@ -50,7 +50,13 @@ public:
 
   InterpretResult run() {
     const Body *start = find("START");
-    if (!start)
+    const Body *itmt = find("ITMT");
+    // Watching, the compiler runs everything a file says to run: `START`, and
+    // then `ITMT`, which is the part that only ever runs here. A library has no
+    // `START`, and its `ITMT` is the whole of what there is to run — which is
+    // how a library gets exercised on its own. Not watching, `ITMT` is not run:
+    // this is what a reader's `xagc run` does, and `ITMT` never ships.
+    if (!start && !(watching_ && itmt))
       return InterpretResult{false, "there is no START to run"};
     // What was already outstanding when this run began, rather than nothing.
     //
@@ -61,8 +67,14 @@ public:
     // being read as this one's fault.
     const int64_t already = xag_live_allocations();
     Value answer;
-    call(*start, {}, answer);
-    endValue(answer);
+    if (start) {
+      call(*start, {}, answer);
+      endValue(answer);
+    }
+    if (watching_ && itmt && trouble_.empty()) {
+      call(*itmt, {}, answer);
+      endValue(answer);
+    }
     if (trouble_.empty() && xag_live_allocations() != already)
       trouble_ = "the program ended still holding " +
                  std::to_string(xag_live_allocations() - already) + " thing(s)";
@@ -760,7 +772,9 @@ private:
                                        : static_cast<XagInt>(ux * uy);
         answer.number = xag_int_fit(raw, width, sign);
         const bool round = tooBig(op, ux, uy, width, sign);
-        notice(round);
+        // Noticed only where nothing said it could: a `wrapping` sum coming
+        // round is a sum doing what it was declared to do.
+        notice(round && !value.wraps);
         // Nothing said it was meant to, so it stops — unless this is the run
         // the compiler is watching, which has to reach the end to say where
         // every sum came round. That run notices and carries on; it is what

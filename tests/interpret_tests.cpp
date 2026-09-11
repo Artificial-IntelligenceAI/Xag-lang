@@ -881,12 +881,21 @@ void itKnowsWhatItWasGiven() {
 
 // Watching does not change the answer, only whether the place is remembered.
 void itNoticesASumComeRound() {
-  // `wrapping` is what a program says when it means to come round, and it is
-  // still watched: the word says not to *complain*, and this is not complaining.
+  // A sum that comes round where nothing said it could. Watching, the engine
+  // carries on and remembers the place — that is what turns it into a refusal
+  // before anything ships. Not watching, it would stop here.
+  CHECK(watched("START {\n"
+                "    var.mut.int8 'n' = [*127*];\n"
+                "    var.int8 'one' = [*1*];\n"
+                "    set 'n' = ['n' + 'one'];\n}\n") == 1);
+
+  // `wrapping` says it is meant to, and then it is not a thing to remember: a
+  // `wrapping` sum coming round is a sum doing what it was declared to do, and
+  // the shipped program would not stop on it.
   CHECK(watched("START {\n"
                 "    var.mut.wrapping.int8 'n' = [*127*];\n"
                 "    var.int8 'one' = [*1*];\n"
-                "    set 'n' = ['n' + 'one'];\n}\n") == 1);
+                "    set 'n' = ['n' + 'one'];\n}\n") == 0);
 
   // Nothing came round here, and the same program is watched all the same.
   CHECK(watched("START {\n"
@@ -896,13 +905,8 @@ void itNoticesASumComeRound() {
 
   // The one the bounds get wrong: 100 trips, at most 2 each by the bound, and
   // 52 in fact. Nothing comes round, and this is the run that can say so.
-  //
-  // `wrapping` is here only to get past the bound, which refuses this program
-  // (`E0534`) before anything can run and show it is fine. That is the ordering
-  // the pass above this will have to fix: a bound cannot be the last word if a
-  // run is meant to overturn it.
   CHECK(watched("START {\n"
-                "    var.mut.wrapping.int8 'total' = [*0*];\n"
+                "    var.mut.int8 'total' = [*0*];\n"
                 "    loop.range.int8 'i' = [*1*, *100*] {\n"
                 "        set 'total' = ['total' + 'i' / *50*];\n"
                 "    }\n}\n") == 0);
@@ -910,7 +914,7 @@ void itNoticesASumComeRound() {
   // And one that really does come round, inside a loop: reported once, not once
   // per trip.
   CHECK(watched("START {\n"
-                "    var.mut.wrapping.int8 'total' = [*0*];\n"
+                "    var.mut.int8 'total' = [*0*];\n"
                 "    loop.range.int8 'i' = [*1*, *100*] {\n"
                 "        set 'total' = ['total' + 'i'];\n"
                 "    }\n}\n") == 1);
@@ -918,14 +922,14 @@ void itNoticesASumComeRound() {
   // Taking away below nothing is a sum that does not fit, the same as going
   // over the top.
   CHECK(watched("START {\n"
-                "    var.mut.wrapping.uint8 'n' = [*0*];\n"
+                "    var.mut.uint8 'n' = [*0*];\n"
                 "    var.uint8 'one' = [*1*];\n"
                 "    set 'n' = ['n' - 'one'];\n}\n") == 1);
 
   // Multiplying, and a width where nothing is cut: a `int64` sum that fits is
   // not noticed because the cut changed nothing.
   CHECK(watched("START {\n"
-                "    var.mut.wrapping.int8 'n' = [*100*];\n"
+                "    var.mut.int8 'n' = [*100*];\n"
                 "    var.int8 'two' = [*2*];\n"
                 "    set 'n' = ['n' x 'two'];\n}\n") == 1);
   CHECK(watched("START {\n"
@@ -938,12 +942,12 @@ void itNoticesASumComeRound() {
   // everything. The built program checks properly and said so; the oracle
   // brought back the disagreement.
   CHECK(watched("START {\n"
-                "    var.mut.wrapping.int128 'n' = [*1*];\n"
+                "    var.mut.int128 'n' = [*1*];\n"
                 "    var.int128 'most' = "
                 "[*170141183460469231731687303715884105727*];\n"
                 "    set 'n' = ['n' + 'most'];\n}\n") == 1);
   CHECK(watched("START {\n"
-                "    var.mut.wrapping.uint128 'n' = [*0*];\n"
+                "    var.mut.uint128 'n' = [*0*];\n"
                 "    var.uint128 'one' = [*1*];\n"
                 "    set 'n' = ['n' - 'one'];\n}\n") == 1);
   // And it still says nothing about one that fits.
@@ -951,6 +955,14 @@ void itNoticesASumComeRound() {
                 "    var.mut.int128 'n' = [*1*];\n"
                 "    var.int128 'two' = [*2*];\n"
                 "    set 'n' = ['n' + 'two'];\n}\n") == 0);
+
+  // A sum with no name to carry `wrapping` — handed straight to a call — is
+  // noticed too, because the shipped program stops there and nothing could
+  // have said otherwise.
+  CHECK(watched("fn.nothing 'take' [int8 'n'] { }\n"
+                "START {\n"
+                "    var.int8 'n' = [*127*];\n"
+                "    take['n' + int8:*1*];\n}\n") == 1);
 }
 
 // The compiler runs a program while compiling it, so a program stopping must
