@@ -92,34 +92,6 @@ bool samePlaces(const std::vector<Span> &a, const std::vector<Span> &b) {
 // `+`, `-` or `x` on whole numbers; a stop needs a divide, a remainder, a power,
 // or reaching into a `many`. A program with none of those has nothing to learn
 // about, and building and starting it costs half a second to find that out.
-bool worthRunning(const Mir &mir) {
-  for (const Body &body : mir.bodies)
-    for (const BasicBlock &block : body.blocks) {
-      for (const Statement &s : block.statements) {
-        if (s.kind == StatementKind::Store)
-          return true;
-        // Which of the two streams a print goes to is a thing an engine can get
-        // wrong, and getting it wrong is silent to anyone comparing output
-        // alone — the two answers are the same text on different streams. So a
-        // program that writes to standard error is worth running, where one
-        // that only writes to standard output still is not.
-        if (s.value.kind == RValueKind::Call && s.value.callee == "print.stderr")
-          return true;
-        if (s.value.kind == RValueKind::Element || s.value.kind == RValueKind::Fill)
-          return true;
-        if (s.value.kind != RValueKind::Binary)
-          continue;
-        const std::string &op = s.value.op;
-        if (op == "/" || op == "mod" || op == "^")
-          return true;
-        if ((op == "+" || op == "-" || op == "x") &&
-            isWhole(body.typed[s.value.type.index].held))
-          return true;
-      }
-    }
-  return false;
-}
-
 bool hasStart(const Mir &mir) {
   for (const Body &body : mir.bodies)
     if (body.name == "START")
@@ -335,8 +307,26 @@ AheadResult ahead(const Source &source, const Mir &mir,
   AheadResult out;
   // Something to settle, or a second engine to settle it with. With neither,
   // running the program would answer a question nobody asked.
-  if ((aboutSums.empty() && !building) || !hasStart(mir) ||
-      (aboutSums.empty() && !worthRunning(mir))) {
+  // Every program with a `START`, and no list of what is worth running.
+  //
+  // There was one, and its answers could not be predicted from outside: it ran
+  // `bin16 / *2*` and skipped `bin16 + *2*`, because `+` was gated on the answer
+  // being a whole number. That gate was written to catch a sum coming round,
+  // which is a different question from whether two engines could disagree —
+  // and it had been answering this one by accident.
+  //
+  // They can disagree about nearly everything. The two do arithmetic, order
+  // numbers, lay out a struct, and let a value go by separate code: native
+  // emits `fadd` where a reader's engine adds in a `double` and rounds after,
+  // which is two roundings against one and differs exactly at a tie. What they
+  // share is a runtime call — text, `deci`, `bin128` — and that is the short
+  // list, not this one.
+  //
+  // So the rule is one sentence: the compiler runs your program while building
+  // it. What that costs is real and is the point; a loop long enough to notice
+  // says `no-itmt` inside `UNSAFE`, and the compiler says so before it starts
+  // rather than going quiet.
+  if ((aboutSums.empty() && !building) || !hasStart(mir)) {
     out.diagnostics = aboutSums;
     return out;
   }

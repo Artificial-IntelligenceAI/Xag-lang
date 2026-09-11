@@ -458,6 +458,49 @@ A run also has to give the same answer on every machine, or the same source
 builds into different programs. There is no FFI, so that is nearly free today,
 which is the moment to write it down rather than later.
 
+## Which programs get run
+
+Every program with a `START`, and there is no list.
+
+There was one. It ran a program holding a `Store`, a reach into a `many`, a
+`fill`, a `/`, a `mod`, a `^`, or a `+`/`-`/`x` whose answer was a *whole*
+number — and skipped everything else. Its answers could not be worked out from
+outside the compiler:
+
+```
+var.bin16 'x' = [*5* / *2*];     ran
+var.bin16 'x' = [*5* + *12*];    did not
+```
+
+Nothing about the language explains that pair, and the reason is that the list
+was answering a different question from the one it was being asked. It was built
+around a sum coming round, which is why `+` was gated on the answer being whole;
+whether **two engines could disagree** is not that question, and the list had
+been standing in for it by accident.
+
+They can disagree about nearly everything. What they share is a runtime call —
+text, `deci`, `bin128`, printing — and that is the short list. Everything else
+is written twice:
+
+| | built | read |
+| --- | --- | --- |
+| whole `+ - x` | `add`, `mul`, at the type's width | `__int128`, then fitted |
+| ordering numbers | `icmp`, signed or unsigned | the host language's operators |
+| `bin` arithmetic | `fadd`, `fsub`, `fmul`, `fdiv` | a `double`, then fitted |
+| a struct, a `many`, a `one-of` | laid out in memory | values with tags on them |
+| letting a value go | its own | its own |
+
+The last two are the ones the list missed most. A program holding a struct and
+no arithmetic ran nowhere, and how a struct is laid out is the most separately
+written thing in the compiler — a `one-of` keeping its number in a spare byte of
+a case's own value is a layout one side invents and the other has never heard
+of.
+
+So the rule is one sentence: **the compiler runs your program while building
+it.** What that costs is real, and is the trade this language already says it is
+making. A loop long enough to notice says so — and the compiler says so first,
+before the wait rather than after it.
+
 ## A loop that says not to bother
 
 Decided and built 2026-09-08. See `design/syntax.md` for the spelling. A loop marked `no-itmt`, inside an `UNSAFE` block, is one ITMT
