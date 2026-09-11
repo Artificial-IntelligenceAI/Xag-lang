@@ -113,13 +113,13 @@ void onTheOrdinaryThings() {
         "  loop.range.int64 'i' = [*1*, *10*] { set 't' = ['t' + 'i']; }\n"
         "  print.stdout['t' \\n]; }\n");
   AGREE("START { var.int64 'n' = [*5*];\n"
-        "  if 'n' > *3* { print.stdout[str:*big* \\n]; }"
+        "  if 'n' > int64:*3* { print.stdout[str:*big* \\n]; }"
         "  else { print.stdout[str:*small* \\n]; } }\n");
   AGREE("START { loop.perm.range.int64 'i' = [*1*, *100*] {"
-        " if 'i' x 'i' > *10* { break; } }"
+        " if 'i' x 'i' > int64:*10* { break; } }"
         " print.stdout['i' \\n]; }\n");
   AGREE("START { loop.range.int64 'i' = [*1*, *100*] {"
-        " if 'i' > *3* { break; } print.stdout['i' str:* *]; } }\n");
+        " if 'i' > int64:*3* { break; } print.stdout['i' str:* *]; } }\n");
   // Counting to the most the counter holds. Stepping first and asking after,
   // that last step came round and the loop never finished.
   AGREE("START { var.mut.wrapping.int64 't' = [*0*];\n"
@@ -162,7 +162,7 @@ void onCallsAndBorrows() {
         "START { var.str 's' = [*taken*]; keep[move 's']; }\n");
   AGREE("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
         "START { var.str 's' = [*hi*]; var.int64 'n' = [*1*];\n"
-        "  if 'n' == *1* { keep[move 's']; } }\n");
+        "  if 'n' == int64:*1* { keep[move 's']; } }\n");
   AGREE("fn.loan.'life'.str 'longer' [loan.'life'.str 'a', loan.'life'.str 'b'] {\n"
         "  if count['a'] >== count['b'] { give ['a']; } else { give ['b']; } }\n"
         "START { var.str 'x' = [*hello*]; var.str 'y' = [*hi*];\n"
@@ -208,7 +208,7 @@ void onHoldingSeveralValues() {
 
 void onHoldingNothing() {
   AGREE("fn.or-nothing.int64 'half' [int64 'n'] {\n"
-        "  if 'n' == *0* { give [nothing]; }\n"
+        "  if 'n' == int64:*0* { give [nothing]; }\n"
         "  give ['n' / *2*]; }\n"
         "START { loop.range.int64 'i' = [*0*, *4*] {\n"
         "  var.or-nothing.int64 'h' = [half['i']];\n"
@@ -221,7 +221,7 @@ void onHoldingNothing() {
 
 void onChoosingBetweenCases() {
   AGREE("fn.or-nothing.int64 'half' [int64 'n'] {\n"
-        "  if 'n' == *0* { give [nothing]; }\n"
+        "  if 'n' == int64:*0* { give [nothing]; }\n"
         "  give ['n' / *2*]; }\n"
         "START { loop.range.int64 'i' = [*0*, *4*] {\n"
         "  when half['i'] {\n"
@@ -240,9 +240,9 @@ void onBeingOneOfSeveralThings() {
         "             is gave-up { print.stdout[str:*none* \\n]; } } }\n");
   AGREE("one-of 'answer' [int64 'ok', bool 'flag', deci64 'money', nothing 'no']\n"
         "fn.answer 'pick' [int64 'n'] {\n"
-        "  if 'n' == *0* { give [no]; }\n"
-        "  if 'n' == *1* { give [flag:*true*]; }\n"
-        "  if 'n' == *2* { give [money:*1.25*]; }\n"
+        "  if 'n' == int64:*0* { give [no]; }\n"
+        "  if 'n' == int64:*1* { give [flag:*true*]; }\n"
+        "  if 'n' == int64:*2* { give [money:*1.25*]; }\n"
         "  give [ok:'n']; }\n"
         "START { loop.range.int64 'i' = [*0*, *3*] {\n"
         "  when pick['i'] {\n"
@@ -453,7 +453,7 @@ void onTurningNumbersIntoText() {
   // given a rewritten middle layer.
   AGREE("START { var.mut.many-growing.int64 'g' = [*1* *2*];\n"
         "  var.mut.uint128 'i' = [*0*];\n"
-        "  loop.while 'i' < *1* { add 'g' = [*22*]; set 'i' = ['i' + *1*]; }\n"
+        "  loop.while 'i' < uint128:*1* { add 'g' = [*22*]; set 'i' = ['i' + *1*]; }\n"
         "  var.mut.many.uint128 'm' = [*248* 'i'];\n"
         "  print.stdout[(count[loan 'g']) \\n]; }\n");
   AGREE("START { var.mut.many-growing.str 'w' = [];\n"

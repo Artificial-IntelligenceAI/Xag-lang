@@ -33,13 +33,47 @@ that: `*1000*` is a number under `int64` and four characters under `str`.
 ### A written value states its type where nothing else does
 
 A written value means nothing on its own, so something has to say what it is.
-Usually something already has:
+Either **the slot it goes into** was declared, or **the value says so itself**:
 
 ```
 var.str 's' = [*a* *b*];              # the chain said it
 sum-to[*10*];                          # the parameter said it
+set 'total' = ['total' + *1*];         # the name it goes into said it
+loop.range.int8 'i' = [*1*, *10*];     # the counter's chain said it
 print.stdout[str:*x = * 'n' \n];       # nothing said it, so the value does
 ```
+
+A slot is a thing that was *declared* — a name, a parameter, a field, a loop's
+counter — and the type reaches down through whatever is written into it, so the
+`*1*` in `['total' + *1*]` is an `int64` because `'total'` is.
+
+**A comparison is not a slot.** It declares nothing, so it tells neither side
+anything, and a written value in one says its own type:
+
+```
+if 'n' > int8:*0* { … }
+loop.while 'left' > int8:*0* { … }
+if ('n' x int8:*4*) > 'limit' { … }
+```
+
+The right side used to take whatever the left turned out to be. That was the one
+place in the language where a value's type came from the thing standing *beside*
+it rather than from the slot it goes into — and `*0*` in `'n' > *0*` has no slot
+at all. It was dropped on 2026-09-11.
+
+**`any:*0*` is how a value says its type inside a generic.** A comparison there
+wants a type the author cannot name, because naming it is the caller's:
+
+```
+fn.any.number 'down' [any.number 'n'] {
+    if 'n' <== any:*0* { give ['n']; }
+    give [down['n' - any:*1*]];
+}
+```
+
+`any` is filled in with everything else when the copy is written, so
+`down$int64` holds `int64:*0*`. It is the same notation as `str:*hi*`, naming a
+type that is not pinned down yet.
 
 A print list has no chain and no declared parameter types, so **every** written
 value in one carries its own type — there is no inheriting it from the item
@@ -151,9 +185,9 @@ var.int32 'a' = [*1*];
 var.int64 'b' = ['a' + *1*];    # a `int32` and a `int64` are not added together
 ```
 
-Arithmetic answers with what it was given, and the right side of a sum takes
-whatever the left turned out to be — which is how a written value in a sum gets
-a size at all. Where nothing says, the value says it itself, in the notation it
+Arithmetic answers with what it was given, and the type wanted of the sum is
+wanted of both its sides — which is how a written value in a sum gets a size at
+all. Where nothing wants anything, the value says it itself, in the notation it
 always could:
 
 ```

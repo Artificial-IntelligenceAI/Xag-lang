@@ -220,11 +220,11 @@ void itWrapsAtTheWidthItWasWritten() {
 void itComparesAsTheTypeSaysToCompare() {
   // 200 in a uint8 is two hundred, not minus fifty-six.
   SAYS("START { var.uint8 'n' = [*200*];\n"
-       "  if 'n' > *100* { print.stdout[str:*bigger* \\n]; }"
+       "  if 'n' > uint8:*100* { print.stdout[str:*bigger* \\n]; }"
        "  else { print.stdout[str:*smaller* \\n]; } }\n",
        "bigger\n");
   SAYS("START { var.int8 'n' = [*-56*];\n"
-       "  if 'n' > *100* { print.stdout[str:*bigger* \\n]; }"
+       "  if 'n' > int8:*100* { print.stdout[str:*bigger* \\n]; }"
        "  else { print.stdout[str:*smaller* \\n]; } }\n",
        "smaller\n");
 }
@@ -292,11 +292,11 @@ void itCountsInTensWhenAsked() {
 
 void itDecides() {
   SAYS("START { var.int64 'n' = [*5*];\n"
-       "  if 'n' > *3* { print.stdout[str:*big* \\n]; } else { print.stdout[str:*small* \\n]; } }\n",
+       "  if 'n' > int64:*3* { print.stdout[str:*big* \\n]; } else { print.stdout[str:*small* \\n]; } }\n",
        "big\n");
   SAYS("START { var.int64 'n' = [*1*];\n"
-       "  if 'n' > *3* { print.stdout[str:*big* \\n]; }\n"
-       "  else-if 'n' == *1* { print.stdout[str:*one* \\n]; }\n"
+       "  if 'n' > int64:*3* { print.stdout[str:*big* \\n]; }\n"
+       "  else-if 'n' == int64:*1* { print.stdout[str:*one* \\n]; }\n"
        "  else { print.stdout[str:*small* \\n]; } }\n",
        "one\n");
 }
@@ -309,10 +309,10 @@ void itLoops() {
        "  print.stdout['total' \\n]; }\n",
        "55\n");
   SAYS("START { var.mut.int64 'n' = [*3*];\n"
-       "  loop.while 'n' > *0* { print.stdout['n' str:* *]; set 'n' = ['n' - *1*]; } }\n",
+       "  loop.while 'n' > int64:*0* { print.stdout['n' str:* *]; set 'n' = ['n' - *1*]; } }\n",
        "3 2 1 ");
   SAYS("START { loop.range.int64 'i' = [*1*, *100*] {"
-       " if 'i' > *3* { break; } print.stdout['i' str:* *]; } }\n",
+       " if 'i' > int64:*3* { break; } print.stdout['i' str:* *]; } }\n",
        "1 2 3 ");
 }
 
@@ -334,7 +334,7 @@ void aLoopCountingToTheMostItsCounterHoldsFinishes() {
 void aPermCounterKeepsWhatItHad() {
   // What a `break` left behind, which is the only reason to keep a counter.
   SAYS("START { loop.perm.range.int64 'i' = [*1*, *100*] {"
-       " if 'i' x 'i' > *10* { break; } }\n"
+       " if 'i' x 'i' > int64:*10* { break; } }\n"
        "  print.stdout['i' \\n]; }\n", "4\n");
   // And the last one, when it simply ran out. Not one past it: the counter is
   // asked before it is stepped, so it never passes the end.
@@ -350,7 +350,7 @@ void itCalls() {
        "START { print.stdout[sum-to[*10*] \\n]; }\n",
        "55\n");
   // Two functions may call each other, since every signature is read first.
-  SAYS("fn.int64 'down' [int64 'n'] { if 'n' <== *0* { give [*0*]; } give [up['n' - *1*]]; }\n"
+  SAYS("fn.int64 'down' [int64 'n'] { if 'n' <== int64:*0* { give [*0*]; } give [up['n' - *1*]]; }\n"
        "fn.int64 'up' [int64 'n'] { give [down['n']]; }\n"
        "START { print.stdout[down[*3*] \\n]; }\n",
        "0\n");
@@ -391,7 +391,7 @@ void itEndsHoldingNothing() {
                     "  var.str 'a' = [*one*];\n"
                     "  var.str 'b' = [*two*];\n"
                     "  var.int64 'n' = [*1*];\n"
-                    "  if 'n' == *1* { keep[move 'b']; }\n"
+                    "  if 'n' == int64:*1* { keep[move 'b']; }\n"
                     "  print.stdout['a' \\n];\n"
                     "}\n");
   CHECK(r.compiled);
@@ -402,7 +402,7 @@ void itEndsHoldingNothing() {
 
 void aRunawayProgramIsStopped() {
   const Ran r = run("START { var.mut.int64 'n' = [*1*];"
-                    " loop.while 'n' > *0* { set 'n' = ['n' + *1*]; } }\n");
+                    " loop.while 'n' > int64:*0* { set 'n' = ['n' + *1*]; } }\n");
   CHECK(r.compiled);
   CHECK(!r.ran);
   CHECK(r.trouble.find("longer than") != std::string::npos);
@@ -442,7 +442,7 @@ void itCountsWhatEachPlaceHolds() {
 
 void itHoldsSomethingOrNothing() {
   SAYS("fn.or-nothing.str 'pick' [int64 'n'] {\n"
-       "  if 'n' > *0* { give [*yes*]; }\n"
+       "  if 'n' > int64:*0* { give [*yes*]; }\n"
        "  give [nothing]; }\n"
        "START {\n"
        "  var.or-nothing.str 'a' = [pick[*1*]];\n"
@@ -586,9 +586,9 @@ void itHoldsOneOfSeveralThings() {
   // something an `if` could not.
   SAYS("one-of 'answer' [int64 'ok', bool 'flag', deci64 'money', nothing 'no']\n"
        "fn.answer 'pick' [int64 'n'] {\n"
-       "  if 'n' == *0* { give [no]; }\n"
-       "  if 'n' == *1* { give [flag:*true*]; }\n"
-       "  if 'n' == *2* { give [money:*1.25*]; }\n"
+       "  if 'n' == int64:*0* { give [no]; }\n"
+       "  if 'n' == int64:*1* { give [flag:*true*]; }\n"
+       "  if 'n' == int64:*2* { give [money:*1.25*]; }\n"
        "  give [ok:'n']; }\n"
        "START { loop.range.int64 'i' = [*0*, *3*] {\n"
        "  when pick['i'] {\n"

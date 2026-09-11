@@ -183,8 +183,8 @@ void sizesDoNotMixOnTheirOwn() {
         "E0506");
   CHECK(inStart("var.int32 'a' = [*1*];\n    var.int32 'b' = ['a' + *1*];").ok());
   // A comparison takes its type from its left side, so the right side fits it.
-  CHECK(inStart("var.uint8 'a' = [*200*];\n    var.bool 'b' = ['a' > *100*];").ok());
-  CHECK(inStart("var.uint8 'a' = [*200*];\n    var.bool 'b' = ['a' > *300*];").code(0) ==
+  CHECK(inStart("var.uint8 'a' = [*200*];\n    var.bool 'b' = ['a' > uint8:*100*];").ok());
+  CHECK(inStart("var.uint8 'a' = [*200*];\n    var.bool 'b' = ['a' > uint8:*300*];").code(0) ==
         "E0509");
 }
 
@@ -228,6 +228,35 @@ void callsAreChecked() {
 }
 
 // A `print` says where it goes, and there are two places for it to go.
+// A comparison declares nothing, so neither side is told what it is. It is the
+// one place a written value used to take its type from the thing standing
+// beside it rather than from a slot it goes into.
+void aComparisonTellsNeitherSideWhatItIs() {
+  CHECK(inStart("var.int8 'n' = [*5*];\n  var.bool 'b' = ['n' > *0*];").code(0) == "E0507");
+  CHECK(inStart("var.int8 'n' = [*5*];\n  var.bool 'b' = ['n' > int8:*0*];").ok());
+  // Either way round, so which was written first does not decide it.
+  CHECK(inStart("var.int8 'n' = [*5*];\n  var.bool 'b' = [*0* < 'n'];").code(0) == "E0507");
+  CHECK(inStart("var.int8 'n' = [*5*];\n  var.bool 'b' = [int8:*0* < 'n'];").ok());
+  // And a sum inside one has no slot either, one level down.
+  CHECK(inStart("var.int8 'n' = [*5*];\n  var.int8 'm' = [*9*];\n"
+                "  var.bool 'b' = [('n' x *4*) > 'm'];").code(0) == "E0507");
+  CHECK(inStart("var.int8 'n' = [*5*];\n  var.int8 'm' = [*9*];\n"
+                "  var.bool 'b' = [('n' x int8:*4*) > 'm'];").ok());
+  // A slot still reaches through a sum to the value inside it.
+  CHECK(inStart("var.mut.int8 'n' = [*5*];\n  set 'n' = ['n' + *1*];").ok());
+  CHECK(run("fn.nothing 'f' [int8 'n'] { }\nSTART { f[*1* + *2*]; }\n").ok());
+
+  // Inside a generic the type is the caller's, so the value names the blank and
+  // it is filled in with everything else when the copy is written.
+  CHECK(run("fn.any.number 'down' [any.number 'n'] {\n"
+            "  if 'n' <== any:*0* { give ['n']; }\n"
+            "  give [down['n' - any:*1*]]; }\n"
+            "START { var.int64 'a' = [*5*]; print.stdout[down['a'] \\n]; }\n").ok());
+  // The tip names what is missing rather than talking about quote marks.
+  const Checked bare = inStart("var.int8 'n' = [*5*];\n  var.bool 'b' = ['n' > *0*];");
+  CHECK(bare.tip().find("a comparison declares nothing") != std::string::npos);
+}
+
 void bothStreamsArePrintedTo() {
   CHECK(inStart("print.stdout[str:*a* \\n];").ok());
   CHECK(inStart("print.stderr[str:*a* \\n];").ok());
@@ -272,10 +301,10 @@ void aFunctionAnswersEveryWayOut() {
 
   // Every arm and an `else`, so there is no way out that says nothing.
   CHECK(run("fn.int64 'f' [int64 'n'] {\n"
-            "  if 'n' > *0* { give [*1*]; } else { give [*0*]; } }\nSTART { }\n").ok());
+            "  if 'n' > int64:*0* { give [*1*]; } else { give [*0*]; } }\nSTART { }\n").ok());
   // No `else`, so one way out is left silent.
   CHECK(run("fn.int64 'f' [int64 'n'] {\n"
-            "  if 'n' > *0* { give [*1*]; } }\nSTART { }\n").code(0) == "E0513");
+            "  if 'n' > int64:*0* { give [*1*]; } }\nSTART { }\n").code(0) == "E0513");
   // A loop may run no times at all, and then it has answered nothing.
   CHECK(run("fn.int64 'f' [] {\n"
             "  loop.range.int64 'i' = [*1*, *3*] { give [*1*]; } }\nSTART { }\n")
@@ -291,7 +320,7 @@ void breakNeedsALoop() {
 
 void conditionsAskABool() {
   CHECK(inStart("var.int64 'n' = [*1*];\n    if 'n' { }").code(0) == "E0506");
-  CHECK(inStart("var.int64 'n' = [*1*];\n    if 'n' > *0* { }").ok());
+  CHECK(inStart("var.int64 'n' = [*1*];\n    if 'n' > int64:*0* { }").ok());
 }
 
 // Where a count starts and stops is counted in, so both are the counter's own
@@ -825,7 +854,7 @@ void askingToSkipNeedsSayingSo() {
   CHECK(run("START {\n"
             "    var.mut.int64 'n' = [*0*];\n"
             "    UNSAFE {\n"
-            "        loop.no-itmt.while 'n' < *3* { set 'n' = ['n' + *1*]; }\n"
+            "        loop.no-itmt.while 'n' < int64:*3* { set 'n' = ['n' + *1*]; }\n"
             "    }\n}\n")
             .ok());
   // The chain is the parser's to judge, so these are asked of it rather than of
@@ -996,8 +1025,8 @@ void aGenericCallingAGenericIsWrittenOutToo() {
   // reads its body. That copy is the one asking, and it is not written twice.
   const std::string itself =
       "fn.any 'down' [any 'n'] {\n"
-      "    if 'n' <== *0* { give [*0*]; }\n"
-      "    give [down['n' - *1*]];\n"
+      "    if 'n' <== any:*0* { give [*0*]; }\n"
+      "    give [down['n' - any:*1*]];\n"
       "}\n"
       "START {\n"
       "    var.int64 'a' = [*5*];\n"
@@ -1610,6 +1639,7 @@ int main() {
   anImmutableNameDoesNotChange();
   aBorrowSaysWhetherItWrites();
   callsAreChecked();
+  aComparisonTellsNeitherSideWhatItIs();
   bothStreamsArePrintedTo();
   signaturesAreReadBeforeBodies();
   giveAnswersItsFunction();

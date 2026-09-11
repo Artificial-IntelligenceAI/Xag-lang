@@ -1908,7 +1908,11 @@ impl<'a> Writer<'a> {
         self.pad();
         self.out.push_str("loop.while '");
         self.out.push_str(&counter);
-        self.out.push_str("' < *");
+        // The end says its own type. A comparison declares nothing, so neither
+        // side is told what it is and a written value in one has to say.
+        self.out.push_str("' < ");
+        self.out.push_str(ty.written());
+        self.out.push_str(":*");
         push_number(self.out, rounds);
         self.out.push_str("* {\n");
         self.indent += 1;
@@ -1981,9 +1985,12 @@ impl<'a> Writer<'a> {
                 return;
             }
         }
-        // A comparison takes no type from anywhere, so its left side has to
-        // say what it is. And both sides are bracketed, because `mod` beside a
-        // comparison has no agreed order and Xag refuses to invent one.
+        // A comparison takes no type from anywhere, so *both* sides have to say
+        // what they are. The right one used to take its type from the left; it
+        // does not any more, because the left is the value standing beside it
+        // rather than a slot it goes into. And both sides are bracketed, because
+        // `mod` beside a comparison has no agreed order and Xag refuses to
+        // invent one.
         let ty = self.whole_in_scope().unwrap_or(COUNTED);
         self.out.push('(');
         self.whole_typed(ty, 1);
@@ -1999,7 +2006,7 @@ impl<'a> Writer<'a> {
         };
         self.out.push_str(compares);
         self.out.push_str(" (");
-        self.expr(ty, 1);
+        self.whole_typed(ty, 1);
         self.out.push(')');
     }
 

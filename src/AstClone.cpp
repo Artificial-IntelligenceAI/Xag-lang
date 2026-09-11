@@ -156,11 +156,54 @@ unsigned fillChain(Chain &chain, std::string_view spelled) {
 }
 
 unsigned fillBlock(Block &block, std::string_view spelled);
+unsigned fillValues(ValueList &list, std::string_view spelled);
+
+// `any:*0*` — a written value saying that its type is the blank.
+//
+// It is the only place a blank is written outside a chain, and it exists for
+// the one position where nothing else can say what a value is: a comparison
+// inside a generic. A comparison declares nothing, so neither side is told
+// anything, and the type the author would have to name is the one the caller
+// picks. `any` is the name for that, and it is filled in here with everything
+// else.
+//
+// Only where the blank was filled with a single word. A value cannot be written
+// as a `many.int64` or a `loan.int64` whatever it says, and leaving the `any`
+// standing lets the check that comes after say so plainly rather than having
+// this invent a type nobody wrote.
+unsigned fillExpr(Expr *e, std::string_view spelled) {
+  if (!e)
+    return 0;
+  unsigned filled = 0;
+  if (e->kind == ExprKind::Typed && e->text == "any" &&
+      spelled.find('.') == std::string_view::npos) {
+    e->text = std::string(spelled);
+    ++filled;
+  }
+  for (ExprPtr &child : e->children)
+    filled += fillExpr(child.get(), spelled);
+  filled += fillValues(e->args, spelled);
+  return filled;
+}
+
+unsigned fillValues(ValueList &list, std::string_view spelled) {
+  unsigned filled = 0;
+  for (Value &value : list.values)
+    for (ExprPtr &item : value.items)
+      filled += fillExpr(item.get(), spelled);
+  return filled;
+}
 
 unsigned fillStmt(Stmt &s, std::string_view spelled) {
   unsigned filled = fillChain(s.chain, spelled);
-  for (Branch &branch : s.branches)
+  filled += fillValues(s.value, spelled);
+  filled += fillExpr(s.index.get(), spelled);
+  filled += fillExpr(s.condition.get(), spelled);
+  filled += fillExpr(s.call.get(), spelled);
+  for (Branch &branch : s.branches) {
+    filled += fillExpr(branch.condition.get(), spelled);
     filled += fillBlock(branch.body, spelled);
+  }
   filled += fillBlock(s.body, spelled);
   return filled;
 }
@@ -179,6 +222,7 @@ unsigned fillTheBlank(Item &item, std::string_view spelled) {
   unsigned filled = fillChain(item.chain, spelled);
   for (Param &param : item.params)
     filled += fillChain(param.chain, spelled);
+  filled += fillValues(item.value, spelled);
   filled += fillBlock(item.body, spelled);
   return filled;
 }

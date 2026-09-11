@@ -91,7 +91,7 @@ void expressionsBecomeTemporaries() {
 
 void anIfBecomesASwitchAndAJoin() {
   const Built b = inStart("var.mut.int64 'n' = [*0*];\n"
-                          "    if 'n' == *0* { set 'n' = [*1*]; } else { set 'n' = [*2*]; }");
+                          "    if 'n' == int64:*0* { set 'n' = [*1*]; } else { set 'n' = [*2*]; }");
   CHECK(b.clean());
   CHECK(b.has("switch "));
   CHECK(b.count("goto block") >= 2); // both arms rejoin
@@ -108,14 +108,14 @@ void aLoopBecomesABackEdge() {
 
 void breakLeavesTheLoop() {
   const Built b = inStart("var.int64 'n' = [*0*];\n"
-                          "    loop.while 'n' == *0* { break; }");
+                          "    loop.while 'n' == int64:*0* { break; }");
   CHECK(b.clean());
   CHECK(b.count("goto block") >= 2);
 }
 
 void switchIsGeneralFromTheStart() {
   // One value per target rather than a true/false pair, so a decision tree fits.
-  const Built b = inStart("var.mut.int64 'n' = [*0*];\n    if 'n' == *0* { set 'n' = [*1*]; }");
+  const Built b = inStart("var.mut.int64 'n' = [*0*];\n    if 'n' == int64:*0* { set 'n' = [*1*]; }");
   CHECK(b.clean());
   CHECK(b.has("[true -> block"));
   CHECK(b.has("[else -> block"));
@@ -158,7 +158,7 @@ void elaborationSettlesEveryDrop() {
                           "START {\n"
                           "  var.str 's' = [*hi*];\n"
                           "  var.int64 'n' = [*1*];\n"
-                          "  if 'n' == *1* { keep[move 's']; }\n"
+                          "  if 'n' == int64:*1* { keep[move 's']; }\n"
                           "}\n");
   CHECK(maybe.clean());
   CHECK(maybe.hasIn("START", "drop "));

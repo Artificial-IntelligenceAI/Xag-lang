@@ -1411,13 +1411,24 @@ private:
                    "the parameter it is passed to, or from itself"});
           return unknownFrom(expected.from);
         }
+        // Which tip depends on where the value is standing. A comparison
+        // declares nothing and wants nothing, so the reader needs to hear that
+        // rather than a sentence about `print.stdout`.
         complain(e.span, "E0507", "nothing here says what this written value is.",
                  {"a written value takes its type from what it is written into, from the "
                   "parameter it is passed to, or from itself"},
-                 {"`*1000*` is a number under `int64` and four characters under `str`. "
-                  "`print.stdout` is a chain that calls rather than one that declares "
-                  "a name, and a print declares no parameters either, so nothing beside "
-                  "the value has said which it is and the value is left to say it."});
+                 comparing_
+                     ? std::vector<std::string>{
+                           "a comparison declares nothing, so neither side is told what "
+                           "it is. The other side does not say it either: it is the "
+                           "value standing beside this one, not a slot this one goes "
+                           "into. `'n' > int8:*0*` says it."}
+                     : std::vector<std::string>{
+                           "`*1000*` is a number under `int64` and four characters under "
+                           "`str`. `print.stdout` is a chain that calls rather than one "
+                           "that declares a name, and a print declares no parameters "
+                           "either, so nothing beside the value has said which it is and "
+                           "the value is left to say it."});
         return Type::Unknown;
       }
       if (isDecimal(expected)) {
@@ -1689,6 +1700,10 @@ private:
     return type;
   }
 
+  // Whether what is being read stands in a comparison, or in a sum inside one —
+  // the two places where nothing declares a type for a written value to take.
+  bool comparing_ = false;
+
   Ty binary(const Expr &e, Ty expected) {
     const std::string &op = e.text;
     const bool comparing = op == "<" || op == ">" || op == "<==" || op == ">==" ||
@@ -1696,14 +1711,58 @@ private:
     const bool logical = op == "and" || op == "or";
 
     // Arithmetic answers with what it was given, so the type wanted here is the
-    // type wanted of it — and the right side takes whatever the left turned out
-    // to be, which is how a written value in a sum gets a size at all.
-    const Ty asked = logical ? Type::Bool
-                               : (comparing ? Type::Unknown
-                                            : (isNumber(expected) ? expected : Type::Unknown));
-    const Ty left = expr(*e.children[0], asked);
-    const Ty right =
-        expr(*e.children[1], comparing || (!logical && asked == Type::Unknown) ? left : asked);
+    // type wanted of it — and it reaches both sides, which is how a written
+    // value in a sum gets a size at all. `set 'total' = ['total' + *1*];` asks
+    // both sides for what `'total'` was declared as.
+    //
+    // A comparison wants nothing, so neither side is told anything. It used to
+    // read the left and then hand *that* to the right, which was the one place
+    // in the language where a value took its type from the thing standing beside
+    // it rather than from the slot it goes into. Every other written value has a
+    // destination whose type was declared — a name, a parameter, a field, a
+    // loop's counter — and `*0*` in `'n' > *0*` has none. It says its own now:
+    // `'n' > int8:*0*`.
+    //
+    // The same for a sum with nowhere to land. In `if ('n' x *4*) > 'limit'` the
+    // `x` is asked for nothing, so `*4*` has no slot either, and borrowing one
+    // from `'n'` was the same sleight of hand one level down.
+    // A blank reaches both sides too. `any` is a declared type — the signature
+    // said it — and a written value taking it is taking what the slot it goes
+    // into was declared as, which is the rule rather than an exception to it.
+    // It is filled in with everything else when the generic is written out.
+    const bool wanted = isNumber(expected) || expected.kind == Type::Blank;
+    const Ty asked = logical ? Ty{Type::Bool}
+                             : (comparing ? Ty{} : (wanted ? expected : Ty{}));
+    // While either side is read, so a value with nothing to take a type from can
+    // be told why there is nothing.
+    const bool nothingAsked = comparing || (!logical && asked == Ty{});
+    const bool was = comparing_;
+    comparing_ = nothingAsked;
+
+    Ty left, right;
+    if (!nothingAsked) {
+      left = expr(*e.children[0], asked);
+      right = expr(*e.children[1], asked);
+    } else {
+      // A blank is the one type a written value cannot be told to be, because
+      // naming it is the caller's to do and the author has no word for it. So
+      // beside a blank the value takes the blank, and is filled in with it when
+      // the generic is written out. Everywhere else a comparison tells neither
+      // side anything.
+      //
+      // The side that is not a written value is read first, so this works
+      // whichever way round the two were written.
+      const bool writtenLeft = e.children[0]->kind == ExprKind::Written;
+      const bool writtenRight = e.children[1]->kind == ExprKind::Written;
+      if (writtenLeft && !writtenRight) {
+        right = expr(*e.children[1], Ty{});
+        left = expr(*e.children[0], right.kind == Type::Blank ? right : Ty{});
+      } else {
+        left = expr(*e.children[0], Ty{});
+        right = expr(*e.children[1], left.kind == Type::Blank ? left : Ty{});
+      }
+    }
+    comparing_ = was;
 
     // One side could not be worked out, because something it was built from was
     // already refused. Nothing here can be checked against anything, and every

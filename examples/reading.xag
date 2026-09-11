@@ -12,7 +12,7 @@ PREP {
 
 START {
     var.many.str 'given' = [arguments[]];
-    if (count[loan 'given']) > *0* {
+    if (count[loan 'given']) > int64:*0* {
         print.stdout[str:*ignoring * (count[loan 'given']) str:* argument(s)* \n];
     }
 

@@ -181,7 +181,7 @@ void armsOfAnIf() {
 
 void conditionsWearNoBrackets() {
   const Parsed w = inStart("var.mut.int64 'left' = [*3*];\n"
-                           "    loop.while 'left' > *0* {\n"
+                           "    loop.while 'left' > int64:*0* {\n"
                            "        set 'left' = ['left' - *1*];\n    }");
   CHECK(w.ok());
   CHECK(w.has("loop while\n"));
@@ -470,7 +470,7 @@ void aCloneIsIndistinguishable() {
       "    give ['a'];\n"
       "}\n"
       "fn.or-nothing.int64 'half' [int64 'n'] {\n"
-      "    if 'n' == *0* { give [nothing]; }\n"
+      "    if 'n' == int64:*0* { give [nothing]; }\n"
       "    give ['n' / *2*];\n"
       "}\n"
       "START {\n"
@@ -479,9 +479,9 @@ void aCloneIsIndistinguishable() {
       "    var.point 'p' = [*1* *2*];\n"
       "    set 'p'.y = [*7*];\n"
       "    loop.perm.range.int64 'i' = [*1*, 'LIMIT'] {\n"
-      "        if 'i' > *3* { break; }\n"
+      "        if 'i' > int64:*3* { break; }\n"
       "    }\n"
-      "    loop.while 'p'.x > *0* { set 'p'.x = ['p'.x - *1*]; }\n"
+      "    loop.while 'p'.x > int64:*0* { set 'p'.x = ['p'.x - *1*]; }\n"
       "    UNSAFE {\n"
       "        loop.no-itmt.range.int64 'j' = [*1*, *2*] { }\n"
       "    }\n"

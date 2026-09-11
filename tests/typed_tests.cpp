@@ -51,7 +51,7 @@ void everythingCarriesItsType() {
       "START { var.many.many.int64 'g' = [[*1* *2*] [*3*]];\n"
       "  print.stdout['g'[*1*][*2*] \\n]; }\n",
       "fn.or-nothing.int64 'half' [int64 'n'] {\n"
-      "  if 'n' == *0* { give [nothing]; }\n  give ['n' / *2*]; }\n"
+      "  if 'n' == int64:*0* { give [nothing]; }\n  give ['n' / *2*]; }\n"
       "START { when half[*4*] { is 'v' { print.stdout['v' \\n]; } is nothing { } } }\n",
   };
   for (const char *one : programs) {

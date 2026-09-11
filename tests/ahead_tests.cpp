@@ -235,7 +235,7 @@ void aRunThatStoppedChangesNothing() {
                            "        set 'sum' = ['sum' + 'i'];\n"
                            "    }\n"
                            "    var.mut.int64 'n' = [*0*];\n"
-                           "    loop.while 'n' >== *0* {\n"
+                           "    loop.while 'n' >== int64:*0* {\n"
                            "        set 'n' = ['n' + *1*];\n"
                            "    }\n}\n");
   CHECK(s.built);
@@ -339,7 +339,7 @@ void aLoopWithAnAnswerIsWrittenAsItsAnswer() {
       "START {\n"
       "    var.mut.int64 'total' = [*0*];\n"
       "    loop.range.int64 'i' = [*1*, *1000*] {\n"
-      "        if ('i' mod *7*) == *0* { set 'total' = ['total' + 'i' x 'i']; }\n"
+      "        if ('i' mod int64:*7*) == int64:*0* { set 'total' = ['total' + 'i' x 'i']; }\n"
       "        else { set 'total' = ['total' - *3*]; }\n"
       "    }\n"
       "    print.stdout[str:*total = * 'total' \\n];\n}\n";
@@ -519,7 +519,7 @@ void aNameIsChangedByMoreThanBeingAssignedTo() {
   xag::MirResult three = mirOf("START {\n"
                                "    var.mut.int64 'total' = [*0*];\n"
                                "    loop.range.int64 'i' = [*1*, *1000*] {\n"
-                               "        if ('i' mod *7*) == *0* {\n"
+                               "        if ('i' mod int64:*7*) == int64:*0* {\n"
                                "            set 'total' = ['total' + 'i' x 'i'];\n"
                                "        } else { set 'total' = ['total' - *3*]; }\n"
                                "    }\n"

@@ -166,14 +166,14 @@ void itEmitsControlFlow() {
         "  loop.range.int64 'i' = [*1*, *10*] { set 't' = ['t' + 'i']; }\n"
         "  print.stdout['t' \\n]; }\n", "block");
   EMITS("START { var.int64 'n' = [*1*];\n"
-        "  if 'n' == *1* { print.stdout[str:*one* \\n]; } else { print.stdout[str:*other* \\n]; } }\n",
+        "  if 'n' == int64:*1* { print.stdout[str:*one* \\n]; } else { print.stdout[str:*other* \\n]; } }\n",
         "br i1");
 }
 
 void itGuardsAConditionalDrop() {
   EMITS("fn.nothing 'keep' [str 't'] { print.stdout['t' \\n]; }\n"
         "START { var.str 's' = [*hi*]; var.int64 'n' = [*1*];\n"
-        "  if 'n' == *1* { keep[move 's']; } }\n",
+        "  if 'n' == int64:*1* { keep[move 's']; } }\n",
         "xag_str_drop");
 }
 
