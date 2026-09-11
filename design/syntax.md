@@ -1237,9 +1237,14 @@ the oracle never saw the hole.
 
 ## A sum that does not fit
 
-A sum that does not fit comes round, as a processor does it. That is rarely what
-was meant, so the compiler works out how far a counted loop gets and says so
-when it can:
+A sum that does not fit **stops the program**, unless something said it was meant
+to come round. That is the only answer for one nobody could work out ahead of
+time: coming round quietly is how a wrong number gets all the way to the end
+looking like a right one.
+
+What *can* be worked out is refused or reported before anything runs, and those
+sums cost nothing at run time. So the compiler works out how far a counted loop
+gets and says so when it can:
 
 ```
 var.mut.int8 'sum' = [*0*];
@@ -1263,10 +1268,37 @@ through in silence.
 var.mut.wrapping.int8 'sum' = [*0*];
 ```
 
-Then nothing is said about it, ever. A checksum is meant to come round, and the
-word says so where the name is declared rather than at every loop that touches
-it. Nothing about the machine changes: sums came round before this word existed
-and still do. What changes is whether the compiler mentions it.
+Then nothing is said about it and nothing checks it. A checksum is meant to come
+round, and the word says so where the name is declared rather than at every sum
+that touches it.
+
+It is written wherever a thing is declared: a `var`, a `const`, a parameter, and
+one of the things a struct holds.
+
+```
+fn.nothing 'mix' [loanmut.wrapping.uint32 'state', loan.uint32 'by'] { … }
+struct 'digest' [wrapping.uint32 'state', int64 'length']
+```
+
+**What it buys is the machine's own instruction.** Without it a sum is asked
+whether it fitted, and stops where it did not; with it the add is an add. That
+is the whole difference, and it is why the word is worth writing where a program
+means it — and why writing it where a program does not mean it is worse than not
+writing it at all.
+
+`checked` is the other side and is refused (`E0201`): it is what a name is when
+nothing says otherwise, and a word that cannot change the answer is not written.
+
+### Where it cannot be said
+
+A sum that never reaches a declaration has nowhere to carry the word:
+
+```
+if ('n' x int8:*4*) > 'limit' { … }
+```
+
+That one is checked and there is no opting out of it. A sum written into a name
+can say `wrapping`; one written into a condition can be given a name first.
 
 ### What it can follow
 

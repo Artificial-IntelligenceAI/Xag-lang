@@ -179,6 +179,9 @@ private:
   // spelling for its printer; everything here asks this instead, so a type is
   // never worked out from a name a second time.
   std::vector<Ty> holds_;
+  // Whether the statement being lowered puts its answer somewhere that said
+  // `wrapping`. A sum is checked while the program runs unless it did.
+  bool wrapsHere_ = false;
   std::unordered_map<std::string, Ty> consts_;
   std::unordered_map<std::string, Ty> answers_;
 
@@ -201,6 +204,13 @@ private:
                           typeRef(answers)}});
     return into;
   }
+
+  // Puts the flag back however the statement left, including out of a `break`.
+  struct Wrapping {
+    bool was;
+    Builder &of;
+    ~Wrapping() { of.wrapsHere_ = was; }
+  };
 
   struct Loop {
     unsigned again = 0; // where a pass restarts
@@ -414,7 +424,8 @@ private:
       const unsigned into = addLocal("", type);
       emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Binary, e.text, {}, 0,
-                            {std::move(left), std::move(right)}, typeRef(type)}});
+                            {std::move(left), std::move(right)}, typeRef(type),
+                            false, wrapsHere_}});
       return into;
     }
 
@@ -764,6 +775,11 @@ private:
   }
 
   void statement(const TypedStmt &s) {
+    // Held across the whole statement, because the word is written where the
+    // name is and the sum is somewhere inside what the name is given.
+    const bool wrapped = wrapsHere_;
+    wrapsHere_ = s.wrapping;
+    const Wrapping restore{wrapped, *this};
     switch (s.kind) {
     case TypedStmtKind::Declare: {
       const unsigned local = addLocal(s.name, s.type);

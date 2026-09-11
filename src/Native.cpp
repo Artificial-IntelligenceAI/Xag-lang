@@ -660,6 +660,7 @@ private:
     add("xag_print", voidTy, {ptr});
     add("xag_print_bool", voidTy, {i32});
     add("xag_writes_to", voidTy, {i32});
+    add("xag_sum_came_round", voidTy, {});
     auto *i128 = builder_.getInt128Ty();
     add("xag_print_int", voidTy, {i128, i32, i32});
     auto *f64 = builder_.getDoubleTy();
@@ -1562,7 +1563,11 @@ private:
   // The same sum, through the intrinsic that answers whether it fitted. The
   // answer is the machine's own wrapped one either way — this changes nothing
   // about what the program computes, only whether anything noticed.
-  llvm::Value *watchedArithmetic(const std::string &op, llvm::Value *left,
+  // A sum asked whether it fitted. The build the compiler runs while compiling
+  // says where one came round and carries on; every other build stops, because a
+  // sum coming round where nobody said it should is a bug and carrying on with
+  // the wrong number is how it stays hidden.
+  llvm::Value *checkedArithmetic(const std::string &op, llvm::Value *left,
                                  llvm::Value *right, bool unsignedly) {
     const llvm::Intrinsic::ID which =
         op == "+" ? (unsignedly ? llvm::Intrinsic::uadd_with_overflow
@@ -1582,8 +1587,13 @@ private:
     auto *on = llvm::BasicBlock::Create(context_, "fitted", function);
     builder_.CreateCondBr(round, say, on);
     builder_.SetInsertPoint(say);
-    builder_.CreateCall(runtime_["xag_came_round"], {builder_.getInt32(at_)});
-    builder_.CreateBr(on);
+    if (watching_) {
+      builder_.CreateCall(runtime_["xag_came_round"], {builder_.getInt32(at_)});
+      builder_.CreateBr(on);
+    } else {
+      builder_.CreateCall(runtime_["xag_sum_came_round"], {});
+      builder_.CreateUnreachable();
+    }
     builder_.SetInsertPoint(on);
     return answer;
   }
@@ -1725,7 +1735,9 @@ private:
     // and says so when the answer did not fit. Nothing a reader runs is built
     // this way.
     if (op == "+" || op == "-" || op == "x") {
-      if (!watching_) {
+      // Meant to come round, so nothing looks. The machine's own instruction is
+      // exactly the answer and the optimiser can see straight through it.
+      if (value.wraps && !watching_) {
         if (op == "+") return builder_.CreateAdd(left, right);
         if (op == "-") return builder_.CreateSub(left, right);
         return builder_.CreateMul(left, right);
@@ -1733,7 +1745,7 @@ private:
       // From `working`, the type the sum is done in — not from `given`, which
       // is what a comparison reads its two sides by. They coincide for these
       // three, and asking the wrong one would be a disagreement waiting.
-      return watchedArithmetic(op, left, right, isWhole(working) && !isSigned(working));
+      return checkedArithmetic(op, left, right, isWhole(working) && !isSigned(working));
     }
 
     // Dividing has a question in front of it rather than inside it: what to do

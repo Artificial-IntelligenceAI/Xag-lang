@@ -76,6 +76,10 @@ Ran run(const std::string &text) {
   xag_set_input(nullptr);
   std::fclose(reading);
   out.leaked = xag_live_allocations() - before;
+  // A stop does not reach the end of a scope, so what it held is still held.
+  // Forgotten here so that it is not counted against the next run.
+  if (!result.ran)
+    xag_forget_allocations(before);
 
   std::fflush(sink);
   std::rewind(sink);
@@ -206,15 +210,49 @@ void itCounts() {
 }
 
 void itWrapsAtTheWidthItWasWritten() {
-  // `overflow = "wrap"`, and the width that wraps is the written one.
-  SAYS("START { var.mut.uint8 'n' = [*255*]; set 'n' = ['n' + *1*];"
+  // `wrapping` says coming round is meant, and the width that wraps is the
+  // written one. Without the word each of these stops instead, which is what
+  // `itStopsOnASumThatDoesNotFit` is about.
+  SAYS("START { var.mut.wrapping.uint8 'n' = [*255*]; set 'n' = ['n' + *1*];"
        " print.stdout['n' \\n]; }\n", "0\n");
-  SAYS("START { var.mut.int8 'n' = [*127*]; set 'n' = ['n' + *1*];"
+  SAYS("START { var.mut.wrapping.int8 'n' = [*127*]; set 'n' = ['n' + *1*];"
        " print.stdout['n' \\n]; }\n", "-128\n");
-  SAYS("START { var.mut.uint16 'n' = [*0*]; set 'n' = ['n' - *1*];"
+  SAYS("START { var.mut.wrapping.uint16 'n' = [*0*]; set 'n' = ['n' - *1*];"
        " print.stdout['n' \\n]; }\n", "65535\n");
   // A wider one does not wrap where a narrower one would.
   SAYS("START { var.int32 'n' = [*127* + *1*]; print.stdout['n' \\n]; }\n", "128\n");
+}
+
+// A sum that does not fit stops, where nothing said it was meant to come round.
+// What is written down is refused before it ever runs; this is the one that only
+// running finds, because what it adds came from outside.
+void itStopsOnASumThatDoesNotFit() {
+  given = "100\n";
+  const Ran over = run("START {\n"
+                       "  when read.stdin[] { is 'line' {\n"
+                       "    var.or-nothing.int8 'read' = [convert-to-number[loan 'line']];\n"
+                       "    when 'read' { is 'n' {\n"
+                       "      var.int8 'big' = ['n' + *100*];\n"
+                       "      print.stdout['big' \\n];\n"
+                       "    } is nothing { } }\n"
+                       "  } is nothing { } } }\n");
+  CHECK(over.compiled);
+  CHECK(!over.ran);
+  CHECK(over.trouble.find("does not fit") != std::string::npos);
+
+  // The same program, saying it is meant to.
+  given = "100\n";
+  const Ran meant = run("START {\n"
+                        "  when read.stdin[] { is 'line' {\n"
+                        "    var.or-nothing.int8 'read' = [convert-to-number[loan 'line']];\n"
+                        "    when 'read' { is 'n' {\n"
+                        "      var.wrapping.int8 'big' = ['n' + *100*];\n"
+                        "      print.stdout['big' \\n];\n"
+                        "    } is nothing { } }\n"
+                        "  } is nothing { } } }\n");
+  CHECK(meant.ran);
+  CHECK(meant.said == "-56\n");
+  given.clear();
 }
 
 void itComparesAsTheTypeSaysToCompare() {
@@ -941,6 +979,7 @@ int main() {
   itSaysWhereEachPrintGoes();
   itCounts();
   itWrapsAtTheWidthItWasWritten();
+  itStopsOnASumThatDoesNotFit();
   itComparesAsTheTypeSaysToCompare();
   itCountsPastSixtyFourBits();
   itDoesIEEEBinary();

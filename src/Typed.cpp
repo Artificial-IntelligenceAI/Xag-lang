@@ -285,12 +285,14 @@ private:
     const auto said = checked_.declarations.find(&s);
     if (said != checked_.declarations.end())
       out->type = said->second;
+    // Said where the name was declared, which for a `set` is somewhere else
+    // entirely — so it comes from the checker rather than from this chain.
+    out->wrapping = checked_.mayWrap.count(&s) != 0;
 
     switch (s.kind) {
     case StmtKind::Declare:
       out->kind = TypedStmtKind::Declare;
       out->changeable = chainSays(s.chain, "mut");
-      out->wrapping = chainSays(s.chain, "wrapping");
       out->value = valueOf(s.value);
       break;
     case StmtKind::Set:

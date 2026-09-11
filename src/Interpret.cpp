@@ -759,7 +759,17 @@ private:
                            : op == "-" ? static_cast<XagInt>(ux - uy)
                                        : static_cast<XagInt>(ux * uy);
         answer.number = xag_int_fit(raw, width, sign);
-        notice(tooBig(op, ux, uy, width, sign));
+        const bool round = tooBig(op, ux, uy, width, sign);
+        notice(round);
+        // Nothing said it was meant to, so it stops — unless this is the run
+        // the compiler is watching, which has to reach the end to say where
+        // every sum came round. That run notices and carries on; it is what
+        // turns a sum that comes round into a refusal before anything ships,
+        // and stopping at the first one would hide the rest.
+        if (round && !value.wraps && !watching_) {
+          xag_sum_came_round();
+          return Value{};
+        }
       }
       else if (op == "/") answer.number = xag_int_div(x, y, width, sign);
       else if (op == "mod") answer.number = xag_int_mod(x, y, width, sign);
@@ -1114,10 +1124,6 @@ private:
 
 } // namespace
 
-InterpretResult interpret(const Mir &mir) {
-  return Machine(mir, /*watching=*/false).run();
-}
-
 namespace {
 
 // Where a stop lands while the compiler is the one running the program.
@@ -1146,7 +1152,7 @@ const Span *whereTheRunIs = nullptr;
 //
 // `setjmp` lives in this frame because this frame is the one still standing
 // when a stop comes back to it.
-InterpretResult runHandingBackStops(Machine &&machine) {
+InterpretResult runHandingBackStops(Machine &&machine, bool forgetting = true) {
   whyItStopped.clear();
   const int64_t held = xag_live_allocations();
   whereTheRunIs = &machine.where();
@@ -1170,11 +1176,22 @@ InterpretResult runHandingBackStops(Machine &&machine) {
   // thrown away. Left alone, the next one in this process — another loop, or
   // the program itself under `xagc run` — is told it ended holding what this
   // one did.
-  xag_forget_allocations(held);
+  // Only where another run follows in this process. A single run is measured on
+  // the way out — every test here asserts the allocation balance alongside the
+  // answer — and forgetting would say every one of them balanced.
+  if (forgetting)
+    xag_forget_allocations(held);
   return out;
 }
 
 } // namespace
+
+// A stop comes back rather than ending the process, so that whoever asked can
+// say what happened in their own words — and so that a test can watch a program
+// stop without the test stopping with it.
+InterpretResult interpret(const Mir &mir) {
+  return runHandingBackStops(Machine(mir, /*watching=*/false), /*forgetting=*/false);
+}
 
 InterpretResult interpretWatching(const Mir &mir) {
   return runHandingBackStops(Machine(mir, /*watching=*/true));

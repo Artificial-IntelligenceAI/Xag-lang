@@ -143,6 +143,12 @@ struct RValue {
   // question does not need asking again while it runs. Last, so that every
   // place that lists an RValue's parts keeps meaning what it meant.
   bool settled = false;
+  // Binary `+`, `-`, `x` on a whole number: the answer goes somewhere that said
+  // `wrapping`, so coming round is meant and nothing checks for it. Everywhere
+  // else a sum that does not fit stops the program — a sum that comes round
+  // where nobody said it should is a bug, and the only reason it was not
+  // checked before is that the check costs something at run time.
+  bool wraps = false;
 };
 
 enum class StatementKind {

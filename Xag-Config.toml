@@ -15,10 +15,13 @@
 #
 #     No default may make code pay for a guarantee it did not ask for.
 #
-# The two agree everywhere except on what counts as a cost. `overflow = "stop"`
-# taxes every `+` in the program, including the ones that could never overflow,
-# so it is not the default; the safety is bought at build time instead, where it
-# is free. `characters = "clusters"` costs more than `letters`, but only when
+# The two agree everywhere except on what counts as a cost. Stopping on a sum
+# that does not fit was read as taxing every `+` in the program, including the
+# ones that could never overflow — but the ones that could never overflow are
+# exactly the ones the compiler settles before anything runs, and a sum that
+# means to come round says `wrapping` and is not checked either. What is left
+# paying is a sum nobody could work out and nobody said was meant, which is the
+# one that should be paying. `characters = "clusters"` costs more than `letters`, but only when
 # `count` is asked — and a reader who asked how many characters there are was
 # asking about clusters. A cost paid by the operation that wanted it is not a
 # tax on everything else.
@@ -35,10 +38,18 @@
 # is what a mathematician means and what makes `n mod k` always land in `0..k`.
 division = "truncated"
 
-# Also changes what a program answers. `wrap` puts a sum that does not fit back
-# into the type, as a processor does; `stop` stops instead, in the same place
-# and for the same reason in every engine.
-overflow = "wrap"
+# Gone, and not replaced. A sum that does not fit stops the program, and the one
+# way to have it come round is `wrapping` where the thing is declared — a `var`,
+# a `const`, a parameter, or one of the things a struct holds.
+#
+# It was a setting while nothing checked at run time, so `wrap` was the only
+# thing a build could do and `stop` named a behaviour that did not exist. Now
+# that it exists, the choice belongs where the language puts choices: on the
+# declaration, per value, where a reader sees it — rather than once for a whole
+# project, where a reader of any single line cannot tell which language it is in.
+#
+# What is written down and certainly wrong is still refused before anything runs
+# (`E0537`, `E0534`), so those sums cost nothing at run time either way.
 
 # Also changes what a program answers. `stops-early` means `and` asks its right
 # side only when the left was true, and `or` only when it was false. The reason
@@ -68,7 +79,8 @@ characters = "clusters"
 # What a `bin` does when there is no number to give back. `carries-on` answers
 # `infinity` or `not-a-number` and continues, as a processor does; `stops` stops.
 #
-# Carrying on is the default for a different reason than `overflow = "wrap"`:
+# Carrying on is the default for a different reason than a whole sum coming
+# round is refused:
 # a `bin` *is* IEEE 754 binary, and `infinity` and `not-a-number` are values of
 # that type rather than accidents of it. Asking to stop is asking for something
 # narrower than the type you named.

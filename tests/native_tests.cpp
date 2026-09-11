@@ -461,6 +461,15 @@ void aLoanIsNotAlwaysOfText() {
         "  set 'total' = ['total' + 'step']; }\n"
         "START { var.mut.int64 't' = [*0*];\n  var.int64 's' = [*3*];\n"
         "  add-into[loanmut 't', loan 's'];\n  print.stdout['t' \\n]; }\n",
+        // Checked, because nothing said the sum was meant to come round. The
+        // plain instruction is what `wrapping` buys.
+        "llvm.sadd.with.overflow.i64");
+  // And the plain instruction is what `wrapping` buys. Counting rather than
+  // adding two written numbers, because two written numbers are folded to their
+  // answer before any of this and there is no add left to look at.
+  EMITS("START { var.str 's' = [*abc*];\n"
+        "  var.mut.wrapping.int64 't' = [*0*];\n"
+        "  set 't' = ['t' + (count[loan 's'])];\n  print.stdout['t' \\n]; }\n",
         "add i64");
   EMITS("fn.nothing 'flip' [loanmut.bool 'b'] { set 'b' = [not 'b']; }\n"
         "START { var.mut.bool 'b' = [*false*];\n  flip[loanmut 'b'];\n"

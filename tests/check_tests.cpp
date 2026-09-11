@@ -34,6 +34,12 @@ struct Checked {
   bool ok() const { return lexed.ok() && parsed.ok() && checked.ok(); }
   // Everything the first complaint offered as a tip, joined, so a test can ask
   // whether it named the thing a reader needed to hear.
+  // A chain is read by the parser, so what it refuses is reported there rather
+  // than here — `E0201` for writing a default, `E0203` for a word this kind of
+  // chain never asks.
+  std::string chainCode(unsigned i) const {
+    return i < parsed.diagnostics.size() ? parsed.diagnostics[i].code : "(none)";
+  }
   std::string tip() const {
     std::string out;
     if (checked.diagnostics.empty())
@@ -231,6 +237,28 @@ void callsAreChecked() {
 // A comparison declares nothing, so neither side is told what it is. It is the
 // one place a written value used to take its type from the thing standing
 // beside it rather than from a slot it goes into.
+// `wrapping` is written wherever a thing is declared, because a sum written into
+// it is meant to come round wherever that thing is.
+void wrappingIsSaidWhereAThingIsDeclared() {
+  CHECK(inStart("var.mut.wrapping.int8 'n' = [*0*]; set 'n' = ['n' + *1*];").ok());
+  CHECK(run("fn.nothing 'mix' [loanmut.wrapping.uint32 's', loan.uint32 'by'] {\n"
+            "  set 's' = ['s' x *2654435761*]; }\n"
+            "START { var.mut.uint32 'h' = [*1*]; var.uint32 'b' = [*2*];\n"
+            "  mix[loanmut 'h', loan 'b']; print.stdout['h' \\n]; }\n").ok());
+  CHECK(run("struct 'digest' [wrapping.uint32 'state', int64 'length']\n"
+            "START { var.mut.digest 'd' = [*1* *0*];\n"
+            "  set 'd'.state = ['d'.state x uint32:*31*];\n"
+            "  print.stdout['d'.state \\n]; }\n").ok());
+
+  // `checked` is what a thing is when nothing says otherwise, so writing it asks
+  // for nothing and is refused like every other default.
+  CHECK(inStart("var.mut.checked.int8 'n' = [*0*]; set 'n' = ['n' + int8:*1*];")
+            .chainCode(0) == "E0201");
+  // Not a `const`, which is worked out while compiling — a sum in one that does
+  // not fit is refused there, and there is no run for a word to change.
+  CHECK(run("const.wrapping.int8 'K' = [*100*];\nSTART { }\n").chainCode(0) == "E0203");
+}
+
 void aComparisonTellsNeitherSideWhatItIs() {
   CHECK(inStart("var.int8 'n' = [*5*];\n  var.bool 'b' = ['n' > *0*];").code(0) == "E0507");
   CHECK(inStart("var.int8 'n' = [*5*];\n  var.bool 'b' = ['n' > int8:*0*];").ok());
@@ -1639,6 +1667,7 @@ int main() {
   anImmutableNameDoesNotChange();
   aBorrowSaysWhetherItWrites();
   callsAreChecked();
+  wrappingIsSaidWhereAThingIsDeclared();
   aComparisonTellsNeitherSideWhatItIs();
   bothStreamsArePrintedTo();
   signaturesAreReadBeforeBodies();

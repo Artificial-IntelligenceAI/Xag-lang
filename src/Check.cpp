@@ -1059,6 +1059,16 @@ private:
                   "turned off where nothing says so."});
   }
 
+  // One of the things a struct holds, by the name it was given.
+  const Field *fieldNamed(Ty of, const std::string &called) const {
+    if (!of.isStruct() || of.named >= result_.shapes.size())
+      return nullptr;
+    for (const Field &one : result_.shapes[of.named].fields)
+      if (one.name == called)
+        return &one;
+    return nullptr;
+  }
+
   static bool wrapsChain(const Chain &chain) {
     for (const ChainSegment &seg : chain.segments)
       if (!seg.isName && seg.text == "wrapping")
@@ -1130,7 +1140,7 @@ private:
                          "`.",
                      {"a name means one thing for as long as it stands"});
         shape.fields.push_back(Field{field.name, typeOfChain(field.chain),
-                                     field.nameSpan});
+                                     field.nameSpan, wrapsChain(field.chain)});
       }
       if (shape.fields.empty())
         complain(item.nameSpan, "E0525", "`" + shape.name + "` holds nothing.",
@@ -2348,6 +2358,8 @@ private:
       Symbol made{type, changeable(s.chain), s.nameSpan, wrapsChain(s.chain)};
       if (isWhole(type) && !made.wraps)
         result_.intoPlainNames.push_back(s.span);
+      if (made.wraps)
+        result_.mayWrap.insert(&s);
       if (isWhole(type)) {
         __int128 given = 0;
         if (wholeItemOf(s.value, given)) {
@@ -2399,9 +2411,26 @@ private:
         held->knownStart = false;
         held->everChanged = true;
       }
-      if (const Symbol *said = lookup(s.name);
-          said && !said->wraps && isWhole(said->type))
-        result_.intoPlainNames.push_back(s.span);
+      // What the sum is written into: the name, or the field the path arrives
+      // at. `wrapping` is said where a thing is declared, and one of the things
+      // a struct holds is declared in the struct.
+      if (const Symbol *said = lookup(s.name)) {
+        bool wraps = said->wraps;
+        Ty here = said->type;
+        for (const std::string &step : s.fields) {
+          const Field *field = fieldNamed(here, step);
+          if (!field)
+            break;
+          wraps = field->wraps;
+          here = field->type;
+        }
+        if (isWhole(here)) {
+          if (wraps)
+            result_.mayWrap.insert(&s);
+          else
+            result_.intoPlainNames.push_back(s.span);
+        }
+      }
       const Symbol *symbol = lookup(s.name);
       if (!symbol) {
         complain(s.nameSpan, "E0501", "`'" + s.name + "'` is not declared.",
@@ -2890,7 +2919,7 @@ private:
       scopes_.emplace_back();
       for (const Param &param : item.params)
         declare(param.name, Symbol{typeOfChain(param.chain), changeable(param.chain),
-                                   param.nameSpan});
+                                   param.nameSpan, wrapsChain(param.chain)});
       // A generic's body is not read with the blank still in it. Almost nothing
       // in it would hold: reaching into a `many.any` looks like taking a value
       // that does not copy out of a place that must hold one, because whether

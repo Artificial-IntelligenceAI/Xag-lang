@@ -46,8 +46,14 @@ The nine programs in `examples/` are the other check, and they must answer the
 same both ways:
 
     for f in examples/*.xag; do
-      diff <(./build/xagc run "$f") <(./build/xagc fast "$f") || echo "DIFF $f"
+      diff <(./build/xagc run "$f" </dev/null) \
+           <(./build/xagc fast "$f" </dev/null) || echo "DIFF $f"
     done
+
+`reading.xag` reads standard input, so **redirect it from `/dev/null`**. Without
+that the loop waits for a line that never comes — and in a backgrounded shell it
+waits forever, which looks like a hung build rather than a program doing exactly
+what it was asked.
 
 ## The bug this compiler keeps having
 

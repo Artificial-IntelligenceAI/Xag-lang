@@ -290,6 +290,12 @@ void xag_str_drop(XagStr *text) {
   text->capacity = 0;
 }
 
+const char *xag_why_a_sum_came_round(void) {
+  return "a sum does not fit, and nothing said it was meant to come round";
+}
+
+void xag_sum_came_round(void) { xag_stop(xag_why_a_sum_came_round()); }
+
 void xag_print(const XagStr *text) {
   if (text && text->length)
     std::fwrite(text->bytes, 1, text->length, output());

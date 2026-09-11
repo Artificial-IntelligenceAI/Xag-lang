@@ -93,7 +93,10 @@ struct Code {
   uint32_t a = 0;
   uint32_t b = 0;
   uint32_t aux = 0;  // a width, a signedness, a constant, a comparison
-  uint32_t jump = 0; // where a fused comparison goes when it is false
+  // Where a fused comparison goes when it is false. On `IntAdd`, `IntSub` and
+  // `IntMul` and their pooled forms it means something else and nothing jumps:
+  // 1 says the sum is checked, because nothing said it was meant to come round.
+  uint32_t jump = 0;
 };
 
 struct Constant {
@@ -734,7 +737,7 @@ private:
                   (isWhole(given) && !isSigned(given)) ? 0u : 1u});
       } else if (fromPool) {
         const Op which = op == "+" ? Op::IntAddK : op == "-" ? Op::IntSubK : Op::IntMulK;
-        emit(Code{which, place, x, y, aux});
+        emit(Code{which, place, x, y, aux, value.wraps ? 0u : 1u});
       } else {
         const Op which = op == "+"     ? Op::IntAdd
                          : op == "-"   ? Op::IntSub
@@ -742,7 +745,8 @@ private:
                          : op == "/"   ? Op::IntDiv
                          : op == "mod" ? Op::IntMod
                                        : Op::IntPow;
-        emit(Code{which, place, x, y, aux});
+        const bool checks = !value.wraps && (op == "+" || op == "-" || op == "x");
+        emit(Code{which, place, x, y, aux, checks ? 1u : 0u});
       }
     } else if (answered == Type::Bin128 || given == Type::Bin128) {
       if (comparing) {
@@ -924,6 +928,39 @@ private:
   std::string trouble_;
   uint64_t steps_ = 0;
   unsigned depth_ = 0;
+
+  // Said in the runtime's words, so that all three engines stop for the same
+  // reason in the same characters — but handed back rather than ending the
+  // process, because this engine runs inside the compiler.
+  void cameRoundAndStopped() {
+    trouble_ = xag_why_a_sum_came_round();
+  }
+
+  // A sum that did not fit. Worked out from the two sides rather than read off
+  // the answer, because the answer has already come round by the time it is
+  // here and there is nothing in it that says it did.
+  static bool cameRound(char how, XagInt x, XagInt y, uint32_t aux) {
+    const unsigned width = aux >> 1;
+    const int sign = static_cast<int>(aux & 1);
+    const __uint128_t ux = static_cast<__uint128_t>(x), uy = static_cast<__uint128_t>(y);
+    if (width < 128) {
+      const XagInt raw = how == '+'   ? static_cast<XagInt>(ux + uy)
+                         : how == '-' ? static_cast<XagInt>(ux - uy)
+                                      : static_cast<XagInt>(ux * uy);
+      return xag_int_fit(raw, width, sign) != raw;
+    }
+    if (sign) {
+      const __int128 a = static_cast<__int128>(ux), b = static_cast<__int128>(uy);
+      __int128 out = 0;
+      return how == '+'   ? __builtin_add_overflow(a, b, &out)
+             : how == '-' ? __builtin_sub_overflow(a, b, &out)
+                          : __builtin_mul_overflow(a, b, &out);
+    }
+    __uint128_t out = 0;
+    return how == '+'   ? __builtin_add_overflow(ux, uy, &out)
+           : how == '-' ? __builtin_sub_overflow(ux, uy, &out)
+                        : __builtin_mul_overflow(ux, uy, &out);
+  }
 
   // A sum cut down to its width, wrapping as a machine would: the bits above
   // the width are shifted off the top and the top one that remains is shifted
@@ -1414,16 +1451,28 @@ private:
         break;
 
       case Op::IntAdd:
+        if (one.jump && cameRound('+', read(one.a).whole, read(one.b).whole, one.aux)) {
+          cameRoundAndStopped();
+          return;
+        }
         to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) +
                                               static_cast<__uint128_t>(read(one.b).whole)),
                           one.aux);
         break;
       case Op::IntSub:
+        if (one.jump && cameRound('-', read(one.a).whole, read(one.b).whole, one.aux)) {
+          cameRoundAndStopped();
+          return;
+        }
         to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) -
                                               static_cast<__uint128_t>(read(one.b).whole)),
                           one.aux);
         break;
       case Op::IntMul:
+        if (one.jump && cameRound('x', read(one.a).whole, read(one.b).whole, one.aux)) {
+          cameRoundAndStopped();
+          return;
+        }
         to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) *
                                               static_cast<__uint128_t>(read(one.b).whole)),
                           one.aux);
@@ -1461,16 +1510,28 @@ private:
       case Op::IntNe: to.whole = read(one.a).whole != read(one.b).whole; break;
 
       case Op::IntAddK:
+        if (one.jump && cameRound('+', read(one.a).whole, pool[one.b].whole, one.aux)) {
+          cameRoundAndStopped();
+          return;
+        }
         to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) +
                                               static_cast<__uint128_t>(pool[one.b].whole)),
                           one.aux);
         break;
       case Op::IntSubK:
+        if (one.jump && cameRound('-', read(one.a).whole, pool[one.b].whole, one.aux)) {
+          cameRoundAndStopped();
+          return;
+        }
         to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) -
                                               static_cast<__uint128_t>(pool[one.b].whole)),
                           one.aux);
         break;
       case Op::IntMulK:
+        if (one.jump && cameRound('x', read(one.a).whole, pool[one.b].whole, one.aux)) {
+          cameRoundAndStopped();
+          return;
+        }
         to.whole = narrow(static_cast<XagInt>(static_cast<__uint128_t>(read(one.a).whole) *
                                               static_cast<__uint128_t>(pool[one.b].whole)),
                           one.aux);

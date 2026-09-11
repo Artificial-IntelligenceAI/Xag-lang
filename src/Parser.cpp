@@ -110,8 +110,11 @@ struct Role {
 // be on, and only its parameters can name one.
 const Role kVar{"a `var`", "var", true,
                 {Slot::Mutability, Slot::Ownership, Slot::Overflow, Slot::Unknown}};
+// `wrapping` sits where it does on a `var` — straight after ownership — so one
+// thing has one spelling wherever it is written. A struct's fields are read
+// against this role too, so both say it the same way.
 const Role kParam{"a parameter", "", true,
-                  {Slot::Mutability, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
+                  {Slot::Mutability, Slot::Ownership, Slot::Overflow, Slot::Lifetime}};
 const Role kFn{"a `fn`", "fn", true,
                {Slot::Visibility, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
 const Role kStruct{"a `struct`", "struct", false,

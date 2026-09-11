@@ -51,6 +51,13 @@ Said capture(const xag::Mir &mir, bool quick) {
   xag_set_output(nullptr);
   xag_set_error(nullptr);
   said.leaked = xag_live_allocations() - before;
+  // A program that stops holds whatever it was holding — a stop does not reach
+  // the end of a scope. That is not this run's mistake and it must not become
+  // the next one's: the fast engine asks whether the balance is clear for the
+  // whole process, so anything left here would be reported against whatever
+  // runs after it.
+  if (!said.ran)
+    xag_forget_allocations(before);
 
   std::fflush(sink);
   std::rewind(sink);
@@ -95,7 +102,11 @@ void agree(const std::string &text, int line) {
               << (quick.ran ? "ran" : quick.trouble) << ")\n";
     ++failures;
   }
-  if (quick.leaked != 0) {
+  // Only where it finished. A program that stops holds whatever it was holding,
+  // and letting go of it is what the end of a scope does — which a stop does not
+  // reach. Both engines are untidy in the same way, and that they agree about
+  // the answer is what is being asked here.
+  if (quick.ran && quick.leaked != 0) {
     std::cerr << "FAIL line " << line << ": the fast engine ended holding "
               << quick.leaked << '\n';
     ++failures;
@@ -128,9 +139,12 @@ void onTheOrdinaryThings() {
 }
 
 void onEverySizeAndFamily() {
-  AGREE("START { var.mut.uint8 'n' = [*255*]; set 'n' = ['n' + *1*];"
+  // `wrapping`, because coming round is the point of these two and without the
+  // word both engines stop instead — which they also have to agree about, and
+  // do in `onASumThatDoesNotFit`.
+  AGREE("START { var.mut.wrapping.uint8 'n' = [*255*]; set 'n' = ['n' + *1*];"
         " print.stdout['n' \\n]; }\n");
-  AGREE("START { var.mut.int8 'n' = [*127*]; set 'n' = ['n' + *1*];"
+  AGREE("START { var.mut.wrapping.int8 'n' = [*127*]; set 'n' = ['n' + *1*];"
         " print.stdout['n' \\n]; }\n");
   AGREE("START { var.uint128 'n' = [*340282366920938463463374607431768211455*];"
         " print.stdout['n' \\n]; }\n");
@@ -303,6 +317,25 @@ void onShowingWhatSeveralThingsHold() {
 // were one bit pattern until a `str` was made never to point nowhere, and the
 // backend now spends that: `or-nothing str` is as wide as a `str`. If the
 // distinction were lost, this is where it would show.
+// A sum that does not fit stops, and both engines stop in the same place with
+// the same words. What is written down is refused before it runs, so this asks
+// with a number that came from outside.
+void onASumThatDoesNotFit() {
+  AGREE("START { var.mut.int8 'n' = [*100*];\n"
+        "  loop.range.int8 'i' = [*1*, *10*] { set 'n' = ['n' + *20*]; }\n"
+        "  print.stdout['n' \\n]; }\n");
+  // Holding text when it stops, which neither engine unwinds — a stopped
+  // program is not a tidy one, and they have to be untidy the same way.
+  AGREE("START { var.str 's' = [*abc*];\n"
+        "  var.mut.int8 'n' = [*100*];\n"
+        "  loop.range.int8 'i' = [*1*, *10*] { set 'n' = ['n' + *20*]; }\n"
+        "  print.stdout['s' \\n]; }\n");
+  // And with the word, both come round instead — still together.
+  AGREE("START { var.mut.wrapping.int8 'n' = [*100*];\n"
+        "  loop.range.int8 'i' = [*1*, *10*] { set 'n' = ['n' + *20*]; }\n"
+        "  print.stdout['n' \\n]; }\n");
+}
+
 void onEmptyTextAgainstNoTextAtAll() {
   AGREE("START { var.or-nothing.str 'a' = [**];\n"
         "  when 'a' { is 'x' { print.stdout[str:*here[* 'x' str:*]* \\n]; }\n"
@@ -651,6 +684,7 @@ int main() {
   onBeingOneOfSeveralThings();
   onACaseThatOwnsSomething();
   onShowingWhatSeveralThingsHold();
+  onASumThatDoesNotFit();
   onEmptyTextAgainstNoTextAtAll();
   onSayingWhereAPrintGoes();
   onGroupingNamedThings();

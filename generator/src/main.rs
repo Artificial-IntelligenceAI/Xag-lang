@@ -347,7 +347,16 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
     }
 
     let interpreted = run(Command::new(&settings.xagc).arg("run").arg(&source));
-    if interpreted.status != 0 && interpreted.complained.contains("Rule(s) broken") {
+    // Refused, meaning it never ran. A program that *did* run and then stopped —
+    // a sum that does not fit, a division by zero, a reach past the end — is not
+    // refused, and is one of the most worthwhile things to compare: all three
+    // have to stop in the same place for the same reason. Warnings print
+    // "Rule(s) broken" too and a program carrying one still runs, so the stop
+    // line is what tells the two apart.
+    let stopped = |a: &Answer| a.complained.contains("the program stopped:");
+    if interpreted.status != 0 && interpreted.complained.contains("Rule(s) broken")
+        && !stopped(&interpreted)
+    {
         return Verdict::Refused(interpreted.complained);
     }
     // A case that outstays its welcome, or that runs past what an engine will

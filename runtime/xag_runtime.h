@@ -96,6 +96,16 @@ int64_t xag_str_count(const XagStr *text);
 int64_t xag_str_compare(const XagStr *left, const XagStr *right);
 void xag_str_push(XagStr *text, const XagStr *tail); // grows in place when it can
 void xag_str_drop(XagStr *text);
+// A sum that did not fit, where nothing said it was meant to come round. One
+// function rather than a string in each engine, so that all three stop for the
+// same reason in the same words — which is what makes a stop something the two
+// ways of running can be compared on.
+void xag_sum_came_round(void);
+
+// The same words, for an engine that runs inside the compiler and hands a stop
+// back rather than ending the process it is part of.
+const char *xag_why_a_sum_came_round(void);
+
 void xag_print(const XagStr *text);
 void xag_print_bool(int truth);
 

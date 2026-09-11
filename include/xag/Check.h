@@ -287,6 +287,9 @@ struct Field {
   std::string name;
   Ty type;
   Span span;
+  // Said `wrapping` where the field was declared: a sum written into it is meant
+  // to come round, so nothing checks it while the program runs.
+  bool wraps = false;
 };
 
 struct Shape {
@@ -385,6 +388,10 @@ struct CheckResult {
   // pass below it walked the same path again by matching names against a list,
   // which is the shape of every type bug this compiler has had.
   std::unordered_map<const Stmt *, std::vector<unsigned>> setPath;
+  // Statements whose whole-number answer goes into a name that said `wrapping`.
+  // A sum in one of these is meant to come round, so nothing watches it at
+  // compile time and nothing checks it while the program runs.
+  std::unordered_set<const Stmt *> mayWrap;
   // Reaches into a `many` that were shown to be places it has, so that nothing
   // asks again while the program runs. A `many` is a fixed length once it is
   // made, which is what makes a loop counting to `count[…]` answerable here.
