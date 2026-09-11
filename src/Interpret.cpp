@@ -686,7 +686,8 @@ private:
                       : op == "-"   ? xag_deci_sub(width, x, y)
                       : op == "x"   ? xag_deci_mul(width, x, y)
                       : op == "/"   ? xag_deci_div(width, x, y)
-                      : op == "mod" ? xag_deci_mod(width, x, y)
+                      : op == "mod" ? (value.floored ? xag_deci_mod_floored(width, x, y)
+                                                     : xag_deci_mod(width, x, y))
                                     : xag_deci_pow(width, x, y);
       } else {
         const int32_t order = xag_deci_compare(width, x, y);
@@ -708,7 +709,8 @@ private:
                       : op == "-"   ? xag_bin128_sub(x, y)
                       : op == "x"   ? xag_bin128_mul(x, y)
                       : op == "/"   ? xag_bin128_div(x, y)
-                      : op == "mod" ? xag_bin128_mod(x, y)
+                      : op == "mod" ? (value.floored ? xag_bin128_mod_floored(x, y)
+                                                     : xag_bin128_mod(x, y))
                                     : xag_bin128_pow(x, y);
       } else {
         // -3 says the two cannot be ordered, which only `!==` answers true to.
@@ -735,7 +737,8 @@ private:
         else if (op == "-") answer.real = xag_bin_fit(x - y, width);
         else if (op == "x") answer.real = xag_bin_fit(x * y, width);
         else if (op == "/") answer.real = xag_bin_fit(x / y, width);
-        else if (op == "mod") answer.real = xag_bin_mod(x, y, width);
+        else if (op == "mod") answer.real = value.floored ? xag_bin_mod_floored(x, y, width)
+                                                          : xag_bin_mod(x, y, width);
         else answer.real = xag_bin_pow(x, y, width);
       } else if (op == "==") answer.number = x == y;
       else if (op == "!==") answer.number = x != y;
@@ -785,8 +788,10 @@ private:
           return Value{};
         }
       }
-      else if (op == "/") answer.number = xag_int_div(x, y, width, sign);
-      else if (op == "mod") answer.number = xag_int_mod(x, y, width, sign);
+      else if (op == "/") answer.number = value.floored ? xag_int_div_floored(x, y, width, sign)
+                                                        : xag_int_div(x, y, width, sign);
+      else if (op == "mod") answer.number = value.floored ? xag_int_mod_floored(x, y, width, sign)
+                                                          : xag_int_mod(x, y, width, sign);
       else if (op == "^") answer.number = xag_int_pow(x, y, width, sign);
       else if (op == "and") answer.number = (x != 0) && (y != 0);
       else if (op == "or") answer.number = (x != 0) || (y != 0);

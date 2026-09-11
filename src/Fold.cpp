@@ -352,9 +352,11 @@ private:
     else if (op == "x")
       folded = spelledOut(xag_int_fit(static_cast<XagInt>(ux * uy), width, sign));
     else if (op == "/")
-      folded = spelledOut(xag_int_div(x, y, width, sign));
+      folded = spelledOut(value.floored ? xag_int_div_floored(x, y, width, sign)
+                                        : xag_int_div(x, y, width, sign));
     else if (op == "mod")
-      folded = spelledOut(xag_int_mod(x, y, width, sign));
+      folded = spelledOut(value.floored ? xag_int_mod_floored(x, y, width, sign)
+                                        : xag_int_mod(x, y, width, sign));
     else if (op == "^")
       folded = spelledOut(xag_int_pow(x, y, width, sign));
     else

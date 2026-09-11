@@ -389,15 +389,21 @@ impl<'a> Writer<'a> {
         // the right side of an `and` runs whatever the left said, so a call
         // there prints, and a division there by zero stops — and all three
         // engines have to do the same.
-        let logic = |rng: &mut Rng| {
-            if rng.chance(50) { "logic = \"asks-both\"\n" } else { "logic = \"stops-early\"\n" }
+        // `division` is another: under `floored` a negative quotient rounds
+        // the other way and a remainder takes the divisor's sign, in every
+        // number family, and the three engines each have their own way of
+        // doing that.
+        let defaults = |rng: &mut Rng| {
+            let mut said = String::from("[defaults]\n");
+            said.push_str(if rng.chance(50) { "logic = \"asks-both\"\n" } else { "logic = \"stops-early\"\n" });
+            said.push_str(if rng.chance(50) { "division = \"floored\"\n" } else { "division = \"truncated\"\n" });
+            said
         };
-        self.manifest.push_str("[defaults]\n");
-        self.manifest.push_str(logic(self.rng));
+        self.manifest.push_str(&defaults(self.rng));
         if self.rng.chance(40) {
             self.manifest.push_str("\n[uses]\npaths = [\"lib\"]\n");
-            self.library_manifest.push_str("[unit]\nname = \"lib\"\ncalled = \"lib\"\n\n[defaults]\n");
-            self.library_manifest.push_str(logic(self.rng));
+            self.library_manifest.push_str("[unit]\nname = \"lib\"\ncalled = \"lib\"\n\n");
+            self.library_manifest.push_str(&defaults(self.rng));
             let start = self.out.len();
             self.in_library = true;
             let exported = self.rng.below(3) + 1;

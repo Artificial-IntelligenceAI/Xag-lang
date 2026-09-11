@@ -246,6 +246,15 @@ add_test(NAME units_settings_are_per_unit
                  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-asking/main.xag
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
 
+# The same for `division`: a library on `floored` imported by a program on the
+# default, both dividing the same numbers, in every number family. `written`
+# is folded before anything runs, under the library's setting.
+add_test(NAME units_division_is_per_unit
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-flooring/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+
 # A mistake inside a library points into the library's file.
 add_test(NAME units_diagnostic_points_into_library
          COMMAND ${CMAKE_COMMAND}

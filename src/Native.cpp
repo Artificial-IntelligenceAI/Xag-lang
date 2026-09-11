@@ -666,6 +666,7 @@ private:
     auto *f64 = builder_.getDoubleTy();
     add("xag_print_bin", voidTy, {f64, i32});
     add("xag_bin_mod", f64, {f64, f64, i32});
+    add("xag_bin_mod_floored", f64, {f64, f64, i32});
     add("xag_bin_pow", f64, {f64, f64, i32});
     add("xag_print_bin128", voidTy, {i128});
     add("xag_bin128_compare", i32, {i128, i128});
@@ -675,9 +676,10 @@ private:
     add("xag_print_deci", voidTy, {i32, i128});
     add("xag_deci_compare", i32, {i32, i128, i128});
     for (const char *op : {"xag_deci_add", "xag_deci_sub", "xag_deci_mul",
-                           "xag_deci_div", "xag_deci_mod", "xag_deci_pow"})
+                           "xag_deci_div", "xag_deci_mod", "xag_deci_mod_floored",
+                           "xag_deci_pow"})
       add(op, i128, {i32, i128, i128});
-    for (const char *op : {"xag_bin128_mod", "xag_bin128_pow"})
+    for (const char *op : {"xag_bin128_mod", "xag_bin128_mod_floored", "xag_bin128_pow"})
       add(op, i128, {i128, i128});
     for (const char *op : {"xag_int_div", "xag_int_mod", "xag_int_pow"})
       add(op, i128, {i128, i128, i32, i32});
@@ -1639,7 +1641,8 @@ private:
                              : op == "-"   ? "xag_deci_sub"
                              : op == "x"   ? "xag_deci_mul"
                              : op == "/"   ? "xag_deci_div"
-                             : op == "mod" ? "xag_deci_mod"
+                             : op == "mod" ? (value.floored ? "xag_deci_mod_floored"
+                                                             : "xag_deci_mod")
                                            : "xag_deci_pow";
         return builder_.CreateTrunc(builder_.CreateCall(runtime_[called], {say, x, y}),
                                     typeFor(typing(value.type)));
@@ -1666,7 +1669,8 @@ private:
                              : op == "-"   ? "xag_bin128_sub"
                              : op == "x"   ? "xag_bin128_mul"
                              : op == "/"   ? "xag_bin128_div"
-                             : op == "mod" ? "xag_bin128_mod"
+                             : op == "mod" ? (value.floored ? "xag_bin128_mod_floored"
+                                                             : "xag_bin128_mod")
                                            : "xag_bin128_pow";
         return builder_.CreateCall(runtime_[called], {left, right});
       }
@@ -1701,7 +1705,8 @@ private:
       if (op == ">==") return builder_.CreateFCmpOGE(left, right);
       auto *wide = builder_.getDoubleTy();
       auto *answered = builder_.CreateCall(
-          runtime_[op == "mod" ? "xag_bin_mod" : "xag_bin_pow"],
+          runtime_[op == "mod" ? (value.floored ? "xag_bin_mod_floored" : "xag_bin_mod")
+                               : "xag_bin_pow"],
           {builder_.CreateFPExt(left, wide), builder_.CreateFPExt(right, wide),
            builder_.getInt32(widthOf(given))});
       return builder_.CreateFPTrunc(answered, typeFor(typing(value.type)));
@@ -1786,8 +1791,20 @@ private:
       auto *wraps = builder_.CreateICmpEQ(
           right, llvm::ConstantInt::getSigned(right->getType(), -1));
       auto *by = builder_.CreateSelect(wraps, one, right);
-      auto *usual = op == "/" ? builder_.CreateSDiv(left, by)
-                              : builder_.CreateSRem(left, by);
+      llvm::Value *usual = op == "/" ? builder_.CreateSDiv(left, by)
+                                     : builder_.CreateSRem(left, by);
+      // `division = "floored"`: the instruction truncates, and the answer is
+      // one step further down when what is left over disagrees with the
+      // divisor about its sign. Over -1 nothing is left over, so the pair
+      // kept off the instruction above is untouched by this.
+      if (value.floored) {
+        auto *left_over = builder_.CreateSRem(left, by);
+        auto *disagree = builder_.CreateICmpSLT(builder_.CreateXor(left_over, by), none);
+        auto *adjust = builder_.CreateAnd(disagree, builder_.CreateICmpNE(left_over, none));
+        auto *stepped = op == "/" ? builder_.CreateSub(usual, one)
+                                  : builder_.CreateAdd(usual, by);
+        usual = builder_.CreateSelect(adjust, stepped, usual);
+      }
       auto *instead = op == "/" ? builder_.CreateSub(none, left)
                                 : llvm::ConstantInt::get(left->getType(), 0);
       return builder_.CreateSelect(wraps, instead, usual);

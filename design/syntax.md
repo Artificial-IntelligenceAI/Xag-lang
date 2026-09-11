@@ -308,6 +308,32 @@ parser as ordinary words, and position tells them apart.
 
 Those five words are reserved. No function may be named one of them.
 
+### `/` and `mod` round the way the unit said
+
+`division = "truncated"` is the default in `Xag-Config.toml`: the quotient
+rounds toward zero and the remainder takes the dividend's sign, which is what
+the processor's instruction does. `floored` rounds the quotient toward negative
+infinity and the remainder takes the divisor's sign, which is what makes
+`'n' mod *k*` land in `0..k` for a positive `k`:
+
+```
+                 truncated      floored
+*-7* / *2*          -3            -4
+*-7* mod *2*        -1             1
+*7* mod *-2*         1            -1
+*-7.5* mod *2.0*    -1.5           0.5
+```
+
+It reaches every number family: a `bin` and a `deci` have only `mod` to round,
+and under `floored` that remainder follows the divisor too, as Python's `%`
+does. Unsigned numbers, exact quotients and the one quotient that does not fit
+answer the same either way. A division the compiler works out before anything
+runs — a place in a `many` written as `*-9* / *4*` — is worked out under the
+setting as well.
+
+Per unit, like every `[defaults]` setting: a library's `mod` does what the
+library's manifest says, whichever program calls it (`design/units.md`).
+
 ### Precedence is kept where mathematics settled it, and invented nowhere
 
 | | |

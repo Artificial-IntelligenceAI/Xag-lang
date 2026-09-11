@@ -7,6 +7,7 @@
 #include "unicode_cases.h"
 
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -177,6 +178,31 @@ void arithmeticIsWrittenOnce() {
   // The one quotient that does not fit, wrapped like every other.
   CHECK(xag_int_div(INT64_MIN, -1, 64, 1) == INT64_MIN);
   CHECK(xag_int_mod(INT64_MIN, -1, 64, 1) == 0);
+
+  // `division = "floored"`: toward negative infinity, remainder follows the
+  // divisor. Exact quotients, unsigned numbers and the one over -1 are the same
+  // either way.
+  CHECK(xag_int_div_floored(-7, 2, 64, 1) == -4);
+  CHECK(xag_int_mod_floored(-7, 2, 64, 1) == 1);
+  CHECK(xag_int_div_floored(7, -2, 64, 1) == -4);
+  CHECK(xag_int_mod_floored(7, -2, 64, 1) == -1);
+  CHECK(xag_int_div_floored(-7, -2, 64, 1) == 3);
+  CHECK(xag_int_mod_floored(-7, -2, 64, 1) == -1);
+  CHECK(xag_int_div_floored(-6, 2, 64, 1) == -3);
+  CHECK(xag_int_mod_floored(-6, 2, 64, 1) == 0);
+  CHECK(xag_int_div_floored(255, 2, 8, 0) == 127);
+  CHECK(xag_int_mod_floored(255, 4, 8, 0) == 3);
+  CHECK(xag_int_div_floored(INT64_MIN, -1, 64, 1) == INT64_MIN);
+  CHECK(xag_int_mod_floored(INT64_MIN, -1, 64, 1) == 0);
+  CHECK(xag_int_div_floored(-128, 3, 8, 1) == -43);
+  CHECK(xag_int_mod_floored(-128, 3, 8, 1) == 1);
+  // The same on a `bin`, and a zero remainder takes the divisor's sign.
+  CHECK(xag_bin_mod_floored(-7.5, 2.0, 64) == 0.5);
+  CHECK(xag_bin_mod_floored(7.5, -2.0, 64) == -0.5);
+  CHECK(xag_bin_mod_floored(-7.5, -2.0, 64) == -1.5);
+  CHECK(!std::signbit(xag_bin_mod_floored(-6.0, 2.0, 64)));
+  CHECK(std::signbit(xag_bin_mod_floored(6.0, -2.0, 64)));
+  CHECK(xag_bin_mod(-7.5, 2.0, 64) == -1.5);
 
   // By squaring, in one place.
   CHECK(xag_int_pow(2, 10, 64, 1) == 1024);

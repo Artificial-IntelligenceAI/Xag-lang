@@ -10,3 +10,10 @@ bench/out/
 # check that built every example and a `git add -A` that believed it.
 examples/*
 !examples/*.xag
+
+# The same under tests/units: `xagc build` on a test program leaves the binary
+# beside its source, and two of those were committed the same way.
+tests/units/*/*
+!tests/units/*/*.xag
+!tests/units/*/*.toml
+!tests/units/*/*.txt

@@ -36,6 +36,8 @@
 # remainder follows the dividend, which is what a processor does. `floored`
 # rounds toward negative infinity and the remainder follows the divisor, which
 # is what a mathematician means and what makes `n mod k` always land in `0..k`.
+# Every number family: a `bin` or `deci` `mod` follows the divisor too under
+# `floored`, as Python's `%` does.
 division = "truncated"
 
 # Gone, and not replaced. A sum that does not fit stops the program, and the one
@@ -128,8 +130,8 @@ decimal = "software"
 # `fast-interpreter` runs bytecode. `native` is compiled ahead of time.
 engine = "test-interpreter"
 
-# `decimal` and `logic` are read; the rest are decided but not yet asked about,
-# because nothing branches on them yet. The file is looked for beside the
+# `decimal`, `logic` and `division` are read; `characters` and `no-number` are
+# decided but not yet asked about, because nothing branches on them yet. The file is looked for beside the
 # source and then upward, so a project decides for every file under it. A
 # `[defaults]` setting is per unit: a library's code runs under the library's
 # manifest whichever program calls it. A single run may

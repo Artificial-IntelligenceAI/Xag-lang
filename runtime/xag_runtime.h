@@ -143,6 +143,13 @@ XagInt xag_int_fit(XagInt value, uint32_t width, int32_t is_signed);
 
 XagInt xag_int_div(XagInt a, XagInt b, uint32_t width, int32_t is_signed);
 XagInt xag_int_mod(XagInt a, XagInt b, uint32_t width, int32_t is_signed);
+// The same two under `division = "floored"`: the quotient rounds toward
+// negative infinity and the remainder takes the divisor's sign, so `n mod k`
+// lands in `0..k` for a positive `k`. Unsigned numbers answer the same either
+// way. The `_floored` names are separate functions rather than a flag, so that
+// a compiled program calls the one it was compiled for and nothing branches.
+XagInt xag_int_div_floored(XagInt a, XagInt b, uint32_t width, int32_t is_signed);
+XagInt xag_int_mod_floored(XagInt a, XagInt b, uint32_t width, int32_t is_signed);
 XagInt xag_int_pow(XagInt base, XagInt exponent, uint32_t width, int32_t is_signed);
 void xag_print_int(XagInt value, uint32_t width, int32_t is_signed);
 
@@ -154,6 +161,9 @@ void xag_print_int(XagInt value, uint32_t width, int32_t is_signed);
 // and `not-a-number` are values of these types rather than accidents of them.
 double xag_bin_fit(double value, uint32_t width);
 double xag_bin_mod(double a, double b, uint32_t width);
+// `mod` under `division = "floored"`: the remainder takes the divisor's sign.
+// A zero remainder takes it too, as IEEE's `fmod` gives it the dividend's.
+double xag_bin_mod_floored(double a, double b, uint32_t width);
 double xag_bin_pow(double base, double exponent, uint32_t width);
 void xag_print_bin(double value, uint32_t width);
 
@@ -170,6 +180,7 @@ XagBin128 xag_bin128_sub(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_mul(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_div(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_mod(XagBin128 a, XagBin128 b);
+XagBin128 xag_bin128_mod_floored(XagBin128 a, XagBin128 b);
 
 // A power takes a whole-number exponent. Xag has no transcendental functions,
 // so raising to a fraction has no answer to give and says so.
@@ -220,6 +231,7 @@ XagDeci xag_deci_sub(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_mul(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_div(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_mod(uint32_t width, XagDeci a, XagDeci b);
+XagDeci xag_deci_mod_floored(uint32_t width, XagDeci a, XagDeci b);
 XagDeci xag_deci_pow(uint32_t width, XagDeci base, XagDeci exponent);
 XagDeci xag_deci_negate(uint32_t width, XagDeci value);
 int32_t xag_deci_compare(uint32_t width, XagDeci a, XagDeci b);

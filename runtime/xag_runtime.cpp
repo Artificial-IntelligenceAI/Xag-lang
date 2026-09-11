@@ -356,6 +356,29 @@ XagInt xag_int_mod(XagInt a, XagInt b, uint32_t width, int32_t is_signed) {
   return xag_int_fit(a % b, width, is_signed);
 }
 
+// Floored: worked out as the truncated quotient and remainder, and moved one
+// step toward negative infinity when the remainder is not zero and disagrees
+// with the divisor about its sign. The one quotient that does not fit is the
+// same one either way — there is no remainder to disagree.
+XagInt xag_int_div_floored(XagInt a, XagInt b, uint32_t width, int32_t is_signed) {
+  if (!is_signed || b == -1 || b == 0)
+    return xag_int_div(a, b, width, is_signed);
+  XagInt quotient = a / b;
+  const XagInt remainder = a % b;
+  if (remainder != 0 && ((remainder < 0) != (b < 0)))
+    --quotient;
+  return xag_int_fit(quotient, width, is_signed);
+}
+
+XagInt xag_int_mod_floored(XagInt a, XagInt b, uint32_t width, int32_t is_signed) {
+  if (!is_signed || b == -1 || b == 0)
+    return xag_int_mod(a, b, width, is_signed);
+  XagInt remainder = a % b;
+  if (remainder != 0 && ((remainder < 0) != (b < 0)))
+    remainder += b;
+  return xag_int_fit(remainder, width, is_signed);
+}
+
 // By squaring, in one place, so that no engine writes this loop a second time.
 XagInt xag_int_pow(XagInt base, XagInt exponent, uint32_t width, int32_t is_signed) {
   if (is_signed && exponent < 0)
@@ -384,6 +407,21 @@ double xag_bin_fit(double value, uint32_t width) {
 
 double xag_bin_mod(double a, double b, uint32_t width) {
   return xag_bin_fit(std::fmod(a, b), width);
+}
+
+// `fmod` and then one adjustment, which is how Python does it: adding the
+// divisor to a remainder that disagrees with it about sign. That sum can round
+// — a remainder of -1 against a divisor of 1e30 comes back as 1e30 — and is
+// left to, because the exact answer is not a `bin` either.
+double xag_bin_mod_floored(double a, double b, uint32_t width) {
+  double remainder = std::fmod(a, b);
+  if (remainder != 0) {
+    if ((remainder < 0) != (b < 0))
+      remainder += b;
+  } else if (std::isfinite(b)) {
+    remainder = std::copysign(0.0, b);
+  }
+  return xag_bin_fit(remainder, width);
 }
 
 // A power takes a whole-number exponent, in every format alike. Xag has no

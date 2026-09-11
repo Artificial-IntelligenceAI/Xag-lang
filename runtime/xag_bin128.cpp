@@ -332,6 +332,18 @@ XagBin128 xag_bin128_mod(XagBin128 a, XagBin128 b) {
   return left;
 }
 
+// Floored: the truncated remainder, moved by one divisor when it disagrees with
+// the divisor about sign, as `xag_bin_mod_floored` does at 64 bits.
+XagBin128 xag_bin128_mod_floored(XagBin128 a, XagBin128 b) {
+  const XagBin128 remainder = xag_bin128_mod(a, b);
+  const Taken r = take(remainder), y = take(b);
+  if (r.kind == Kind::NotANumber || r.kind == Kind::Infinity)
+    return remainder;
+  if (r.kind == Kind::Zero || r.significand == 0)
+    return y.kind == Kind::Finite ? zero(y.sign) : remainder;
+  return r.sign != y.sign ? xag_bin128_add(remainder, b) : remainder;
+}
+
 // Whether a number is whole, and what whole number it is.
 bool wholeValue(const Taken &x, long long &out) {
   if (x.kind != Kind::Finite)

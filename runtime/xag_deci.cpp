@@ -594,6 +594,19 @@ XagDeci xag_deci_mod(uint32_t width, XagDeci a, XagDeci b) {
   return put(width, x.sign, left, under);
 }
 
+// Floored: the remainder above, moved by one divisor when it disagrees with
+// the divisor about sign. A zero remainder takes the divisor's sign and keeps
+// its own exponent.
+XagDeci xag_deci_mod_floored(uint32_t width, XagDeci a, XagDeci b) {
+  const XagDeci remainder = xag_deci_mod(width, a, b);
+  const Taken r = take(width, remainder), y = take(width, b);
+  if (r.kind != Kind::Finite)
+    return remainder;
+  if (r.coefficient == 0)
+    return y.kind == Kind::Finite ? put(width, y.sign, U256{}, r.exponent) : remainder;
+  return r.sign != y.sign ? xag_deci_add(width, remainder, b) : remainder;
+}
+
 XagDeci xag_deci_pow(uint32_t width, XagDeci base, XagDeci exponent) {
   const Shape shape = shapeOf(width);
   const Taken e = take(width, exponent);

@@ -170,6 +170,7 @@ struct Param {
 // — every test, a lone program — gets exactly what an empty manifest would.
 struct Settings {
   bool asksBoth = false; // logic = "asks-both": `and` and `or` ask both sides
+  bool floored = false;  // division = "floored": `/` rounds down, `mod` follows the divisor
 };
 
 struct Item {

@@ -149,6 +149,11 @@ struct RValue {
   // where nobody said it should is a bug, and the only reason it was not
   // checked before is that the check costs something at run time.
   bool wraps = false;
+  // Binary `/` and `mod`: the unit this was written in said `division =
+  // "floored"`, so the quotient rounds toward negative infinity and the
+  // remainder takes the divisor's sign. Carried on the operation because a
+  // setting is the unit's, and one program holds operations from several.
+  bool floored = false;
 };
 
 enum class StatementKind {

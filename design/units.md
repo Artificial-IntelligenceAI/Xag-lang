@@ -168,7 +168,7 @@ is refused (`E0608`), in the program and in a library alike.
 
 - **Constants across a unit.** `t.'LIMIT'` — how a program spells a library's
   constant — has no syntax yet. Functions and types do.
-- **Settings per unit.** Built for `logic`; `division`, `characters` and
+- **Settings per unit.** Built for `logic` and `division`; `characters` and
   `no-number` are decided in the manifest and nothing reads them yet. The
   program's override — its settings winning everywhere, or a library whose
   settings differ refused — has no spelling yet.
@@ -211,3 +211,12 @@ is refused (`E0608`), in the program and in a library alike.
   said nothing, and the test checks the output rather than only that engines
   agree. The oracle tosses `logic` per unit and writes `and`/`or` now, which it
   never had.
+- **2026-09-11, `division`** — read per unit and carried on the `/` and `mod`
+  operation (`RValue.floored`), so the folding pass, both interpreters and the
+  native code each answer the unit's way. The runtime gained `_floored`
+  twins of `xag_int_div`, `xag_int_mod`, `xag_bin_mod`, `xag_bin128_mod` and
+  `xag_deci_mod`; native whole-number division stays inline and adjusts the
+  instruction's answer by one when the remainder disagrees with the divisor.
+  `tests/units/flooring` is a library on `floored` under a program on the
+  default, checked against expected output on all three engines. The oracle
+  tosses `division` per unit too.

@@ -477,7 +477,7 @@ private:
       emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Binary, e.text, {}, 0,
                             {std::move(left), std::move(right)}, typeRef(type),
-                            false, wrapsHere_}});
+                            false, wrapsHere_, settings_.floored}});
       return into;
     }
 

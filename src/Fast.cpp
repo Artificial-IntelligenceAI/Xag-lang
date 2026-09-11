@@ -96,6 +96,7 @@ struct Code {
   // Where a fused comparison goes when it is false. On `IntAdd`, `IntSub` and
   // `IntMul` and their pooled forms it means something else and nothing jumps:
   // 1 says the sum is checked, because nothing said it was meant to come round.
+  // On `IntDiv`, `IntMod` and every `Mod`, 1 says the unit said `floored`.
   uint32_t jump = 0;
 };
 
@@ -746,7 +747,8 @@ private:
                          : op == "mod" ? Op::IntMod
                                        : Op::IntPow;
         const bool checks = !value.wraps && (op == "+" || op == "-" || op == "x");
-        emit(Code{which, place, x, y, aux, checks ? 1u : 0u});
+        const bool floored = value.floored && (op == "/" || op == "mod");
+        emit(Code{which, place, x, y, aux, (checks || floored) ? 1u : 0u});
       }
     } else if (answered == Type::Bin128 || given == Type::Bin128) {
       if (comparing) {
@@ -758,7 +760,7 @@ private:
                          : op == "/"   ? Op::WideDiv
                          : op == "mod" ? Op::WideMod
                                        : Op::WidePow;
-        emit(Code{which, place, x, y, 0});
+        emit(Code{which, place, x, y, 0, value.floored ? 1u : 0u});
       }
     } else if (isDecimal(answered) || isDecimal(given)) {
       const uint32_t width = widthOf(isDecimal(working) ? working : given);
@@ -773,7 +775,7 @@ private:
                          : op == "/"   ? Op::DeciDiv
                          : op == "mod" ? Op::DeciMod
                                        : Op::DeciPow;
-        emit(Code{which, place, x, y, width});
+        emit(Code{which, place, x, y, width, value.floored ? 1u : 0u});
       }
     } else {
       const uint32_t width = widthOf(isBinary(working) ? working : given);
@@ -788,7 +790,7 @@ private:
                          : op == "/"   ? Op::RealDiv
                          : op == "mod" ? Op::RealMod
                                        : Op::RealPow;
-        emit(Code{which, place, x, y, width});
+        emit(Code{which, place, x, y, width, value.floored ? 1u : 0u});
       }
     }
     if (through)
@@ -1478,10 +1480,12 @@ private:
                           one.aux);
         break;
       case Op::IntDiv:
-        to.whole = xag_int_div(read(one.a).whole, read(one.b).whole, one.aux >> 1, one.aux & 1);
+        to.whole = (one.jump ? xag_int_div_floored : xag_int_div)(
+            read(one.a).whole, read(one.b).whole, one.aux >> 1, one.aux & 1);
         break;
       case Op::IntMod:
-        to.whole = xag_int_mod(read(one.a).whole, read(one.b).whole, one.aux >> 1, one.aux & 1);
+        to.whole = (one.jump ? xag_int_mod_floored : xag_int_mod)(
+            read(one.a).whole, read(one.b).whole, one.aux >> 1, one.aux & 1);
         break;
       case Op::IntPow:
         to.whole = xag_int_pow(read(one.a).whole, read(one.b).whole, one.aux >> 1, one.aux & 1);
@@ -1599,7 +1603,10 @@ private:
       case Op::RealSub: to.real = xag_bin_fit(read(one.a).real - read(one.b).real, one.aux); break;
       case Op::RealMul: to.real = xag_bin_fit(read(one.a).real * read(one.b).real, one.aux); break;
       case Op::RealDiv: to.real = xag_bin_fit(read(one.a).real / read(one.b).real, one.aux); break;
-      case Op::RealMod: to.real = xag_bin_mod(read(one.a).real, read(one.b).real, one.aux); break;
+      case Op::RealMod:
+        to.real = (one.jump ? xag_bin_mod_floored : xag_bin_mod)(read(one.a).real,
+                                                                 read(one.b).real, one.aux);
+        break;
       case Op::RealPow: to.real = xag_bin_pow(read(one.a).real, read(one.b).real, one.aux); break;
       case Op::RealLt: to.whole = read(one.a).real < read(one.b).real; break;
       case Op::RealGt: to.whole = read(one.a).real > read(one.b).real; break;
@@ -1612,7 +1619,10 @@ private:
       case Op::WideSub: to.whole = xag_bin128_sub(read(one.a).whole, read(one.b).whole); break;
       case Op::WideMul: to.whole = xag_bin128_mul(read(one.a).whole, read(one.b).whole); break;
       case Op::WideDiv: to.whole = xag_bin128_div(read(one.a).whole, read(one.b).whole); break;
-      case Op::WideMod: to.whole = xag_bin128_mod(read(one.a).whole, read(one.b).whole); break;
+      case Op::WideMod:
+        to.whole = (one.jump ? xag_bin128_mod_floored : xag_bin128_mod)(read(one.a).whole,
+                                                                        read(one.b).whole);
+        break;
       case Op::WidePow: to.whole = xag_bin128_pow(read(one.a).whole, read(one.b).whole); break;
       case Op::WideCompare:
         to.whole = xag_bin128_compare(read(one.a).whole, read(one.b).whole);
@@ -1622,7 +1632,10 @@ private:
       case Op::DeciSub: to.whole = xag_deci_sub(one.aux, read(one.a).whole, read(one.b).whole); break;
       case Op::DeciMul: to.whole = xag_deci_mul(one.aux, read(one.a).whole, read(one.b).whole); break;
       case Op::DeciDiv: to.whole = xag_deci_div(one.aux, read(one.a).whole, read(one.b).whole); break;
-      case Op::DeciMod: to.whole = xag_deci_mod(one.aux, read(one.a).whole, read(one.b).whole); break;
+      case Op::DeciMod:
+        to.whole = (one.jump ? xag_deci_mod_floored : xag_deci_mod)(one.aux, read(one.a).whole,
+                                                                    read(one.b).whole);
+        break;
       case Op::DeciPow: to.whole = xag_deci_pow(one.aux, read(one.a).whole, read(one.b).whole); break;
       case Op::DeciCompare:
         to.whole = xag_deci_compare(one.aux, read(one.a).whole, read(one.b).whole);
