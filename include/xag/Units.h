@@ -82,11 +82,12 @@ const Unit *unitNamed(const UnitsResult &units, const std::string &name);
 // unit is.
 void qualify(std::vector<Program> &files, const Unit &unit);
 
-// Writes what a unit's manifest decided onto every item of one of its files.
-// Done to the program's own file as much as to a library's, because the
-// program is a unit too; done here rather than in the parser because the
-// parser reads one file and a setting is about a directory of them.
-void applySettings(Program &file, const Unit &unit);
+// Writes what a unit's manifest decided onto every item of one of its files,
+// and which unit and file the item came from. Done to the program's own file
+// as much as to a library's, because the program is a unit too; done here
+// rather than in the parser because the parser reads one file and a setting is
+// about a directory of them. `file` is the file's place in `unit.files`.
+void applySettings(Program &file, const Unit &unit, unsigned which = 0);
 
 // Every place a file reaches into a library — `t.twice[…]`, `var.t.point`,
 // `t.uer:*…*` — checked against the file's own `import` lines. A file uses what

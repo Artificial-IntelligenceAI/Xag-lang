@@ -297,8 +297,11 @@ public:
     scopes_.emplace_back();
     collectShapes();
     collect();
-    for (const Item &item : program_.items)
+    for (const Item &item : program_.items) {
+      here_ = &item;
       body(item);
+    }
+    here_ = nullptr;
     return std::move(result_);
   }
 
@@ -310,6 +313,24 @@ private:
   unsigned insideUnsafe_ = 0;
   std::vector<std::unordered_map<std::string, Symbol>> scopes_;
   std::unordered_map<std::string, Signature> functions_;
+  // The operator functions, by what they answer and for which type. What is
+  // kept is enough to say whether a use site may see one: an exported answer
+  // is seen everywhere, a `program` one across its unit, a `file` one from its
+  // own file. A type is answered only by the unit that declared it.
+  struct Answered {
+    std::string name;   // the function, as everything below calls it
+    Ty result;
+    std::string unit;
+    unsigned file = 0;
+    bool exported = false;
+    bool acrossUnit = false; // `program`
+    Span span;
+  };
+  std::unordered_map<std::string, Answered> operators_;
+  // Which unit and file each declared type came from, by the type's name.
+  std::unordered_map<std::string, std::pair<std::string, unsigned>> typeHomes_;
+  // The item whose body is being read, for what it may see.
+  const Item *here_ = nullptr;
   std::vector<std::string> names_;     // struct names, indexed the way `Ty` names them
   std::vector<std::string> sumsNamed_; // and the same for `one-of` names
   Ty giving_ = Type::Nothing;
@@ -711,9 +732,17 @@ private:
     case ExprKind::Borrow:
     case ExprKind::Call:
     case ExprKind::Index:
+    case ExprKind::Field: // `'w'.inner` is whatever the field was declared as
       return true;
     case ExprKind::Group:
       return !e.children.empty() && selfTyped(*e.children[0]);
+    // `'a' + 'b'` says what it is when both sides do — which is how a struct
+    // that answers `+` is made from two others where a struct goes.
+    case ExprKind::Binary:
+      for (const ExprPtr &side : e.children)
+        if (!side || !selfTyped(*side))
+          return false;
+      return !e.children.empty();
     default:
       return false;
     }
@@ -1099,12 +1128,15 @@ private:
       const bool isSum = item.kind == ItemKind::OneOf;
       if (item.kind != ItemKind::Struct && !isSum)
         continue;
-      if (typeNamed(item.name) != Type::Unknown || item.name == "nothing") {
+      // Refused, and still given a shape: the fields are read below by walking
+      // the items again in the same order, and a struct with no shape put the
+      // next one's fields into this one's slot and ran off the end. The
+      // program is refused either way; it was the compiler that fell over.
+      if (typeNamed(item.name) != Type::Unknown || item.name == "nothing")
         complain(item.nameSpan, "E0524",
                  "`" + item.name + "` is already a type.",
                  {"a word names one thing for the whole file"});
-        continue;
-      }
+      typeHomes_[item.name] = {item.unit, item.file};
       bool taken = false;
       for (const Shape &already : result_.shapes)
         if (already.name == item.name)
@@ -1268,13 +1300,187 @@ private:
           signature.params.push_back(held);
           result_.parameters[&param] = held;
         }
-        if (functions_.count(item.name))
+        if (!item.op.empty()) {
+          // Says its own thing about a second answer for the same type.
+          operatorFunction(item, signature);
+          if (!functions_.count(item.name))
+            functions_[item.name] = std::move(signature);
+        } else if (functions_.count(item.name))
           complain(item.nameSpan, "E0502", "`" + item.name + "` is already a function.",
                    {"a word names one function for the whole file"});
         else
           functions_[item.name] = std::move(signature);
       }
     }
+  }
+
+  // ---- what a type answers
+
+  static bool comparisonWord(const std::string &op) {
+    return op == "<" || op == ">" || op == "<==" || op == ">==" || op == "==" ||
+           op == "!==";
+  }
+
+  // The key an operator is looked up by: the word, and which declared type.
+  static std::string operatorKey(const std::string &op, Ty type) {
+    return op + (type.kind == Type::OneOf ? "\to" : "\ts") + std::to_string(type.named);
+  }
+
+  const std::string &typeNameOf(Ty type) const {
+    static const std::string none;
+    if (type.kind == Type::Struct && type.named < names_.size())
+      return names_[type.named];
+    if (type.kind == Type::OneOf && type.named < sumsNamed_.size())
+      return sumsNamed_[type.named];
+    return none;
+  }
+
+  // `fn.uer '+' [loan.uer 'a', loan.uer 'b']`, checked for shape and written
+  // down. Both sides are lent, because an operator's operands are written bare
+  // and a transfer is spelled where it happens (`E0406`) — there is nowhere in
+  // `'x' + 'y'` to write `move`. Arithmetic answers the type; a comparison
+  // answers `bool`; `convert-to-str` takes one and answers `str`. Only the
+  // unit that declared the type may answer for it: a `+` on `big.uer` written
+  // by an importer would be found by the library's own bodies, which never
+  // asked for it.
+  void operatorFunction(const Item &item, const Signature &signature) {
+    const std::string &op = item.op;
+    const bool converts = op == "convert-to-str";
+    const bool comparing = comparisonWord(op);
+    const auto refuse = [&](std::string what, std::vector<std::string> tips = {}) {
+      complain(item.nameSpan, "E0611", std::move(what),
+               {"an operator is answered by a function of the shape the operator has"},
+               std::move(tips));
+    };
+    const std::string shape =
+        converts ? "`fn.str 'convert-to-str' [loan.T 'v']`"
+                 : "`fn." + std::string(comparing ? "bool" : "T") + " '" + op +
+                       "' [loan.T 'a', loan.T 'b']`";
+    const unsigned wants = converts ? 1 : 2;
+    if (signature.params.size() != wants) {
+      refuse("`'" + op + "'` takes " + std::to_string(wants) + ", and this takes " +
+                 std::to_string(signature.params.size()) + ".",
+             {shape + ", for a declared type `T`."});
+      return;
+    }
+    const Ty type = signature.params[0];
+    for (const Ty &param : signature.params) {
+      if (param.kind != Type::Struct && param.kind != Type::OneOf) {
+        refuse("`'" + op + "'` is answered for a declared type, and this takes a `" +
+                   std::string(name(param)) + "`.",
+               {shape + ". What `" + op + "` does on a built-in type is the language's."});
+        return;
+      }
+      if (param.held != Held::Loan || param.mayBeNothing()) {
+        refuse("`'" + op + "'` lends both sides, and this takes `" +
+                   std::string(param.held == Held::LoanMut ? "loanmut" : "own") + "`.",
+               {"`'x' " + op + " 'y'` has nowhere to write `move`, so an operator "
+                "reads its sides and hands them back: " + shape + "."});
+        return;
+      }
+      if (!(param == type)) {
+        refuse("`'" + op + "'` takes two of one type, and this takes a `" +
+                   std::string(name(type)) + "` and a `" + std::string(name(param)) + "`.",
+               {"nothing converts on its own, here or anywhere: " + shape + "."});
+        return;
+      }
+    }
+    const Ty answers = signature.result;
+    if (converts ? !(answers == Ty{Type::Str} && answers.held == Held::Owned)
+        : comparing ? !(answers == Ty{Type::Bool})
+                    : !(answers == type && answers.held == Held::Owned)) {
+      refuse("`'" + op + "'` on a `" + std::string(name(type)) + "` answers with a `" +
+                 (converts ? "str" : comparing ? "bool" : std::string(name(type))) +
+                 "`, and this answers with a `" + std::string(name(answers)) + "`.",
+             {shape + "."});
+      return;
+    }
+    const auto home = typeHomes_.find(typeNameOf(type));
+    if (home != typeHomes_.end() && home->second.first != item.unit) {
+      refuse("`" + std::string(name(type)) + "` is another unit's type, and only the "
+             "unit that declared a type says what `" + op + "` does on it.",
+             {"a library's own functions would find an answer they never asked for; "
+              "write a function with a name instead."});
+      return;
+    }
+    const std::string key = operatorKey(op, type);
+    if (const auto already = operators_.find(key); already != operators_.end()) {
+      complain(item.nameSpan, "E0612",
+               "`" + op + "` on a `" + std::string(name(type)) + "` is already answered.",
+               {"a type answers an operator once"}, {},
+               "here", {Note{already->second.span, "answered here"}});
+      return;
+    }
+    Answered answered;
+    answered.name = item.name;
+    answered.result = answers;
+    answered.unit = item.unit;
+    answered.file = item.file;
+    for (const ChainSegment &seg : item.chain.segments) {
+      if (seg.isName)
+        continue;
+      if (seg.text == "export")
+        answered.exported = true;
+      if (seg.text == "program")
+        answered.acrossUnit = true;
+    }
+    answered.span = item.nameSpan;
+    operators_[key] = std::move(answered);
+  }
+
+  // The function that answers `op` for this type, if there is one that the body
+  // being read may see.
+  const Answered *answering(const std::string &op, Ty type) const {
+    if (type.kind != Type::Struct && type.kind != Type::OneOf)
+      return nullptr;
+    const auto found = operators_.find(operatorKey(op, type));
+    if (found == operators_.end())
+      return nullptr;
+    const Answered &one = found->second;
+    if (one.exported || !here_)
+      return &one;
+    if (one.unit != here_->unit)
+      return nullptr;
+    // A program is one file, so within it everything sees everything.
+    if (one.acrossUnit || one.unit.empty() || one.file == here_->file)
+      return &one;
+    return nullptr;
+  }
+
+  // Whether a type answers any operator at all — and so is one that says how
+  // it is written, or is not written.
+  bool answersAnything(Ty type) const {
+    if (type.kind != Type::Struct && type.kind != Type::OneOf)
+      return false;
+    for (const char *op : {"+", "-", "x", "/", "^", "mod", "<", ">", "<==", ">==", "==",
+                           "!==", "convert-to-str"})
+      if (operators_.count(operatorKey(op, type)))
+        return true;
+    return false;
+  }
+
+  // A value of a declared type, about to be shown. Answers whether it was
+  // settled here — written by the type's own `convert-to-str` (recorded), or
+  // refused because the type answers operators and not that.
+  bool shownByItsOwn(const Expr &item, Ty got) {
+    if (got.kind != Type::Struct && got.kind != Type::OneOf)
+      return false;
+    if (got.mayBeNothing())
+      return false;
+    if (const Answered *writes = answering("convert-to-str", got)) {
+      result_.shownBy[&item] = writes->name;
+      return true;
+    }
+    if (answersAnything(got)) {
+      complain(item.span, "E0613",
+               "a `" + std::string(name(got)) + "` answers operators and not "
+               "`convert-to-str`, so there is no writing it out.",
+               {"a type that says what its arithmetic means says how it is written"},
+               {"`fn.str 'convert-to-str' [loan." + std::string(name(got)) +
+                " 'v']` beside its operators says what a print of one writes."});
+      return true;
+    }
+    return false;
   }
 
   // ---- expressions
@@ -1788,6 +1994,42 @@ private:
       return comparing || logical ? Ty{Type::Bool} : unknownFrom(broken.from);
     }
 
+    // Two of a declared type, and the type answers this operator: a call to
+    // the function that answers it, lending both sides. The typed tree makes
+    // the call; here it is only which function, and what it answers.
+    if (!logical && left == right && !left.mayBeNothing() &&
+        (left.kind == Type::Struct || left.kind == Type::OneOf)) {
+      if (const Answered *answers = answering(op, left)) {
+        result_.operatorCalls[&e] = answers->name;
+        return answers->result;
+      }
+      // Nothing answers, and there is no built-in meaning to fall back on. A
+      // struct compared with `==` used to slip through here and reach the
+      // engines, which had no such instruction.
+      const bool answersOthers = answersAnything(left);
+      const auto home = typeHomes_.find(typeNameOf(left));
+      const bool elsewhere =
+          here_ && home != typeHomes_.end() && home->second.first != here_->unit;
+      complain(e.span, "E0506",
+               "a `" + std::string(name(left)) + "` does not answer `" + op + "`.",
+               {"a declared type answers an operator when a function of its unit says "
+                "what the operator does"},
+               {elsewhere
+                    ? "only the unit that declared `" + std::string(name(left)) +
+                          "` may answer for it, and it has not — or has, for itself "
+                          "alone. Its functions are what it offers."
+                : answersOthers
+                    ? "it answers others; `fn." +
+                          std::string(comparisonWord(op) ? "bool" : name(left)) + " '" + op +
+                          "' [loan." + std::string(name(left)) + " 'a', loan." +
+                          std::string(name(left)) + " 'b']` would answer this one."
+                    : "`fn." + std::string(comparisonWord(op) ? "bool" : name(left)) + " '" +
+                          op + "' [loan." + std::string(name(left)) + " 'a', loan." +
+                          std::string(name(left)) + " 'b']` in the unit that declared `" +
+                          std::string(name(left)) + "` says what `" + op + "` does."});
+      return comparing ? Ty{Type::Bool} : unknownFrom(e.span);
+    }
+
     if (comparing) {
       // Two `one-of`s are the same when they are in the same case *and* what
       // they hold is the same, and what they hold is a different type in every
@@ -1897,6 +2139,11 @@ private:
                     "this was not checked as something with a way of being written.",
                     "a value is written out the way it is shown, and what this is could "
                     "not be worked out");
+      // A declared type that says how it is written is written that way, and
+      // the typed tree calls its function in place of this.
+      if (e.args.values[0].items.size() == 1 &&
+          shownByItsOwn(*e.args.values[0].items[0], got))
+        return Type::Str;
       // Whatever a print can write, this can write into a `str`, because it is
       // the same walk: a `many` and a struct write what they hold, one value
       // after another. What is left is text, which is already text, and an
@@ -2103,8 +2350,20 @@ private:
     couldNotCheck(got, item.span, "this was not checked as something showable.",
                   "showing writes one piece after another, and what this is could not "
                   "be worked out");
+    if (shownByItsOwn(item, got))
+      return;
     Ty absent;
     std::string where;
+    if (answersOperatorsSomewhere(got, where)) {
+      complain(item.span, "E0613",
+               "`" + where + "` inside this answers operators and says nothing about how "
+               "it is written, so there is no writing it out.",
+               {"a type that says what its arithmetic means says how it is written"},
+               {"show the parts, or give the type a `convert-to-str` and show them "
+                "one at a time — a struct that holds one is written field by field, "
+                "and its own function is not asked on the way."});
+      return;
+    }
     if (holdsNothingSomewhere(got, absent, where)) {
       const bool oneOf = absent.kind == Type::OneOf;
       const std::string what = oneOf ? " is one of several things"
@@ -2123,6 +2382,35 @@ private:
                          "else an absence should look like is a decision nobody has "
                          "made."});
     }
+  }
+
+  // Whether a struct or `many` holds, however deep, a type that answers
+  // operators. Showing a struct walks its fields and writes each as it is laid
+  // out, without asking the field's own `convert-to-str` on the way — so a
+  // field of such a type would be written as its insides, which is exactly the
+  // quiet wrong answer a type with operators exists to stop.
+  bool answersOperatorsSomewhere(Ty got, std::string &where, unsigned depth = 0) const {
+    if (depth > 32)
+      return false;
+    if (depth > 0 && answersAnything(got))
+      return true; // `where` was named by whoever asked
+    if (got.holds()) {
+      std::string deeper;
+      if (!answersOperatorsSomewhere(elementOf(got), deeper, depth + 1))
+        return false;
+      where = deeper.empty() ? "a place" : "a place's " + deeper;
+      return true;
+    }
+    if (!got.isStruct() || got.named >= result_.shapes.size())
+      return false;
+    for (const Field &field : result_.shapes[got.named].fields) {
+      std::string deeper;
+      if (answersOperatorsSomewhere(field.type, deeper, depth + 1)) {
+        where = deeper.empty() ? field.name : field.name + "." + deeper;
+        return true;
+      }
+    }
+    return false;
   }
 
   // Whether anything inside this, however deep, may hold nothing. A `many` of
@@ -2871,6 +3159,18 @@ private:
         const auto chose = result_.chosenArm.find(s.get());
         if (chose != result_.chosenArm.end() && chose->second < s->branches.size() &&
             alwaysGives(s->branches[chose->second].body))
+          return true;
+        continue;
+      }
+      // A `when` covers every case or is refused (`E0522`), so it answers when
+      // every arm does. It used to count for nothing here, and a function over
+      // a `one-of` had to end with a `give` it could never reach.
+      if (s->kind == StmtKind::When) {
+        bool everyArm = !s->branches.empty();
+        for (const Branch &branch : s->branches)
+          if (!alwaysGives(branch.body))
+            everyArm = false;
+        if (everyArm)
           return true;
         continue;
       }

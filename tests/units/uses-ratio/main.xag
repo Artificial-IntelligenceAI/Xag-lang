@@ -1,0 +1,48 @@
+READ_ME {
+Operators on a library's type, and on a `one-of` of this program's own that
+holds one. Printing a `ratio` writes what its `convert-to-str` says; a `many`
+of `ratio` is summed in a loop the way a `many` of numbers would be.
+}
+PREP {
+    import 'ratio';
+
+    one-of 'num' [int64 'whole', ra.ratio 'part']
+
+    fn.num '+' [loan.num 'a', loan.num 'b'] {
+        when 'a' {
+            is whole 'x' {
+                when 'b' {
+                    is whole 'y' { give [whole:('x' + 'y')]; }
+                    is part 'q'  { give [part:(ra.over['x', *1*] + 'q')]; }
+                }
+            }
+            is part 'p' {
+                when 'b' {
+                    is whole 'y' { give [part:('p' + ra.over['y', *1*])]; }
+                    is part 'q'  { give [part:('p' + 'q')]; }
+                }
+            }
+        }
+    }
+    fn.str 'convert-to-str' [loan.num 'n'] {
+        when 'n' {
+            is whole 'x' { give [convert-to-str['x']]; }
+            is part 'p'  { give [convert-to-str['p']]; }
+        }
+    }
+}
+START {
+    var.ra.ratio 'half' = [ra.over[*1*, *2*]];
+    var.ra.ratio 'third' = [ra.over[*1*, *3*]];
+    print.stdout['half' + 'third' str:* * 'half' x 'third' \n];
+    print.stdout[('half' == ra.over[*2*, *4*]) str:* * ('half' !== 'third') str:* * ('third' < 'half') \n];
+    var.many.ra.ratio 'parts' = [ra.over[*1*, *2*] ra.over[*1*, *3*] ra.over[*1*, *6*]];
+    var.mut.ra.ratio 'total' = [ra.over[*0*, *1*]];
+    loop.range.int64 'i' = [*1*, count[loan 'parts']] { set 'total' = ['total' + 'parts'['i']]; }
+    print.stdout['total' str:* * convert-to-str['total'] str:* * count[loan convert-to-str['total']] \n];
+    var.num 'a' = [whole:*2*];
+    var.num 'b' = [part:ra.over[*1*, *2*]];
+    print.stdout['a' + 'b' str:* * 'a' + 'a' str:* * 'b' + 'b' \n];
+}
+ITMT {
+}

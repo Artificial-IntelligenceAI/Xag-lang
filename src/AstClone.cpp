@@ -91,6 +91,9 @@ Item clone(const Item &item) {
   out.kind = item.kind;
   out.span = item.span;
   out.settings = item.settings;
+  out.unit = item.unit;
+  out.file = item.file;
+  out.op = item.op;
   out.chain = item.chain;
   out.nameSpan = item.nameSpan;
   out.name = item.name;

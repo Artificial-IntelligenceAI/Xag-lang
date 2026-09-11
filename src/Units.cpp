@@ -576,9 +576,12 @@ void reachedInBlock(const Block &block, Reached &r) {
 
 } // namespace
 
-void applySettings(Program &file, const Unit &unit) {
-  for (Item &item : file.items)
+void applySettings(Program &file, const Unit &unit, unsigned which) {
+  for (Item &item : file.items) {
     item.settings = unit.settings;
+    item.unit = unit.called;
+    item.file = which;
+  }
 }
 
 std::vector<Diagnostic> importsCover(const Program &file, const UnitsResult &units) {

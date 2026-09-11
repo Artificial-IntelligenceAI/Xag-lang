@@ -77,7 +77,53 @@ private:
     return out;
   }
 
+  // `loan` around a value, as if the program had written it. An operator's
+  // sides and a shown value are lent to the function that answers for them,
+  // and the borrow is made here so that everything below sees an ordinary
+  // call with ordinary loans. A side that is already a borrow is left as it is.
+  static TypedPtr lent(TypedPtr inner) {
+    if (inner->kind == TypedKind::Borrow)
+      return inner;
+    auto out = std::make_unique<TypedExpr>();
+    out->kind = TypedKind::Borrow;
+    out->span = inner->span;
+    out->text = "loan";
+    out->type = inner->type;
+    out->type.held = Held::Loan;
+    out->wrote = inner->wrote;
+    out->children.push_back(std::move(inner));
+    return out;
+  }
+
+  // A call to the function that answers for a declared type, with what it is
+  // given lent.
+  static TypedPtr answeredBy(const std::string &name, Ty answers, const Expr &e,
+                             std::vector<TypedPtr> sides) {
+    auto out = std::make_unique<TypedExpr>();
+    out->kind = TypedKind::Call;
+    out->span = e.span;
+    out->type = answers;
+    out->name = name;
+    out->wrote = &e;
+    for (TypedPtr &side : sides) {
+      out->args.emplace_back();
+      out->args.back().push_back(lent(std::move(side)));
+    }
+    return out;
+  }
+
   TypedPtr expr_(const Expr &e) {
+    // A value of a type that says how it is written, where it is shown: the
+    // type's own `convert-to-str` is called on it, and what is shown is text.
+    if (const auto shown = checked_.shownBy.find(&e); shown != checked_.shownBy.end()) {
+      std::vector<TypedPtr> one;
+      one.push_back(plain_(e));
+      return answeredBy(shown->second, Ty{Type::Str}, e, std::move(one));
+    }
+    return plain_(e);
+  }
+
+  TypedPtr plain_(const Expr &e) {
     switch (e.kind) {
     case ExprKind::Group:
       // Brackets that only group are gone: grouping is the shape of the tree.
@@ -181,6 +227,16 @@ private:
     }
 
     case ExprKind::Binary: {
+      // `'x' + 'y'` on two of a declared type is a call to the function that
+      // answers `+` for it, both sides lent. Below here nobody knows an
+      // operator was written, which is why no engine had to learn one.
+      if (const auto answers = checked_.operatorCalls.find(&e);
+          answers != checked_.operatorCalls.end() && e.children.size() == 2) {
+        std::vector<TypedPtr> sides;
+        for (const ExprPtr &one : e.children)
+          sides.push_back(expr_(*one));
+        return answeredBy(answers->second, typeOf(e), e, std::move(sides));
+      }
       auto out = make(TypedKind::Binary, e);
       out->text = e.text;
       for (const ExprPtr &one : e.children)
@@ -191,8 +247,12 @@ private:
     case ExprKind::Call: {
       // A word before a bracket is one of three things, and which it is was
       // settled before this: a struct made where it stands, or a call.
+      // The whole path: a library's struct made from outside it is
+      // `lib.arith[…]`, two words, and the checker found its shape by the
+      // joined name. Reading only a one-word path here sent it below as a
+      // call to a function no engine had.
       bool isSum = false;
-      const std::string word = e.path.size() == 1 ? e.path[0] : std::string();
+      const std::string word = joined(e.path);
       const Shape *shape = word.empty() ? nullptr : shapeNamed(word, isSum);
       if (shape && !isSum) {
         auto out = make(TypedKind::Made, e);
@@ -205,6 +265,14 @@ private:
           out->children = items(e.args.values[0]);
         return out;
       }
+      // `convert-to-str['n']` on a type with a `convert-to-str` of its own is
+      // that function's call, not the built-in's: the argument was already
+      // marked as shown by it, and wrapping the text it answers in the
+      // built-in again would be converting text.
+      if (e.path.size() == 1 && e.path[0] == "convert-to-str" && e.args.values.size() == 1 &&
+          e.args.values[0].items.size() == 1 &&
+          checked_.shownBy.count(e.args.values[0].items[0].get()))
+        return expr_(*e.args.values[0].items[0]);
       auto out = make(TypedKind::Call, e);
       out->name = joined(e.path);
       for (const Value &value : e.args.values)

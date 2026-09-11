@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace xag {
@@ -175,10 +176,38 @@ struct Settings {
   bool noNumberStops = false; // no-number = "stops": a `bin` with no number to give stops
 };
 
+// The words a declared type may answer with a function of its own: the six
+// arithmetic operators, the six comparisons, and how it is written out. `and`,
+// `or` and `not` are not among them — they ask about a `bool`, and a struct is
+// not one. A function named with one of these is an operator function:
+//
+//     fn.export.uer '+' [loan.uer 'a', loan.uer 'b'] { … }
+//
+// and `'x' + 'y'` on two `uer`s is a call to it. `convert-to-str` is what a
+// print of one writes.
+inline bool answersOperator(std::string_view word) {
+  for (std::string_view one : {"+", "-", "x", "/", "^", "mod", "<", ">", "<==", ">==",
+                               "==", "!==", "convert-to-str"})
+    if (word == one)
+      return true;
+  return false;
+}
+
 struct Item {
   ItemKind kind = ItemKind::Start;
   Span span;
   Settings settings;
+  // Which unit this came from, and which of its files: the library's call
+  // name, or empty for the program's own. Written on with `settings`. An
+  // operator may be answered only by the unit that declared the type, and a
+  // `file`-visible one is seen from its own file alone, which is what these
+  // are for.
+  std::string unit;
+  unsigned file = 0;
+  // An operator function: the word it answers, `+` or `==` or
+  // `convert-to-str`. Its `name` is that word and the type's, `+ uer`, so
+  // that two types' `+` in one unit are two functions.
+  std::string op;
 
   Chain chain;              // Function, Const
   Span nameSpan;

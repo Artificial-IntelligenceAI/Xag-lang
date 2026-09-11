@@ -94,6 +94,10 @@ struct FnInfo {
   std::vector<ParamInfo> params;
   Mode result = Mode::Owned;
   bool variadic = false;
+  // The language's own — `count`, `print.stdout` — which read what they are
+  // given where it stands, written value or not, and are lowered on their own
+  // terms rather than called.
+  bool builtIn = false;
 };
 
 // How a value is being taken: read where it stands, or taken away for good.
@@ -160,14 +164,14 @@ private:
   // ---- signatures, and the one lifetime rule a signature can answer alone
 
   void collect() {
-    functions_["print.stdout"] = FnInfo{{}, Mode::Owned, true};
-    functions_["print.stderr"] = FnInfo{{}, Mode::Owned, true};
-    functions_["count"] = FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false};
-    functions_["read.stdin"] = FnInfo{{}, Mode::Owned, false};
-    functions_["arguments"] = FnInfo{{}, Mode::Owned, false};
+    functions_["print.stdout"] = FnInfo{{}, Mode::Owned, true, true};
+    functions_["print.stderr"] = FnInfo{{}, Mode::Owned, true, true};
+    functions_["count"] = FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false, true};
+    functions_["read.stdin"] = FnInfo{{}, Mode::Owned, false, true};
+    functions_["arguments"] = FnInfo{{}, Mode::Owned, false, true};
     // Read where it stands, and the text goes on belonging to whoever had it.
     functions_["convert-to-number"] =
-        FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false};
+        FnInfo{{ParamInfo{Mode::Ref, false}}, Mode::Owned, false, true};
 
     for (const TypedItem &item : program_.items) {
       if (item.kind != TypedItemKind::Function)
@@ -442,7 +446,7 @@ private:
         const bool known = !info.variadic && i < info.params.size();
         const ParamInfo param = known ? info.params[i] : ParamInfo{Mode::Owned, true};
         if (argument.size() == 1)
-          argue(*argument[0], param, e.name);
+          argue(*argument[0], param, e.name, info.builtIn);
         else
           for (const TypedPtr &piece : argument)
             read(*piece);
@@ -483,7 +487,8 @@ private:
   }
 
   // One argument against what its parameter asked for.
-  void argue(const TypedExpr &e, ParamInfo param, const std::string &path) {
+  void argue(const TypedExpr &e, ParamInfo param, const std::string &path,
+             bool builtIn = false) {
     if (e.kind == TypedKind::Borrow && e.text != "move") {
       const char *wanted = word(param.mode);
       if (e.text != wanted && !(param.mode == Mode::Owned && param.copies))
@@ -505,6 +510,22 @@ private:
                  {"`loan` lends for reading, `loanmut` lends for writing, and `move` hands "
                   "the value over for good."});
       use(e, Use::Consume, param.mode, param.copies);
+      return;
+    }
+    // A value with no name — what a call answered, a struct made on the spot,
+    // text joined here — handed bare to a parameter that borrows. A name in the
+    // same place is refused above as a transfer nobody spelled; a temporary
+    // slipped past, and the built program passed the value itself where the
+    // function expected a pointer to one.
+    if (param.mode != Mode::Owned && !builtIn && e.kind != TypedKind::Name &&
+        e.kind != TypedKind::Field && e.kind != TypedKind::Element) {
+      const char *wanted = word(param.mode);
+      complain(e.span, "E0406",
+               "`" + path + "` asks for `" + wanted + "` here, and this is handed to it "
+               "bare.",
+               {"a transfer is spelled where it happens, and says which one it is"},
+               {"`" + std::string(wanted) + "` lends it for as long as the call runs: `" +
+                path + "[" + wanted + " …]`."});
       return;
     }
     use(e, Use::Consume, param.mode, param.copies);

@@ -1444,6 +1444,18 @@ private:
         }
       }
       readFields(out.params);
+      // `fn.uer '+' [loan.uer 'a', loan.uer 'b']` answers `+` for a `uer`. The
+      // word stays as what it answers, and the name takes the type's word as
+      // well, so that a unit answering `+` for two of its types has two
+      // functions rather than one name twice. Whether the signature is the
+      // right shape is the checker's question.
+      if (answersOperator(out.name)) {
+        out.op = out.name;
+        if (!out.params.empty())
+          for (const ChainSegment &seg : out.params[0].chain.segments)
+            if (!seg.isName)
+              out.name = out.op + " " + seg.text; // the last word is the type
+      }
       out.body = block();
     } else if (out.chain.startsWith("struct")) {
       out.kind = ItemKind::Struct;

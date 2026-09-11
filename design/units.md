@@ -70,8 +70,14 @@ a given function, so an unbounded exact number from a library can be arithmetic
 rather than `big.add['x', 'y']`. The type already decides what `+` does — `int64`
 wraps or stops, `bin64` rounds, `deci64` rounds decimally — so a struct
 answering it is one more row rather than a new kind of thing. "Nothing converts
-on its own" stands: both sides must be the same `big.uer`. The spelling and which
-operators may be answered are not yet chosen.
+on its own" stands: both sides must be the same `big.uer`.
+
+Built 2026-09-11: `fn.export.uer '+' [loan.uer 'a', loan.uer 'b']`, the twelve
+value operators and `convert-to-str`, structs and `one-of`s alike, answered
+only by the unit that declared the type and seen under the function's own
+visibility word. The full rule is in `design/syntax.md`, "A declared type
+answers operators with functions". `tests/units/ratio` is a library whose
+fraction type answers them.
 
 ## Settings are per-unit
 

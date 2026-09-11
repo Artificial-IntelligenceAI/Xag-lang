@@ -396,6 +396,15 @@ struct CheckResult {
   // asks again while the program runs. A `many` is a fixed length once it is
   // made, which is what makes a loop counting to `count[…]` answerable here.
   std::unordered_set<const Expr *> settled;
+  // `'x' + 'y'` on two of a declared type is a call to the function that
+  // answers `+` for it: which one, by the name everything below calls it by.
+  // The binary node is the key; the typed tree makes a call of it, lending both
+  // sides, so nothing below the checker knows an operator was written.
+  std::unordered_map<const Expr *, std::string> operatorCalls;
+  // A value of a declared type that answers `convert-to-str`, where it is
+  // shown — a piece of a print, or the argument of `convert-to-str` — and the
+  // function that writes it.
+  std::unordered_map<const Expr *, std::string> shownBy;
 
   Ty of(const Expr *e) const {
     auto found = expressions.find(e);

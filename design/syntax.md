@@ -1214,6 +1214,66 @@ Lending one of them lends the struct, because what the loan points at lives
 inside it and goes wherever it goes — so handing the struct over while a field is
 lent is `E0408`, and writing that field behind the loan's back is `E0409`.
 
+### A declared type answers operators with functions
+
+A struct or a `one-of` may say what an operator does on it, by declaring a
+function named with the operator:
+
+```
+struct.export 'ratio' [int64 'top', int64 'bottom']
+
+fn.export.ratio '+' [loan.ratio 'a', loan.ratio 'b'] { … }
+fn.export.bool  '<' [loan.ratio 'a', loan.ratio 'b'] { … }
+fn.export.str   'convert-to-str' [loan.ratio 'r'] { … }
+```
+
+`'x' + 'y'` on two `ratio`s is then a call to that `'+'`, and `'x' < 'y'` to
+that `'<'`. Nothing below the checker knows an operator was written: the typed
+tree makes an ordinary call of it, lending both sides, which is why no engine
+had to learn anything. The name is quoted like every declared name; written
+bare, `+` where a name goes would be the operator token and a second shape for
+the one slot.
+
+What may be answered is the twelve operators that work on values — `+ - x / ^
+mod` and `< > <== >== == !==` — and `convert-to-str`. `and`, `or` and `not` ask
+about a `bool` and cannot be. The shape is fixed (`E0611` otherwise):
+
+- **Two sides, both `loan`, both the same type.** `'x' + 'y'` has nowhere to
+  write `move`, and a transfer is spelled where it happens — so an operator
+  reads its sides and hands them back. A side that is a temporary, like
+  `('a' + 'b') + 'c'`, is lent the same way a name is.
+- **Arithmetic answers the type; a comparison answers `bool`;
+  `convert-to-str` takes one and answers `str`.**
+- **Each written on its own.** `!==` is not derived from `==`: what is answered
+  is what was declared, and nothing else. A type that answers none of them
+  answers none — `'p' == 'q'` on a plain struct is `E0506`, where it used to
+  reach the engines with no instruction to run.
+- **Once per type** (`E0612`), and **only by the unit that declared the type.**
+  A `+` on `big.uer` written by an importer would be found by the library's own
+  bodies, which never asked for it. A `file`-visible answer is seen from its
+  file, a `program` one across the unit, an `export` one everywhere — the same
+  words as any function.
+
+A type that answers any operator **must say how it is written** before it is
+shown: a print of one, or `convert-to-str` of one, calls its `convert-to-str`,
+and without one it is `E0613` rather than its fields written out — which is
+exactly the quiet wrong answer a number type would otherwise give. A struct
+that holds one is not shown whole either, for the same reason: showing walks
+fields as they are laid out and does not ask the field's own function on the
+way.
+
+A `one-of` answers them too. The rule is "a declared type may answer", and an
+exact number that is an `int64` while it fits and a `uer` once it does not is a
+`one-of` that wants `+`. `or-nothing` is a chain segment, not a declared type,
+and stays out.
+
+Decided 2026-09-11, in four questions; built the same day. Two things came out
+on the way: a `when` whose every arm gives now counts as answering (`E0513`
+used to want a `give` after it that nothing could reach), and a temporary or a
+written value handed bare to a `loan` parameter of a declared function is
+`E0406` — it used to pass the value where the function expected a pointer to
+one, which the built program did not survive.
+
 ## Converting, on purpose
 
 Nothing converts on its own — that is the rule `E0506` enforces everywhere. So

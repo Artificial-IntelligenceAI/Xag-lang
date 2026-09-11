@@ -179,6 +179,37 @@ const PREAMBLE: &str = concat!(
     "fn.any 'same' [any 'v'] { give ['v']; }\n\n",
 );
 
+// A struct that answers operators, written into every unit: `arith` holds two
+// whole numbers and says what `+ - x`, the six comparisons and
+// `convert-to-str` do on it. Every answer is taken `mod *1000*`, so that
+// however many times a loop adds one to another nothing comes round. A library
+// exports its own, so a program that imports one has two such types to hand.
+fn arith_preamble(library: bool) -> String {
+    let vis = if library { ".export" } else { "" };
+    let mut out = String::new();
+    out.push_str(&format!("struct{vis} 'arith' [int64 'x', int64 'y']\n\n"));
+    for (op, word) in [("+", "+"), ("-", "-"), ("x", "x")] {
+        out.push_str(&format!(
+            "fn{vis}.arith '{op}' [loan.arith 'a', loan.arith 'b'] {{\n    give [arith[(('a'.x {word} 'b'.x) mod *1000*) (('a'.y {word} 'b'.y) mod *1000*)]];\n}}\n\n"
+        ));
+    }
+    out.push_str(&format!(
+        "fn{vis}.bool '==' [loan.arith 'a', loan.arith 'b'] {{\n    give [('a'.x == 'b'.x) and ('a'.y == 'b'.y)];\n}}\n\n"
+    ));
+    out.push_str(&format!(
+        "fn{vis}.bool '!==' [loan.arith 'a', loan.arith 'b'] {{\n    give [('a'.x !== 'b'.x) or ('a'.y !== 'b'.y)];\n}}\n\n"
+    ));
+    for op in ["<", ">", "<==", ">=="] {
+        out.push_str(&format!(
+            "fn{vis}.bool '{op}' [loan.arith 'a', loan.arith 'b'] {{\n    give [(('a'.x x int64:*1000*) + 'a'.y) {op} (('b'.x x int64:*1000*) + 'b'.y)];\n}}\n\n"
+        ));
+    }
+    out.push_str(&format!(
+        "fn{vis}.str 'convert-to-str' [loan.arith 'v'] {{\n    give [str:*<* convert-to-str['v'.x] str:*,* convert-to-str['v'.y] str:*>*];\n}}\n\n"
+    ));
+    out
+}
+
 pub struct Writer<'a> {
     rng: &'a mut Rng,
     out: &'a mut String,
@@ -217,6 +248,11 @@ pub struct Writer<'a> {
     /// the length of a call, and assigned to. It is only holding a borrow of one
     /// *across* the step that cannot work.
     stepped: Vec<String>,
+    /// Names holding an `arith`, kept apart from `scopes` so that nothing
+    /// picking a name by type ever picks one. Each with how deep the scope it
+    /// was declared in is, and whether it is the library's `arith` rather than
+    /// the program's — two types, each answering its own operators.
+    ariths: Vec<(String, usize, bool)>,
     indent: usize,
     size: u32,
 }
@@ -266,6 +302,7 @@ pub fn generate(seed: u64, size: u32, case: &mut Case) {
         next_name: 0,
         seed,
         stepped: Vec::new(),
+        ariths: Vec::new(),
         indent: 0,
         size,
     };
@@ -370,6 +407,7 @@ impl<'a> Writer<'a> {
         self.out.push_str(".\n}\n\nPREP {\n");
 
         self.out.push_str(PREAMBLE);
+        self.out.push_str(&arith_preamble(false));
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
@@ -426,6 +464,7 @@ impl<'a> Writer<'a> {
             self.library.push_str(&self.seed.to_string());
             self.library.push_str(".\n}\nLIBRARY {\n");
             self.library.push_str(PREAMBLE);
+            self.library.push_str(&arith_preamble(true));
             self.library.push_str(&written);
             self.library.push_str("}\nITMT {\n}\n");
             self.out.push_str("import 'lib';\n\n");
@@ -483,6 +522,7 @@ impl<'a> Writer<'a> {
         self.body(statements);
         self.finish_scope();
         self.scopes.pop();
+        self.forget_ariths();
         // Every file has an `ITMT`, run while building and never shipped. Empty
         // here: what this generator is asking about is what ships, and a
         // program whose build-time block did anything would be one whose built
@@ -1070,6 +1110,7 @@ impl<'a> Writer<'a> {
         self.expr(ty, 2);
         self.out.push_str("];\n}\n\n");
         self.scopes.pop();
+        self.forget_ariths();
         self.indent = 0;
         self.funs.push(Fun { name, params, answers: ty, library: self.in_library });
     }
@@ -1129,6 +1170,10 @@ impl<'a> Writer<'a> {
             } else {
                 self.sum_when();
             }
+            return;
+        }
+        if self.rng.chance(8) {
+            self.arith_statement();
             return;
         }
         match self.rng.below(25) {
@@ -1945,6 +1990,105 @@ impl<'a> Writer<'a> {
         self.out.push_str("\\n];\n");
     }
 
+    fn forget_ariths(&mut self) {
+        let depth = self.scopes.len();
+        self.ariths.retain(|(_, at, _)| *at <= depth);
+    }
+
+    /// How an `arith` is spelled here: the library's own is `arith` inside
+    /// the library and `lib.arith` from the program.
+    fn arith_word(&self, from_library: bool) -> &'static str {
+        if from_library && !self.in_library { "lib.arith" } else { "arith" }
+    }
+
+    fn arith_names(&self, from_library: bool) -> Vec<String> {
+        self.ariths
+            .iter()
+            .filter(|(_, _, lib)| *lib == from_library)
+            .map(|(name, _, _)| name.clone())
+            .collect()
+    }
+
+    /// A value of `arith`: one made from two written numbers, or two names
+    /// under an operator.
+    fn arith_value(&mut self, from_library: bool) {
+        let names = self.arith_names(from_library);
+        if names.len() >= 1 && self.rng.chance(60) {
+            let a = names[self.rng.below(names.len() as u32) as usize].clone();
+            let b = names[self.rng.below(names.len() as u32) as usize].clone();
+            let op = match self.rng.below(3) { 0 => "+", 1 => "-", _ => "x" };
+            self.out.push_str(&format!("'{a}' {op} '{b}'"));
+            return;
+        }
+        let word = self.arith_word(from_library);
+        let x = self.rng.below(1000);
+        let y = self.rng.below(1000);
+        self.out.push_str(&format!("{word}[*{x}* *{y}*]"));
+    }
+
+    /// A struct that answers operators, used: declared, added to, compared,
+    /// shown. Its operators are functions, so this is the oracle's only look
+    /// at a `+` that is a call, a `<` in an `if` that is a call, and a print
+    /// piece that goes through the type's own `convert-to-str`.
+    fn arith_statement(&mut self) {
+        // The library's type from the program, some of the time, when there is
+        // one. Inside the library only its own.
+        let from_library = !self.in_library && !self.library.is_empty() && self.rng.chance(50);
+        let names = self.arith_names(from_library);
+        let word = self.arith_word(from_library);
+        self.pad();
+        if names.len() < 2 || self.rng.chance(30) {
+            let name = self.fresh();
+            self.out.push_str(&format!("var.mut.{word} '{name}' = ["));
+            self.arith_value(from_library);
+            self.out.push_str("];
+");
+            self.ariths.push((name, self.scopes.len(), from_library));
+            return;
+        }
+        let a = names[self.rng.below(names.len() as u32) as usize].clone();
+        let b = names[self.rng.below(names.len() as u32) as usize].clone();
+        match self.rng.below(5) {
+            0 => {
+                self.out.push_str(&format!("set '{a}' = ["));
+                self.arith_value(from_library);
+                self.out.push_str("];
+");
+            }
+            1 => {
+                let op = match self.rng.below(3) { 0 => "+", 1 => "-", _ => "x" };
+                self.out.push_str(&format!("print.stdout['{a}' {op} '{b}' \\n];
+"));
+            }
+            2 => {
+                let op = match self.rng.below(6) {
+                    0 => "==", 1 => "!==", 2 => "<", 3 => ">", 4 => "<==", _ => ">==",
+                };
+                self.out.push_str(&format!(
+                    "print.stdout[('{a}' {op} '{b}') str:* * convert-to-str['{a}'] \\n];
+"
+                ));
+            }
+            3 => {
+                self.out.push_str(&format!("print.stdout['{a}' str:* * (convert-to-str[loan '{b}']) \\n];
+"));
+            }
+            _ => {
+                let op = match self.rng.below(2) { 0 => "<", _ => "==" };
+                self.out.push_str(&format!("if '{a}' {op} '{b}' {{
+"));
+                self.indent += 1;
+                self.pad();
+                self.out.push_str(&format!("print.stdout['{a}' + '{b}' \\n];
+"));
+                self.indent -= 1;
+                self.pad();
+                self.out.push_str("}
+");
+            }
+        }
+    }
+
     fn branch(&mut self) {
         self.pad();
         self.out.push_str("if ");
@@ -1956,6 +2100,7 @@ impl<'a> Writer<'a> {
         self.body(statements);
         self.finish_scope();
         self.scopes.pop();
+        self.forget_ariths();
         self.indent -= 1;
         self.pad();
         if self.rng.chance(50) {
@@ -1966,6 +2111,8 @@ impl<'a> Writer<'a> {
             self.body(statements);
             self.finish_scope();
             self.scopes.pop();
+            self.forget_ariths();
+        self.forget_ariths();
             self.indent -= 1;
             self.pad();
         }
@@ -2029,6 +2176,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("' + *1*];\n");
         self.finish_scope();
         self.scopes.pop();
+        self.forget_ariths();
         self.stepped.retain(|name| name != &counter);
         self.indent -= 1;
         self.pad();
@@ -2067,6 +2215,7 @@ impl<'a> Writer<'a> {
         self.body(statements);
         self.finish_scope();
         self.scopes.pop();
+        self.forget_ariths();
         self.stepped.retain(|name| name != &counter);
         self.indent -= 1;
         self.pad();

@@ -657,8 +657,8 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
       theirs.push_back(std::move(theirParsed.program));
     }
     xag::qualify(theirs, library);
-    for (xag::Program &file : theirs)
-      xag::applySettings(file, library);
+    for (unsigned f = 0; f < theirs.size(); ++f)
+      xag::applySettings(theirs[f], library, f);
     xag::Item *itmt = nullptr;
     for (xag::Program &file : theirs)
       for (xag::Item &item : file.items) {

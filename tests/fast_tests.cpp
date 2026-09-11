@@ -735,7 +735,29 @@ void onTheOtherValueOfEverySetting() {
         "  print.stdout[('x' / 'z') str:* * ('z' / 'z') \\n]; }\n");
 }
 
+// A type's own operators are calls, so both interpreters run them as calls.
+void onATypeThatAnswersOperators() {
+  AGREE("struct 'vec' [int64 'x', int64 'y']\n"
+        "fn.vec '+' [loan.vec 'a', loan.vec 'b'] { give [vec[('a'.x + 'b'.x) ('a'.y + 'b'.y)]]; }\n"
+        "fn.bool '<' [loan.vec 'a', loan.vec 'b'] { give ['a'.x < 'b'.x]; }\n"
+        "fn.bool '==' [loan.vec 'a', loan.vec 'b'] { give [('a'.x == 'b'.x) and ('a'.y == 'b'.y)]; }\n"
+        "fn.str 'convert-to-str' [loan.vec 'v'] { give [str:*(* convert-to-str['v'.x] str:*,* convert-to-str['v'.y] str:*)*]; }\n"
+        "START { var.vec 'a' = [*1* *2*]; var.vec 'b' = [*10* *20*];\n"
+        "  var.mut.vec 't' = [*0* *0*];\n"
+        "  loop.range.int64 'i' = [*1*, *3*] { set 't' = ['t' + 'a' + 'b']; }\n"
+        "  print.stdout['t' str:* * ('a' + 'b') + 'a' str:* * ('a' < 'b') str:* * ('t' == 't') \\n];\n"
+        "  var.str 's' = [convert-to-str['a']]; print.stdout['s' count[loan 's'] \\n]; }\n");
+  // Text made and let go inside the operator, and the answer lent on again.
+  AGREE("struct 'tag' [str 'name']\n"
+        "fn.tag '+' [loan.tag 'a', loan.tag 'b'] {\n"
+        "  var.str 'n' = ['a'.name str:*-* 'b'.name]; give [tag[move 'n']]; }\n"
+        "fn.str 'convert-to-str' [loan.tag 't'] { give ['t'.name str:*!*]; }\n"
+        "START { var.tag 'a' = [*x*]; var.tag 'b' = [*y*];\n"
+        "  print.stdout[('a' + 'b') + ('b' + 'a') \\n]; print.stdout['a' \\n]; }\n");
+}
+
 int main() {
+  onATypeThatAnswersOperators();
   onTheOrdinaryThings();
   onEverySizeAndFamily();
   onCallsAndBorrows();

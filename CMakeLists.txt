@@ -274,6 +274,23 @@ add_test(NAME units_no_number_stops_refuses
          COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/no-number/a.xag)
 set_tests_properties(units_no_number_stops_refuses PROPERTIES WILL_FAIL TRUE)
 
+# Operators on a library's type: `ratio` answers `+ x == !== <` and
+# `convert-to-str` for a program, and `-` for itself alone; the program's own
+# `one-of` answers `+` and `convert-to-str` too. All three engines, against
+# expected output. The library builds alone, its ITMT using the private `-`.
+# And a program that uses the private `-`, or answers `mod` for the library's
+# type itself, is refused.
+add_test(NAME units_operators_on_a_library_type
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-ratio/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+add_test(NAME units_operator_library_builds_alone
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/ratio/ratio.xag)
+add_test(NAME units_operators_respect_the_unit
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-ratio-wrongly/main.xag)
+set_tests_properties(units_operators_respect_the_unit PROPERTIES WILL_FAIL TRUE)
+
 # A mistake inside a library points into the library's file.
 add_test(NAME units_diagnostic_points_into_library
          COMMAND ${CMAKE_COMMAND}

@@ -1646,7 +1646,71 @@ void loopPartsWritesOneCopyPerField() {
     CHECK(one.code != "W0003");
 }
 
+// A declared type answers operators with functions named for them.
+void aTypeAnswersOperatorsWithFunctions() {
+  const std::string vec =
+      "struct 'vec' [int64 'x', int64 'y']\n"
+      "fn.vec '+' [loan.vec 'a', loan.vec 'b'] { give [vec[('a'.x + 'b'.x) ('a'.y + 'b'.y)]]; }\n"
+      "fn.bool '==' [loan.vec 'a', loan.vec 'b'] { give [('a'.x == 'b'.x) and ('a'.y == 'b'.y)]; }\n"
+      "fn.str 'convert-to-str' [loan.vec 'v'] { give [convert-to-str['v'.x] str:*,* convert-to-str['v'.y]]; }\n";
+  // The shape that works, and what the checker wrote down about it: the sum is
+  // a call, and so is the print's piece.
+  {
+    const Checked c = run(vec + "START { var.vec 'a' = [*1* *2*]; var.vec 'b' = ['a' + 'a'];\n"
+                                "  print.stdout['b' ('a' == 'b') convert-to-str['b'] \\n]; }\n");
+    CHECK(c.ok());
+    CHECK(c.checked.operatorCalls.size() == 2);
+    CHECK(c.checked.shownBy.size() == 2);
+    for (const auto &[at, name] : c.checked.operatorCalls)
+      CHECK(name == "+ vec" || name == "== vec");
+    for (const auto &[at, name] : c.checked.shownBy)
+      CHECK(name == "convert-to-str vec");
+  }
+  // An operator it does not answer, on a type that answers others.
+  CHECK(run(vec + "START { var.vec 'a' = [*1* *2*]; var.vec 'b' = ['a' - 'a']; }\n").code(0) ==
+        "E0506");
+  // A plain struct answers nothing, `==` included — that used to reach the
+  // engines, which had no such instruction.
+  CHECK(run("struct 'p' [int64 'x']\n"
+            "START { var.p 'a' = [*1*]; var.p 'b' = [*1*]; print.stdout[('a' == 'b') \\n]; }\n")
+            .code(0) == "E0506");
+  // The shape: two sides lent, of one type, answering the type or a `bool`.
+  CHECK(run("struct 'p' [int64 'x']\nfn.p '+' [p 'a', p 'b'] { give ['a']; }\n").code(0) == "E0611");
+  CHECK(run("struct 'p' [int64 'x']\nfn.p '+' [loan.p 'a'] { give ['a']; }\n").code(0) == "E0611");
+  CHECK(run("struct 'p' [int64 'x']\nfn.int64 '+' [loan.p 'a', loan.p 'b'] { give [*1*]; }\n")
+            .code(0) == "E0611");
+  CHECK(run("struct 'p' [int64 'x']\nfn.p '<' [loan.p 'a', loan.p 'b'] { give ['a']; }\n")
+            .code(0) == "E0611");
+  CHECK(run("struct 'p' [int64 'x']\nstruct 'q' [int64 'x']\n"
+            "fn.p '+' [loan.p 'a', loan.q 'b'] { give ['a']; }\n").code(0) == "E0611");
+  CHECK(run("fn.int64 '+' [loan.int64 'a', loan.int64 'b'] { give [*1*]; }\n").code(0) == "E0611");
+  // Once per type.
+  CHECK(run("struct 'p' [int64 'x']\n"
+            "fn.p '+' [loan.p 'a', loan.p 'b'] { give [p[*1*]]; }\n"
+            "fn.p '+' [loan.p 'a', loan.p 'b'] { give [p[*2*]]; }\n").code(0) == "E0612");
+  // A type that answers operators says how it is written, or is not written —
+  // on its own, and inside a struct that holds one.
+  CHECK(run("struct 'p' [int64 'x']\nfn.p '+' [loan.p 'a', loan.p 'b'] { give [p[*1*]]; }\n"
+            "START { var.p 'a' = [*1*]; print.stdout['a' \\n]; }\n").code(0) == "E0613");
+  CHECK(run("struct 'p' [int64 'x']\nfn.p '+' [loan.p 'a', loan.p 'b'] { give [p[*1*]]; }\n"
+            "START { var.p 'a' = [*1*]; var.str 's' = [convert-to-str['a']]; }\n").code(0) == "E0613");
+  CHECK(run("struct 'p' [int64 'x']\nstruct 'q' [p 'inner']\n"
+            "fn.p '+' [loan.p 'a', loan.p 'b'] { give [p[*1*]]; }\n"
+            "START { var.p 'a' = [*1*]; var.q 'w' = [move 'a']; print.stdout['w' \\n]; }\n")
+            .code(0) == "E0613");
+  // A `one-of` answers them too, and a `when` whose every arm gives answers.
+  CHECK(run("one-of 'num' [int64 'whole', bool 'flag']\n"
+            "fn.num '+' [loan.num 'a', loan.num 'b'] {\n"
+            "  when 'a' { is whole 'x' { give [whole:'x']; } is flag 'f' { give [flag:'f']; } } }\n"
+            "fn.str 'convert-to-str' [loan.num 'n'] {\n"
+            "  when 'n' { is whole 'x' { give [convert-to-str['x']]; } is flag 'f' { give [str:*flag*]; } } }\n"
+            "START { var.num 'a' = [whole:*1*]; print.stdout['a' + 'a' \\n]; }\n").ok());
+  // `'x'` stays a name: only a function named with an operator answers one.
+  CHECK(run("START { var.int64 'x' = [*1*]; print.stdout['x' x 'x' \\n]; }\n").ok());
+}
+
 int main() {
+  aTypeAnswersOperatorsWithFunctions();
   loopPartsWritesOneCopyPerField();
   howAThingIsHeldIsItsOwnQuestion();
   whicheverKeepsOneArm();
