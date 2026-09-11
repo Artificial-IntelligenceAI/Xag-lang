@@ -18,6 +18,12 @@ struct ParseResult {
 // Parsing, like lexing, reports everything it can see rather than stopping at the
 // first mistake: a broken statement is abandoned at the next `;` or `}` and the
 // next one is read.
+// Whether a word is one a chain reads — `mut`, `loan`, `many`, `any` and the
+// rest. A unit's prefix cannot be one, or `var.t.point 'p'` could not be read:
+// the chain would not know whether `t` was answering a question or naming a
+// library.
+bool isChainWord(std::string_view word);
+
 ParseResult parse(const Source &source, const std::vector<Token> &tokens);
 
 // The tree, printed. Used by `xagc parse` and by the tests.

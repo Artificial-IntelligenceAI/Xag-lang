@@ -1,0 +1,10 @@
+READ_ME {
+Counting things in text.
+}
+LIBRARY {
+    fn.export.int64 'twice' [int64 'n'] {
+        give ['n' + 'n'];
+    }
+}
+ITMT {
+}

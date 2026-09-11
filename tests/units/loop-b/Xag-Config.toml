@@ -1,0 +1,5 @@
+[unit]
+name = "b"
+called = "b"
+[uses]
+paths = ["../loop-a"]

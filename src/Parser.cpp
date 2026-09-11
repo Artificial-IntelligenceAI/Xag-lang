@@ -1505,6 +1505,11 @@ private:
 
 } // namespace
 
+bool isChainWord(std::string_view word) {
+  return slotOf(word) != Slot::Unknown || word == "many" || word == "many-growing" ||
+         word == "or-nothing" || word == "any" || word == "ref" || word == "refmut";
+}
+
 ParseResult parse(const Source &source, const std::vector<Token> &tokens) {
   return Parser(source, tokens).run();
 }

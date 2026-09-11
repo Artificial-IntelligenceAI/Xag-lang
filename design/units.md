@@ -98,7 +98,32 @@ interface belongs in a small third unit both sides import, and the rest is
 accretion. Refusing it costs nothing anyone wanted and is what lets a library be
 built on its own.
 
+## Which files are a library's
+
+Every `.xag` in the directory holding its manifest, in name order. Not the
+directories under it: a unit is one directory, and a directory below it is
+somebody else's. This was an assumption made while building rather than a
+decision taken; it can be a `files = [...]` under `[unit]` if a library ever
+wants to say otherwise.
+
+## Errors
+
+| code | when |
+| --- | --- |
+| `E0601` | a manifest line is not `key = value`, or a value is not quoted |
+| `E0602` | a library's manifest gives no `name` or no `called`, or one that cannot be a name, or one a chain already reads |
+| `E0603` | a `[uses]` path has no `Xag-Config.toml` at it |
+| `E0604` | the walk came round: a unit is used by something it uses |
+| `E0605` | two libraries answer to one import name |
+| `E0606` | `import` names a library the manifest does not reach |
+
+The first five are about a manifest and point into it; the last is about the
+file being compiled.
+
 ## What is built
 
 - **2026-09-11, slice 1** — the two file shapes, `ITMT`, and `import` parse;
   every file has an `ITMT`; `ITMT` lowers to a body but is not yet run.
+- **2026-09-11, slice 2** — manifests read (`src/Units.cpp`), `[uses]`
+  followed, cycles refused, every `import` checked against what was reached.
+  Nothing below the parser consumes a library's files yet.

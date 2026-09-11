@@ -3,6 +3,7 @@
 #include "xag/Ahead.h"
 #include "xag/Check.h"
 #include "xag/Typed.h"
+#include "xag/Units.h"
 #include "xag/Expand.h"
 #include "xag/Fold.h"
 #include "xag/Fast.h"
@@ -547,6 +548,40 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   xag::ParseResult parsed = xag::parse(source, lexed.tokens);
   if (report(source, parsed.diagnostics) != 0)
     return false;
+
+  // What this file may reach for: the manifest beside it, and every library the
+  // manifest's `[uses]` leads to. Read before checking, because a name the
+  // checker meets may be one of theirs — and refused here if a manifest is
+  // wrong or a loop closes, since nothing after this could mean anything.
+  const xag::UnitsResult units = xag::unitsFor(path);
+  if (!units.ok()) {
+    for (std::size_t i = 0; i < units.diagnostics.size(); ++i)
+      report(units.about[i] ? *units.about[i] : source, {units.diagnostics[i]});
+    return false;
+  }
+  // Every `import` names a library the manifest reached. Said here rather than
+  // in the checker because it is about the manifest, not about the program.
+  {
+    std::vector<xag::Diagnostic> unknown;
+    for (const xag::Item &item : parsed.program.items) {
+      if (item.kind != xag::ItemKind::Import || xag::unitNamed(units, item.name))
+        continue;
+      std::string known;
+      for (const xag::Unit &one : units.libraries)
+        known += (known.empty() ? "`" : ", `") + one.name + "`";
+      unknown.push_back(xag::Diagnostic{
+          item.nameSpan, "E0606", "no library is called `" + item.name + "`.", "here",
+          {"`import` names a library the manifest's `[uses]` reaches"},
+          {known.empty() ? std::string("this program's manifest reaches no libraries at "
+                                       "all — `[uses]` with `paths = [\"../text\"]` is "
+                                       "how it says which.")
+                         : "the manifest reaches " + known + ". A library is called what "
+                           "its own manifest says under `[unit]`, not what its directory "
+                           "is called."}});
+    }
+    if (report(source, unknown) != 0)
+      return false;
+  }
   // Read, and read again after every round of writing generics out. Only what
   // refuses is said as it happens; what is only *said* waits until the rounds
   // have settled, because a warning about a name is the same warning every

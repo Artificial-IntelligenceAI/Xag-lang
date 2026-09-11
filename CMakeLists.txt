@@ -89,6 +89,7 @@ add_library(xagfront STATIC
   src/AstPrinter.cpp
   src/Check.cpp
   src/Typed.cpp
+  src/Units.cpp
   src/Own.cpp
   src/MirBuild.cpp
   src/MirPrinter.cpp
@@ -125,8 +126,10 @@ target_compile_options(xagc PRIVATE -fno-exceptions -Wall -Wextra)
 
 enable_testing()
 
-foreach(suite lexer parser check typed own mir runtime interpret native regions fast ahead)
+foreach(suite lexer parser check typed own mir runtime interpret native regions fast ahead units)
   add_executable(${suite}_tests tests/${suite}_tests.cpp)
+  # The units suite reads real manifests from tests/units/, so it is told where.
+  target_compile_definitions(${suite}_tests PRIVATE XAG_TESTS_DIR="${CMAKE_SOURCE_DIR}/tests")
   if(${suite} STREQUAL native)
     target_link_libraries(${suite}_tests PRIVATE xagnative xagrt)
   else()

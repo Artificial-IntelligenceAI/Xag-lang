@@ -1,0 +1,2 @@
+[uses]
+paths = ["../nowhere", "../loop-a"]

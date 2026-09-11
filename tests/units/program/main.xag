@@ -1,0 +1,8 @@
+READ_ME { }
+PREP {
+    import 'text';
+}
+START {
+    print.stdout[str:*hello* \n];
+}
+ITMT { }
