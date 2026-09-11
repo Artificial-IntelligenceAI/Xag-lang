@@ -248,6 +248,41 @@ private:
     result_.about.push_back(in);
   }
 
+  // `[defaults]`: the settings that change what a program answers. Each has
+  // exactly the values the manifest documents, and a value that is none of
+  // them is refused rather than read as the default — a manifest that says
+  // `logic = "short-circuit"` meant something, and quietly giving it the other
+  // thing is how a program comes to run under a language it did not ask for.
+  bool readDefaults(const Manifest &m, Unit &out) {
+    struct Knob {
+      const char *key;
+      const char *yes;   // the value that sets the flag
+      const char *no;    // the default
+      bool Settings::*flag;
+    };
+    static const Knob knobs[] = {
+        {"logic", "asks-both", "stops-early", &Settings::asksBoth},
+    };
+    for (const Knob &knob : knobs) {
+      const Said *said = find(m, "defaults", knob.key);
+      if (!said)
+        continue;
+      const std::string value = said->values.size() == 1 ? said->values.front() : "";
+      if (value == knob.yes) {
+        out.settings.*knob.flag = true;
+      } else if (value != knob.no) {
+        complain(m.source,
+                 Diagnostic{said->valueSpan, "E0609",
+                            "`" + std::string(knob.key) + "` cannot be `" + value + "`.", "here",
+                            {"a setting has the values its manifest names, and no others"},
+                            {"`" + std::string(knob.key) + "` is `\"" + knob.no + "\"` or `\"" +
+                             knob.yes + "\"`."}});
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool readUnit(const std::string &manifestPath, Unit &out, bool mustBeNamed) {
     Manifest m = readManifest(manifestPath);
     for (Diagnostic &d : m.trouble)
@@ -269,6 +304,8 @@ private:
     }
     if (const Said *uses = find(m, "uses", "paths"))
       out.uses = uses->values;
+    if (!readDefaults(m, out))
+      return false;
 
     if (mustBeNamed) {
       if (out.name.empty()) {
@@ -535,6 +572,11 @@ void reachedInBlock(const Block &block, Reached &r) {
 }
 
 } // namespace
+
+void applySettings(Program &file, const Unit &unit) {
+  for (Item &item : file.items)
+    item.settings = unit.settings;
+}
 
 std::vector<Diagnostic> importsCover(const Program &file, const UnitsResult &units) {
   Reached reached;

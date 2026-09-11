@@ -52,7 +52,7 @@ struct Broke {
 
 struct Finding {
     seed: u64,
-    program: String,
+    case: gen::Case,
     answers: Vec<(&'static str, Answer)>,
     odd: Option<&'static str>,
 }
@@ -130,16 +130,15 @@ fn main() {
                 // name and nothing has to be locked to write a file.
                 let room = settings.workspace.join(format!("worker{worker}"));
                 let _ = std::fs::create_dir_all(&room);
-                let mut program = String::with_capacity(4096);
-                let mut library = String::with_capacity(2048);
+                let mut case = gen::Case::default();
 
                 loop {
                     let seed = next.fetch_add(1, Ordering::Relaxed);
                     if seed >= end {
                         break;
                     }
-                    gen::generate(seed, settings.size, &mut program, &mut library);
-                    match ask(settings, &room, &program, &library) {
+                    gen::generate(seed, settings.size, &mut case);
+                    match ask(settings, &room, &case) {
                         Verdict::Agreed => {}
                         Verdict::Skipped => {
                             skipped.fetch_add(1, Ordering::Relaxed);
@@ -152,10 +151,16 @@ fn main() {
                                 // which line of the generator wrote it.
                                 eprintln!(
                                     "\nseed {seed}: the generator wrote something the \
-                                     compiler would not take —\n{why}\n{program}"
+                                     compiler would not take —\n{why}\n{}",
+                                    case.program
                                 );
-                                if !library.is_empty() {
-                                    eprintln!("\n--- and its library, lib/lib.xag:\n{library}");
+                                eprintln!("\n--- under this Xag-Config.toml:\n{}", case.manifest);
+                                if !case.library.is_empty() {
+                                    eprintln!(
+                                        "\n--- and its library, lib/lib.xag:\n{}\n--- under \
+                                         lib/Xag-Config.toml:\n{}",
+                                        case.library, case.library_manifest
+                                    );
                                 }
                             }
                         }
@@ -163,7 +168,7 @@ fn main() {
                             broke.lock().unwrap().push(Broke {
                                 seed,
                                 step,
-                                program: program.clone(),
+                                program: case.program.clone(),
                                 why,
                             });
                             if !settings.keep_going {
@@ -171,15 +176,14 @@ fn main() {
                             }
                         }
                         Verdict::Differed(answers) => {
-                            let smaller = if settings.shrink {
-                                shrink(settings, &room, &program, &library)
-                            } else {
-                                program.clone()
-                            };
+                            let mut smaller = case.clone();
+                            if settings.shrink {
+                                smaller.program = shrink(settings, &room, &case);
+                            }
                             let odd = oddOneOut(&answers);
                             findings.lock().unwrap().push(Finding {
                                 seed,
-                                program: smaller,
+                                case: smaller,
                                 answers,
                                 odd,
                             });
@@ -275,7 +279,14 @@ fn main() {
     }
     for finding in &found {
         println!("\n──────── seed {} ────────", finding.seed);
-        println!("{}", finding.program);
+        println!("{}", finding.case.program);
+        println!("--- under this Xag-Config.toml:\n{}", finding.case.manifest);
+        if !finding.case.library.is_empty() {
+            println!(
+                "--- and its library, lib/lib.xag:\n{}\n--- under lib/Xag-Config.toml:\n{}",
+                finding.case.library, finding.case.library_manifest
+            );
+        }
         match finding.odd {
             Some(name) => println!(
                 ">>> {name} is the one out of step; the other two agree.\n\
@@ -344,27 +355,27 @@ fn withoutTheCompilersVoice(mut answer: Answer) -> Answer {
 }
 
 /// One program, put to every engine.
-fn ask(settings: &Settings, room: &Path, program: &str, library: &str) -> Verdict {
+fn ask(settings: &Settings, room: &Path, case: &gen::Case) -> Verdict {
     let source = room.join("case.xag");
-    if let Err(why) = std::fs::write(&source, program) {
+    if let Err(why) = std::fs::write(&source, &case.program) {
         return Verdict::Broke("writing the case out", why.to_string());
     }
-    // A program that imports a library needs the library beside it, with both
-    // manifests: the library's saying what it is called, the program's saying
-    // where it is. A program that stands alone needs neither, and a manifest
-    // left over from the last case would say it uses something it does not —
-    // so both are written or both removed, every time.
+    // Every program has a manifest, because the manifest is where its
+    // `[defaults]` are. A program that imports a library needs the library
+    // beside it too, with a manifest of its own saying what it is called and
+    // what it decided. A library left over from the last case would be one
+    // this case's manifest does not reach, and is removed.
+    if let Err(why) = std::fs::write(room.join("Xag-Config.toml"), &case.manifest) {
+        return Verdict::Broke("writing the manifest out", why.to_string());
+    }
     let lib = room.join("lib");
-    let manifest = room.join("Xag-Config.toml");
-    if library.is_empty() {
-        let _ = std::fs::remove_file(&manifest);
+    if case.library.is_empty() {
         let _ = std::fs::remove_dir_all(&lib);
     } else {
         let _ = std::fs::create_dir_all(&lib);
         for (path, text) in [
-            (lib.join("Xag-Config.toml"), "[unit]\nname = \"lib\"\ncalled = \"lib\"\n"),
-            (lib.join("lib.xag"), library),
-            (manifest, "[uses]\npaths = [\"lib\"]\n"),
+            (lib.join("Xag-Config.toml"), &case.library_manifest),
+            (lib.join("lib.xag"), &case.library),
         ] {
             if let Err(why) = std::fs::write(&path, text) {
                 return Verdict::Broke("writing the library out", why.to_string());
@@ -438,8 +449,9 @@ fn ask(settings: &Settings, room: &Path, program: &str, library: &str) -> Verdic
 // The library is kept whole while the program shrinks: what is being cut down
 // is the program that showed the disagreement, and the library is what it
 // imports.
-fn shrink(settings: &Settings, room: &Path, program: &str, library: &str) -> String {
-    let mut best: Vec<String> = program.lines().map(|line| line.to_string()).collect();
+fn shrink(settings: &Settings, room: &Path, case: &gen::Case) -> String {
+    let mut best: Vec<String> = case.program.lines().map(|line| line.to_string()).collect();
+    let mut tried_case = case.clone();
     let mut improved = true;
     let mut rounds = 0;
     while improved && rounds < 8 {
@@ -450,8 +462,8 @@ fn shrink(settings: &Settings, room: &Path, program: &str, library: &str) -> Str
             at -= 1;
             let mut tried = best.clone();
             tried.remove(at);
-            let text = tried.join("\n");
-            if matches!(ask(settings, room, &text, library), Verdict::Differed(_)) {
+            tried_case.program = tried.join("\n");
+            if matches!(ask(settings, room, &tried_case), Verdict::Differed(_)) {
                 best = tried;
                 improved = true;
             }

@@ -110,6 +110,7 @@ public:
     }
 
     for (const TypedItem &item : program_.items) {
+      settings_ = item.settings;
       if (item.kind == TypedItemKind::Const) {
         newBody(constBody(item.name));
         names_.emplace_back();
@@ -184,6 +185,10 @@ private:
   // Whether the statement being lowered puts its answer somewhere that said
   // `wrapping`. A sum is checked while the program runs unless it did.
   bool wrapsHere_ = false;
+  // What the unit the item came from decided. Read off the item, so a library's
+  // function is lowered under the library's settings whichever program it is
+  // lowered into.
+  Settings settings_;
   std::unordered_map<std::string, Ty> consts_;
   std::unordered_map<std::string, Ty> answers_;
 
@@ -204,6 +209,49 @@ private:
     emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                    RValue{RValueKind::Call, {}, constBody(e.text), 0, {},
                           typeRef(answers)}});
+    return into;
+  }
+
+  // `and` and `or` under `logic = "stops-early"`, which is the default: the
+  // right side is asked only when the left has not already settled it. There is
+  // no instruction for that, because an instruction has both its operands
+  // before it runs — so it is two blocks and a switch, the same shape as an
+  // `if` with one arm:
+  //
+  //     into = left
+  //     switch into: true → ask, otherwise → after      (`and`)
+  //   ask:
+  //     into = right
+  //     goto after
+  //   after:
+  //
+  // `or` swaps the two targets. Whatever the right side makes on its way — a
+  // text it counted, a value it moved — is made in `ask` and ended there, in a
+  // scope of its own, so that nothing after `after` has to wonder whether it
+  // exists. A `move` inside the right side is still a maybe for elaboration,
+  // which is what elaboration is for.
+  //
+  // Under `asks-both` this is not reached: both sides are lowered as any
+  // arithmetic is, and every engine already has the instruction.
+  unsigned stoppingEarly(const TypedExpr &e, Ty type) {
+    const unsigned into = addLocal("", type);
+    Operand left = operandOf(*e.children[0]);
+    emit(Statement{StatementKind::Assign, e.children[0]->span, into, {}, {},
+                   RValue{RValueKind::Use, {}, {}, 0, {std::move(left)}, typeRef(type)}});
+    const unsigned ask = addBlock();
+    const unsigned after = addBlock();
+    const bool conjunction = e.text == "and";
+    finish(Terminator{TerminatorKind::Switch, e.span,
+                      Operand{OperandKind::Copy, into, {}, typeRef(type)}, {"true"},
+                      {conjunction ? ask : after, conjunction ? after : ask}, false, {}});
+    current_ = ask;
+    openScope();
+    Operand right = operandOf(*e.children[1]);
+    emit(Statement{StatementKind::Assign, e.children[1]->span, into, {}, {},
+                   RValue{RValueKind::Use, {}, {}, 0, {std::move(right)}, typeRef(type)}});
+    closeScope();
+    finish(Terminator{TerminatorKind::Goto, e.span, {}, {}, {after}, false, {}});
+    current_ = after;
     return into;
   }
 
@@ -421,6 +469,8 @@ private:
     }
 
     case TypedKind::Binary: {
+      if ((e.text == "and" || e.text == "or") && !settings_.asksBoth)
+        return stoppingEarly(e, type);
       Operand left = operandOf(*e.children[0]);
       Operand right = operandOf(*e.children[1]);
       const unsigned into = addLocal("", type);

@@ -33,6 +33,7 @@ struct Unit {
   std::string directory;           // where its files are
   std::vector<std::string> files;  // every `.xag` in that directory
   std::vector<std::string> uses;   // the `[uses]` paths of its own manifest
+  Settings settings;               // its `[defaults]`, as far as they are read
   // The manifest, kept so a diagnostic about it can point into it.
   std::shared_ptr<Source> manifest;
   Span nameSpan, calledSpan;
@@ -80,6 +81,12 @@ const Unit *unitNamed(const UnitsResult &units, const std::string &name);
 // can collide with — and it is why nothing below the parser had to learn what a
 // unit is.
 void qualify(std::vector<Program> &files, const Unit &unit);
+
+// Writes what a unit's manifest decided onto every item of one of its files.
+// Done to the program's own file as much as to a library's, because the
+// program is a unit too; done here rather than in the parser because the
+// parser reads one file and a setting is about a directory of them.
+void applySettings(Program &file, const Unit &unit);
 
 // Every place a file reaches into a library — `t.twice[…]`, `var.t.point`,
 // `t.uer:*…*` — checked against the file's own `import` lines. A file uses what

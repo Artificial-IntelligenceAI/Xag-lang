@@ -611,6 +611,9 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // And every prefix this file reaches for is one it imported.
   if (report(source, xag::importsCover(parsed.program, units)) != 0)
     return false;
+  // The program is a unit too, and its manifest's `[defaults]` are its own.
+  // Where the entry is a library this is redone below, for the whole unit.
+  xag::applySettings(parsed.program, units.self);
 
   // One library's files, read from the one source and renamed together under
   // the library's call name. All of them first, then the rename: what a name
@@ -654,6 +657,8 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
       theirs.push_back(std::move(theirParsed.program));
     }
     xag::qualify(theirs, library);
+    for (xag::Program &file : theirs)
+      xag::applySettings(file, library);
     xag::Item *itmt = nullptr;
     for (xag::Program &file : theirs)
       for (xag::Item &item : file.items) {

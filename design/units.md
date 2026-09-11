@@ -168,8 +168,10 @@ is refused (`E0608`), in the program and in a library alike.
 
 - **Constants across a unit.** `t.'LIMIT'` — how a program spells a library's
   constant — has no syntax yet. Functions and types do.
-- **Settings per unit.** Decided, and nothing to attach to yet: the four
-  semantic knobs are decided in the manifest but nothing branches on them.
+- **Settings per unit.** Built for `logic`; `division`, `characters` and
+  `no-number` are decided in the manifest and nothing reads them yet. The
+  program's override — its settings winning everywhere, or a library whose
+  settings differ refused — has no spelling yet.
 - **A program of several files.** A library is all the `.xag` files in its
   directory; a program is still the one file named. Which file has `START`,
   and what several `ITMT`s mean, is not decided.
@@ -198,3 +200,14 @@ is refused (`E0608`), in the program and in a library alike.
   watchers see come round is now a refusal, with a tip that says whether
   `wrapping` can be written or the sum needs a name first. The watchers no
   longer notice a `wrapping` sum at all — it is doing what it was declared to.
+- **2026-09-11, settings** — `[defaults]` is read per unit and written onto
+  every item of the unit (`Settings` in `Ast.h`, carried on `Item` and
+  `TypedItem`), so the middle layer lowers each function under the manifest of
+  the unit that wrote it. `logic` is the first setting read. It turned out the
+  default itself was not built: `and` and `or` were lowered as one instruction
+  on both sides, so both sides were always asked. `stops-early` is now two
+  blocks and a switch in `MirBuild.cpp`; `asks-both` is the instruction.
+  `tests/units/asking` is a library on `asks-both` imported by a program that
+  said nothing, and the test checks the output rather than only that engines
+  agree. The oracle tosses `logic` per unit and writes `and`/`or` now, which it
+  never had.

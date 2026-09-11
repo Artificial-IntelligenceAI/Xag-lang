@@ -162,9 +162,20 @@ struct Param {
   std::string name;
 };
 
+// What a unit's manifest decided about what its code answers, carried on every
+// item of the unit. Settings attach to the item rather than the build: a
+// library's `and` stops early if the library said so, whatever the program that
+// calls it said, because the author tested one thing and shipped that thing.
+// Defaults are the manifest's defaults, so a file read with no manifest at all
+// — every test, a lone program — gets exactly what an empty manifest would.
+struct Settings {
+  bool asksBoth = false; // logic = "asks-both": `and` and `or` ask both sides
+};
+
 struct Item {
   ItemKind kind = ItemKind::Start;
   Span span;
+  Settings settings;
 
   Chain chain;              // Function, Const
   Span nameSpan;

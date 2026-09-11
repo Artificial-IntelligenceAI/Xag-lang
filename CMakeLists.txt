@@ -236,6 +236,16 @@ add_test(NAME units_two_files_build_alone_from_a
 add_test(NAME units_two_files_build_alone_from_b
          COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/b.xag)
 
+# Settings are per unit: a library whose manifest says `logic = "asks-both"`
+# asks both sides of its own `and`, and the program importing it, which said
+# nothing, still stops early. Compared against what was expected rather than
+# only between engines, because two engines asking a side neither should agree.
+add_test(NAME units_settings_are_per_unit
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-asking/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+
 # A mistake inside a library points into the library's file.
 add_test(NAME units_diagnostic_points_into_library
          COMMAND ${CMAKE_COMMAND}

@@ -1,0 +1,14 @@
+READ_ME {
+This program says nothing about `logic`, so its `and` stops early. The
+library's `and` asks both sides, because the library said so.
+}
+PREP {
+    import 'asking';
+}
+START {
+    var.bool 'a' = [ask.both[]];
+    var.bool 'b' = [bool:*false* and ask.loud[str:*program*]];
+    print.stdout['a' str:* * 'b' \n];
+}
+ITMT {
+}

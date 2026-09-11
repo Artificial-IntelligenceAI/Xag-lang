@@ -154,6 +154,7 @@ struct TypedParam {
 struct TypedItem {
   TypedItemKind kind = TypedItemKind::Start;
   Span span;
+  Settings settings;     // what the item's unit decided; see `Ast.h`
   Span nameSpan;
   std::string name;
   Ty answers;

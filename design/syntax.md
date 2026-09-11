@@ -352,6 +352,29 @@ associative and the brackets would say nothing:
 [*9* mod *5* mod *3*]        # brackets — `mod` is not associative
 ```
 
+### `and` asks its right side only when it has to
+
+`logic = "stops-early"` is the default in `Xag-Config.toml`, and it means what
+C, Rust and Python all mean by `&&` and `||`: `and` asks its right side only
+when the left was true, and `or` only when it was false. The setting exists
+for the guard that every language has:
+
+```
+if ('n' !== int64:*0*) and ((int64:*100* / 'n') > int64:*5*) { … }
+```
+
+Under `stops-early` a zero `'n'` settles the `and` on the left and the division
+is never asked. Under `asks-both` — the other value — both sides are always
+asked, and that division by zero stops the program.
+
+It is a setting rather than a rule because the two are two languages: a call on
+the right side prints under one and not the other. Like every `[defaults]`
+setting it is per unit — a library's `and` does what the library's manifest
+says, whichever program calls it — and a value that is neither is refused
+(`E0609`) rather than read as the default.
+
+Until 2026-09-11 the compiler asked both sides whatever the manifest said.
+
 ## Comparison carries the whole of `==`
 
 ```

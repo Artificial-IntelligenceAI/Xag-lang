@@ -128,9 +128,11 @@ decimal = "software"
 # `fast-interpreter` runs bytecode. `native` is compiled ahead of time.
 engine = "test-interpreter"
 
-# `decimal` is read; the rest are decided but not yet asked about, because
-# nothing branches on them yet. The file is looked for beside the source and
-# then upward, so a project decides for every file under it. A single run may
+# `decimal` and `logic` are read; the rest are decided but not yet asked about,
+# because nothing branches on them yet. The file is looked for beside the
+# source and then upward, so a project decides for every file under it. A
+# `[defaults]` setting is per unit: a library's code runs under the library's
+# manifest whichever program calls it. A single run may
 # say otherwise — `xagc --decimal=hardware` — which is how a build that has both
 # decimals is asked for each in turn.
 #

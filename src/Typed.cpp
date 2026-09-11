@@ -379,6 +379,7 @@ private:
   TypedItem item_(const Item &item) {
     TypedItem out;
     out.span = item.span;
+    out.settings = item.settings;
     out.nameSpan = item.nameSpan;
     out.name = item.name;
     out.wrote = &item;

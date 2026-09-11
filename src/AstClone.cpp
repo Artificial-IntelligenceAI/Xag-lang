@@ -90,6 +90,7 @@ Item clone(const Item &item) {
   Item out;
   out.kind = item.kind;
   out.span = item.span;
+  out.settings = item.settings;
   out.chain = item.chain;
   out.nameSpan = item.nameSpan;
   out.name = item.name;

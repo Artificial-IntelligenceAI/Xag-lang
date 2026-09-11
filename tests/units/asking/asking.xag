@@ -1,0 +1,15 @@
+READ_ME {
+A library whose manifest says `and` asks both sides. Its own `and` does;
+a program importing it keeps whatever its own manifest says.
+}
+LIBRARY {
+    fn.export.bool 'loud' [str 'tag'] {
+        print.stdout[str:*asked * 'tag' \n];
+        give [*true*];
+    }
+    fn.export.bool 'both' [] {
+        give [bool:*false* and loud[str:*library*]];
+    }
+}
+ITMT {
+}

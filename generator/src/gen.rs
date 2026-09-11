@@ -193,6 +193,12 @@ pub struct Writer<'a> {
     // The library being written beside the program, when there is one, and
     // whether what is being written right now goes into it.
     library: &'a mut String,
+    // Each unit's manifest. `[defaults]` are chosen here, per unit, so that a
+    // library and the program importing it are as often as not under
+    // different settings — which is the case the rule "settings attach to the
+    // item" exists for.
+    manifest: &'a mut String,
+    library_manifest: &'a mut String,
     in_library: bool,
     scopes: Vec<Vec<Var>>,
     funs: Vec<Fun>,
@@ -215,7 +221,20 @@ pub struct Writer<'a> {
     size: u32,
 }
 
-/// A whole program, written into `out`.
+/// One case: a program, the library beside it when there is one, and what
+/// each unit's manifest says. The manifests matter as much as the code — a
+/// unit's `[defaults]` change what its code answers, and a finding without
+/// them is a finding nobody can run again.
+#[derive(Default, Clone)]
+pub struct Case {
+    pub program: String,
+    pub library: String,
+    /// The program's `Xag-Config.toml`, and the library's.
+    pub manifest: String,
+    pub library_manifest: String,
+}
+
+/// A whole program, written into `case`.
 ///
 /// `size` is roughly how many statements START gets. It matters more than it
 /// looks: every case pays about 170ms for macOS to scan a freshly linked
@@ -225,16 +244,20 @@ pub struct Writer<'a> {
 /// `library` is left empty when the program stands alone, and otherwise holds
 /// a library the program imports as `lib` — to be written beside it, with a
 /// manifest, by whoever runs the program.
-pub fn generate(seed: u64, size: u32, out: &mut String, library: &mut String) {
-    out.clear();
-    library.clear();
+pub fn generate(seed: u64, size: u32, case: &mut Case) {
+    case.program.clear();
+    case.library.clear();
+    case.manifest.clear();
+    case.library_manifest.clear();
     let mut rng = Rng::from_seed(seed);
     let mut writer = Writer {
         rng: &mut rng,
         may_wrap: false,
-        library,
+        library: &mut case.library,
+        library_manifest: &mut case.library_manifest,
+        manifest: &mut case.manifest,
         in_library: false,
-        out,
+        out: &mut case.program,
         scopes: Vec::new(),
         funs: Vec::new(),
         shapes: Vec::new(),
@@ -361,7 +384,20 @@ impl<'a> Writer<'a> {
         // the same preamble, because a body in it may hand a `str` to
         // `consume` or ask `describe` about a value, and those have to be its
         // own: a library's private names and a program's are different names.
+        // The program's own manifest, with or without a library to reach.
+        // `logic` is a coin each unit tosses for itself: under `asks-both`
+        // the right side of an `and` runs whatever the left said, so a call
+        // there prints, and a division there by zero stops — and all three
+        // engines have to do the same.
+        let logic = |rng: &mut Rng| {
+            if rng.chance(50) { "logic = \"asks-both\"\n" } else { "logic = \"stops-early\"\n" }
+        };
+        self.manifest.push_str("[defaults]\n");
+        self.manifest.push_str(logic(self.rng));
         if self.rng.chance(40) {
+            self.manifest.push_str("\n[uses]\npaths = [\"lib\"]\n");
+            self.library_manifest.push_str("[unit]\nname = \"lib\"\ncalled = \"lib\"\n\n[defaults]\n");
+            self.library_manifest.push_str(logic(self.rng));
             let start = self.out.len();
             self.in_library = true;
             let exported = self.rng.below(3) + 1;
@@ -2033,6 +2069,26 @@ impl<'a> Writer<'a> {
                 return;
             }
         }
+        // Some of the time two of them, joined. Under `stops-early` the right
+        // one is asked only when the left has not settled it; under
+        // `asks-both` it is asked regardless. The right side may be a call,
+        // which prints, so which of the two the unit is under shows in the
+        // output — and a division in it divides, so it may stop. Bracketed,
+        // because a comparison beside `and` has no agreed order either.
+        if self.rng.chance(25) {
+            self.out.push('(');
+            self.comparison();
+            self.out.push(')');
+            self.out.push_str(if self.rng.chance(50) { " and (" } else { " or (" });
+            self.comparison();
+            self.out.push(')');
+            return;
+        }
+        self.comparison();
+    }
+
+    /// Two whole numbers, each saying its own type, compared.
+    fn comparison(&mut self) {
         // A comparison takes no type from anywhere, so *both* sides have to say
         // what they are. The right one used to take its type from the left; it
         // does not any more, because the left is the value standing beside it

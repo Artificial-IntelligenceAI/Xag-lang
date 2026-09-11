@@ -38,20 +38,30 @@ struct Ran {
 // which is not the same as reading an empty line.
 std::string given;
 
+// Why a program did not compile, said on standard error, so that a test that
+// did not compile says what stopped it rather than only that something did.
+template <typename Result> bool passed(const Result &r) {
+  if (r.ok())
+    return true;
+  for (const xag::Diagnostic &d : r.diagnostics)
+    std::cerr << "  " << d.code << ": " << d.message << '\n';
+  return false;
+}
+
 Ran run(const std::string &text) {
   Ran out;
   const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
-  if (!lexed.ok())
+  if (!passed(lexed))
     return out;
   const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
-  if (!parsed.ok())
+  if (!passed(parsed))
     return out;
   const xag::CheckResult checked = xag::check(source, parsed.program);
-  if (!checked.ok())
+  if (!passed(checked))
     return out;
   const xag::OwnResult owned = xag::own(source, parsed.program, checked);
-  if (!owned.ok())
+  if (!passed(owned))
     return out;
   out.compiled = true;
 
@@ -337,6 +347,34 @@ void itDecides() {
        "  else-if 'n' == int64:*1* { print.stdout[str:*one* \\n]; }\n"
        "  else { print.stdout[str:*small* \\n]; } }\n",
        "one\n");
+}
+
+// `logic = "stops-early"` is the default: `and` asks its right side only when
+// the left was true, and `or` only when it was false. Both sides used to be
+// asked whatever the left said — a guard like `('n' !== *0*) and (… / 'n')`
+// divided by zero — while the manifest said the opposite.
+void itStopsAskingEarly() {
+  SAYS("fn.bool 'loud' [str 'tag'] { print.stdout[str:*asked * 'tag' \\n]; give [*true*]; }\n"
+       "START {\n"
+       "  var.bool 'a' = [bool:*false* and loud[str:*a*]];\n"
+       "  var.bool 'b' = [bool:*true* or loud[str:*b*]];\n"
+       "  var.bool 'c' = [bool:*true* and loud[str:*c*]];\n"
+       "  var.bool 'd' = [bool:*false* or loud[str:*d*]];\n"
+       "  print.stdout['a' str:* * 'b' str:* * 'c' str:* * 'd' \\n]; }\n",
+       "asked c\nasked d\nfalse true true true\n");
+  // The guard the setting is for.
+  SAYS("START { var.int64 'n' = [*0*];\n"
+       "  print.stdout[('n' !== int64:*0*) and ((int64:*100* / 'n') > int64:*5*) \\n]; }\n",
+       "false\n");
+  // The right side may make something and move something; both are its own
+  // block's business, and the program ends holding nothing either way.
+  SAYS("fn.bool 'eats' [str 'meal'] { give [count[loan 'meal'] > int64:*2*]; }\n"
+       "START { var.str 's' = [str:*hello*];\n"
+       "  var.bool 'e' = [('s' == str:*hello*) and eats[move 's']];\n"
+       "  var.str 't' = [str:*hi*];\n"
+       "  var.bool 'f' = [('t' == str:*hello*) and eats[move 't']];\n"
+       "  print.stdout['e' str:* * 'f' \\n]; }\n",
+       "true false\n");
 }
 
 void itLoops() {
@@ -998,6 +1036,7 @@ int main() {
   itHoldsWhatABin64Cannot();
   itCountsInTensWhenAsked();
   itDecides();
+  itStopsAskingEarly();
   itLoops();
   aLoopCountingToTheMostItsCounterHoldsFinishes();
   aPermCounterKeepsWhatItHad();
