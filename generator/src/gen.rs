@@ -145,7 +145,39 @@ struct Fun {
     name: String,
     params: Vec<Ty>,
     answers: Ty,
+    // Declared in the library, so a call from the program is `lib.name[…]`
+    // and a call from inside the library is `name[…]`.
+    library: bool,
 }
+
+// What every unit starts with, program and library alike. Something to hand a
+// `str` to, so that moves and their drop flags get written as well as read;
+// and three generics, written in whether or not anything calls one — a generic
+// nobody calls is written out not at all, which is itself worth generating.
+// They are fixed rather than random because what a generic body may do depends
+// on every type it is ever called with, and the generator does not know that
+// when it writes the body. These do only what every type can do.
+const PREAMBLE: &str = concat!(
+    "fn.nothing 'consume' [str 't'] {\n    print.stdout['t' \\n];\n}\n\n",
+    "fn.nothing 'look' [loan.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n",
+    "fn.nothing 'edit' [loanmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n",
+    "fn.str 'describe' [loan.any 'v'] {\n",
+    "    whichever 'v' {\n",
+    "        is number     { give [convert-to-str['v']]; }\n",
+    "        is bool       { give [convert-to-str['v']]; }\n",
+    "        is str        { give [convert-to-str[count['v']]]; }\n",
+    "        is many       { give [convert-to-str[count['v']]]; }\n",
+    "        is struct     { give [str:*group*]; }\n",
+    "        is or-nothing { give [str:*maybe*]; }\n",
+    "    }\n}\n\n",
+    "fn.str 'parts-of' [loan.any 'v'] {\n",
+    "    var.mut.str 'out' = [str:*<*];\n",
+    "    loop.parts 'p' = ['v'] {\n",
+    "        set 'out' = ['out' 'p'.name str:*=* (describe[loan 'p'.value]) str:* *];\n",
+    "    }\n",
+    "    give ['out' str:*>*];\n}\n\n",
+    "fn.any 'same' [any 'v'] { give ['v']; }\n\n",
+);
 
 pub struct Writer<'a> {
     rng: &'a mut Rng,
@@ -158,6 +190,10 @@ pub struct Writer<'a> {
     /// `give`, a place in a `many` — a whole number is a name, a literal, a
     /// count, or a division, none of which can overflow.
     may_wrap: bool,
+    // The library being written beside the program, when there is one, and
+    // whether what is being written right now goes into it.
+    library: &'a mut String,
+    in_library: bool,
     scopes: Vec<Vec<Var>>,
     funs: Vec<Fun>,
     shapes: Vec<Shape>,
@@ -186,12 +222,18 @@ pub struct Writer<'a> {
 /// binary before it will run it once, which dwarfs compiling and running put
 /// together. That cost is per *binary*, not per statement, so the way to test
 /// more per second is to ask each binary to carry more.
-pub fn generate(seed: u64, size: u32, out: &mut String) {
+/// `library` is left empty when the program stands alone, and otherwise holds
+/// a library the program imports as `lib` — to be written beside it, with a
+/// manifest, by whoever runs the program.
+pub fn generate(seed: u64, size: u32, out: &mut String, library: &mut String) {
     out.clear();
+    library.clear();
     let mut rng = Rng::from_seed(seed);
     let mut writer = Writer {
         rng: &mut rng,
         may_wrap: false,
+        library,
+        in_library: false,
         out,
         scopes: Vec::new(),
         funs: Vec::new(),
@@ -304,53 +346,39 @@ impl<'a> Writer<'a> {
         self.out.push_str(&self.seed.to_string());
         self.out.push_str(".\n}\n\nPREP {\n");
 
-        // Something to hand a `str` to, so that moves and their drop flags get
-        // written as well as read.
-        self.out
-            .push_str("fn.nothing 'consume' [str 't'] {\n    print.stdout['t' \\n];\n}\n\n");
-        self.out.push_str(
-            "fn.nothing 'look' [loan.str 't'] {\n    print.stdout[(count['t']) \\n];\n}\n\n");
-        self.out.push_str(
-            "fn.nothing 'edit' [loanmut.str 't'] {\n    set 't' = ['t' *!*];\n}\n\n");
-
-        // Three generics, written into every program whether or not anything
-        // calls one. A generic nobody calls is written out not at all, which is
-        // itself worth generating.
-        //
-        // They are fixed rather than random because what a generic body may do
-        // depends on every type it is ever called with, and the generator does
-        // not know that when it writes the body. These three do only what every
-        // type can do — be looked at, be asked about, be handed back.
-
-        // Every kind it could be handed, so no call can fail to be covered.
-        self.out.push_str(concat!(
-            "fn.str 'describe' [loan.any 'v'] {\n",
-            "    whichever 'v' {\n",
-            "        is number     { give [convert-to-str['v']]; }\n",
-            "        is bool       { give [convert-to-str['v']]; }\n",
-            "        is str        { give [convert-to-str[count['v']]]; }\n",
-            "        is many       { give [convert-to-str[count['v']]]; }\n",
-            "        is struct     { give [str:*group*]; }\n",
-            "        is or-nothing { give [str:*maybe*]; }\n",
-            "    }\n}\n\n"));
-
-        // Walking a struct nobody wrote this function to know about, and
-        // asking each field what it is on the way past.
-        self.out.push_str(concat!(
-            "fn.str 'parts-of' [loan.any 'v'] {\n",
-            "    var.mut.str 'out' = [str:*<*];\n",
-            "    loop.parts 'p' = ['v'] {\n",
-            "        set 'out' = ['out' 'p'.name str:*=* (describe[loan 'p'.value]) str:* *];\n",
-            "    }\n",
-            "    give ['out' str:*>*];\n}\n\n"));
-
-        // The floor: what can be done with a blank when nothing narrows it.
-        self.out.push_str("fn.any 'same' [any 'v'] { give ['v']; }\n\n");
+        self.out.push_str(PREAMBLE);
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
             answers: COUNTED, // never called for its answer
+            library: false,
         });
+
+        // Some of the time, a library: a second unit with functions of its
+        // own, exported, reached from this program as `lib.f0[…]`. Written
+        // first so that nothing in it can name a constant or a struct of the
+        // program's — a library knows nothing about who imports it. It gets
+        // the same preamble, because a body in it may hand a `str` to
+        // `consume` or ask `describe` about a value, and those have to be its
+        // own: a library's private names and a program's are different names.
+        if self.rng.chance(40) {
+            let start = self.out.len();
+            self.in_library = true;
+            let exported = self.rng.below(3) + 1;
+            for _ in 0..exported {
+                self.function();
+            }
+            self.in_library = false;
+            let written = self.out[start..].to_string();
+            self.out.truncate(start);
+            self.library.push_str("READ_ME {\nA library written by xag-oracle from seed ");
+            self.library.push_str(&self.seed.to_string());
+            self.library.push_str(".\n}\nLIBRARY {\n");
+            self.library.push_str(PREAMBLE);
+            self.library.push_str(&written);
+            self.library.push_str("}\nITMT {\n}\n");
+            self.out.push_str("import 'lib';\n\n");
+        }
 
         let constants = self.rng.below(3);
         for _ in 0..constants {
@@ -963,7 +991,7 @@ impl<'a> Writer<'a> {
         // One whole type throughout: what it takes, what it works in, and what
         // it answers with, since none of them convert into each other.
         let ty = self.pick_whole();
-        self.out.push_str("fn.");
+        self.out.push_str(if self.in_library { "fn.export." } else { "fn." });
         self.out.push_str(ty.written());
         // Marked where it is named, bare where it is called.
         self.out.push_str(" '");
@@ -992,7 +1020,7 @@ impl<'a> Writer<'a> {
         self.out.push_str("];\n}\n\n");
         self.scopes.pop();
         self.indent = 0;
-        self.funs.push(Fun { name, params, answers: ty });
+        self.funs.push(Fun { name, params, answers: ty, library: self.in_library });
     }
 
     fn body(&mut self, statements: u32) {
@@ -2179,6 +2207,9 @@ impl<'a> Writer<'a> {
         let name = self.funs[at].name.clone();
         let params = self.funs[at].params.clone();
         let arity = params.len();
+        if self.funs[at].library && !self.in_library {
+            self.out.push_str("lib.");
+        }
         self.out.push_str(&name);
         self.out.push('[');
         for i in 0..arity {

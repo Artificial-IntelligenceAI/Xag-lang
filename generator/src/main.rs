@@ -131,14 +131,15 @@ fn main() {
                 let room = settings.workspace.join(format!("worker{worker}"));
                 let _ = std::fs::create_dir_all(&room);
                 let mut program = String::with_capacity(4096);
+                let mut library = String::with_capacity(2048);
 
                 loop {
                     let seed = next.fetch_add(1, Ordering::Relaxed);
                     if seed >= end {
                         break;
                     }
-                    gen::generate(seed, settings.size, &mut program);
-                    match ask(settings, &room, &program) {
+                    gen::generate(seed, settings.size, &mut program, &mut library);
+                    match ask(settings, &room, &program, &library) {
                         Verdict::Agreed => {}
                         Verdict::Skipped => {
                             skipped.fetch_add(1, Ordering::Relaxed);
@@ -153,6 +154,9 @@ fn main() {
                                     "\nseed {seed}: the generator wrote something the \
                                      compiler would not take —\n{why}\n{program}"
                                 );
+                                if !library.is_empty() {
+                                    eprintln!("\n--- and its library, lib/lib.xag:\n{library}");
+                                }
                             }
                         }
                         Verdict::Broke(step, why) => {
@@ -168,7 +172,7 @@ fn main() {
                         }
                         Verdict::Differed(answers) => {
                             let smaller = if settings.shrink {
-                                shrink(settings, &room, &program)
+                                shrink(settings, &room, &program, &library)
                             } else {
                                 program.clone()
                             };
@@ -340,10 +344,32 @@ fn withoutTheCompilersVoice(mut answer: Answer) -> Answer {
 }
 
 /// One program, put to every engine.
-fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
+fn ask(settings: &Settings, room: &Path, program: &str, library: &str) -> Verdict {
     let source = room.join("case.xag");
     if let Err(why) = std::fs::write(&source, program) {
         return Verdict::Broke("writing the case out", why.to_string());
+    }
+    // A program that imports a library needs the library beside it, with both
+    // manifests: the library's saying what it is called, the program's saying
+    // where it is. A program that stands alone needs neither, and a manifest
+    // left over from the last case would say it uses something it does not —
+    // so both are written or both removed, every time.
+    let lib = room.join("lib");
+    let manifest = room.join("Xag-Config.toml");
+    if library.is_empty() {
+        let _ = std::fs::remove_file(&manifest);
+        let _ = std::fs::remove_dir_all(&lib);
+    } else {
+        let _ = std::fs::create_dir_all(&lib);
+        for (path, text) in [
+            (lib.join("Xag-Config.toml"), "[unit]\nname = \"lib\"\ncalled = \"lib\"\n"),
+            (lib.join("lib.xag"), library),
+            (manifest, "[uses]\npaths = [\"lib\"]\n"),
+        ] {
+            if let Err(why) = std::fs::write(&path, text) {
+                return Verdict::Broke("writing the library out", why.to_string());
+            }
+        }
     }
 
     let interpreted = run(Command::new(&settings.xagc).arg("run").arg(&source));
@@ -409,7 +435,10 @@ fn ask(settings: &Settings, room: &Path, program: &str) -> Verdict {
 
 /// Take lines away for as long as the engines keep disagreeing. A finding that
 /// arrives as forty lines is a finding somebody still has to read.
-fn shrink(settings: &Settings, room: &Path, program: &str) -> String {
+// The library is kept whole while the program shrinks: what is being cut down
+// is the program that showed the disagreement, and the library is what it
+// imports.
+fn shrink(settings: &Settings, room: &Path, program: &str, library: &str) -> String {
     let mut best: Vec<String> = program.lines().map(|line| line.to_string()).collect();
     let mut improved = true;
     let mut rounds = 0;
@@ -422,7 +451,7 @@ fn shrink(settings: &Settings, room: &Path, program: &str) -> String {
             let mut tried = best.clone();
             tried.remove(at);
             let text = tried.join("\n");
-            if matches!(ask(settings, room, &text), Verdict::Differed(_)) {
+            if matches!(ask(settings, room, &text, library), Verdict::Differed(_)) {
                 best = tried;
                 improved = true;
             }
