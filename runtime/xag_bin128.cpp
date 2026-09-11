@@ -344,6 +344,17 @@ XagBin128 xag_bin128_mod_floored(XagBin128 a, XagBin128 b) {
   return r.sign != y.sign ? xag_bin128_add(remainder, b) : remainder;
 }
 
+int32_t xag_bin128_is_number(XagBin128 value) {
+  const Kind kind = take(value).kind;
+  return kind != Kind::Infinity && kind != Kind::NotANumber;
+}
+
+XagBin128 xag_bin128_number(XagBin128 value) {
+  if (!xag_bin128_is_number(value))
+    xag_no_number();
+  return value;
+}
+
 // Whether a number is whole, and what whole number it is.
 bool wholeValue(const Taken &x, long long &out) {
   if (x.kind != Kind::Finite)

@@ -167,6 +167,18 @@ void xag_str_push(XagStr *text, const XagStr *tail) {
 // Written out rather than approximated because the approximation was wrong
 // about Hangul, about every Indic vowel sign and about Arabic prepends — which
 // is to say, right about Latin and emoji and wrong about most of the world.
+// A scalar starts at every byte that is not a continuation byte, and the text
+// is UTF-8 that the lexer already checked.
+int64_t xag_str_count_letters(const XagStr *text) {
+  if (!text || text->length == 0)
+    return 0;
+  int64_t scalars = 0;
+  for (uint64_t at = 0; at < text->length; ++at)
+    if ((static_cast<unsigned char>(text->bytes[at]) & 0xC0) != 0x80)
+      ++scalars;
+  return scalars;
+}
+
 int64_t xag_str_count(const XagStr *text) {
   if (!text || text->length == 0)
     return 0;
@@ -402,6 +414,18 @@ double xag_bin_fit(double value, uint32_t width) {
     return static_cast<double>(static_cast<_Float16>(value));
   if (width == 32)
     return static_cast<double>(static_cast<float>(value));
+  return value;
+}
+
+const char *xag_why_no_number(void) {
+  return "a `bin` had no number to give back";
+}
+
+void xag_no_number(void) { xag_stop(xag_why_no_number()); }
+
+double xag_bin_number(double value) {
+  if (!std::isfinite(value))
+    xag_no_number();
   return value;
 }
 

@@ -137,20 +137,23 @@ void countingAgreesWithUnicodeItself() {
 }
 
 void countingCountsWhatAPersonWouldCount() {
+  // `clusters` is the default; `letters` is what `characters = "letters"`
+  // counts instead, one per scalar.
   struct Case {
     const char *text;
     int64_t clusters;
+    int64_t letters;
   };
   const Case cases[] = {
-      {"", 0},
-      {"abc", 3},
-      {"café", 4},                       // é is one scalar in NFC
-      {"cafe\xCC\x81", 4},               // and e + combining acute is still one
-      {"🧑‍🧑‍🧒‍🧒", 1}, // seven scalars, one thing on the page
-      {"👍🏽", 1},                        // a thumb and a skin tone
-      {"🇹🇭", 1},                        // a flag is two halves
-      {"🇹🇭🇯🇵", 2},                      // and two flags are four
-      {"a\r\nb", 3},                     // a carriage return and a line feed break once
+      {"", 0, 0},
+      {"abc", 3, 3},
+      {"café", 4, 4},                       // é is one scalar in NFC
+      {"cafe\xCC\x81", 4, 5},               // and e + combining acute is still one
+      {"🧑‍🧑‍🧒‍🧒", 1, 7}, // seven scalars, one thing on the page
+      {"👍🏽", 1, 2},                        // a thumb and a skin tone
+      {"🇹🇭", 1, 2},                        // a flag is two halves
+      {"🇹🇭🇯🇵", 2, 4},                      // and two flags are four
+      {"a\r\nb", 3, 4},                     // a carriage return and a line feed break once
   };
   for (const Case &one : cases) {
     XagStr text = of(one.text);
@@ -158,6 +161,12 @@ void countingCountsWhatAPersonWouldCount() {
     if (got != one.clusters) {
       std::cerr << "FAIL count(\"" << one.text << "\") = " << got << ", wanted "
                 << one.clusters << '\n';
+      ++failures;
+    }
+    const int64_t scalars = xag_str_count_letters(&text);
+    if (scalars != one.letters) {
+      std::cerr << "FAIL letters(\"" << one.text << "\") = " << scalars << ", wanted "
+                << one.letters << '\n';
       ++failures;
     }
     xag_str_drop(&text);

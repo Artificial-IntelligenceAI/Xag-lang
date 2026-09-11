@@ -154,6 +154,13 @@ struct RValue {
   // remainder takes the divisor's sign. Carried on the operation because a
   // setting is the unit's, and one program holds operations from several.
   bool floored = false;
+  // Call `count` of a `str`: the unit said `characters = "letters"`, so it
+  // counts Unicode scalars rather than grapheme clusters.
+  bool letters = false;
+  // Binary arithmetic on a `bin`: the unit said `no-number = "stops"`, so an
+  // answer that is an infinity or a not-a-number stops the program instead of
+  // being handed on.
+  bool noNumberStops = false;
 };
 
 enum class StatementKind {

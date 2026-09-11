@@ -74,10 +74,14 @@ Said capture(const xag::Mir &mir, bool quick) {
   return said;
 }
 
-void agree(const std::string &text, int line) {
+// `under` is what the file's manifest would have said: every item is read
+// under it, the way `applySettings` does for a unit.
+void agree(const std::string &text, int line, xag::Settings under = {}) {
   const xag::Source source("test.xag", xag::asFile(text));
   const xag::LexResult lexed = xag::lex(source);
-  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  for (xag::Item &item : parsed.program.items)
+    item.settings = under;
   const xag::CheckResult checked = xag::check(source, parsed.program);
   const xag::OwnResult owned = xag::own(source, parsed.program, checked);
   if (!lexed.ok() || !parsed.ok() || !checked.ok() || !owned.ok()) {
@@ -94,7 +98,8 @@ void agree(const std::string &text, int line) {
   // Both streams, not just the one. Writing every print to standard output is
   // an engine getting the destination wrong, and comparing the two engines'
   // output alone they would agree about it perfectly.
-  if (slow.out != quick.out || slow.err != quick.err || slow.ran != quick.ran) {
+  if (slow.out != quick.out || slow.err != quick.err || slow.ran != quick.ran ||
+      (!slow.ran && slow.trouble != quick.trouble)) {
     std::cerr << "FAIL line " << line << ": the engines disagree\n"
               << "    test: \"" << slow.out << "\" / err \"" << slow.err << "\" ("
               << (slow.ran ? "ran" : slow.trouble) << ")\n"
@@ -114,6 +119,7 @@ void agree(const std::string &text, int line) {
 }
 
 #define AGREE(program) agree(program, __LINE__)
+#define AGREE_UNDER(program, settings) agree(program, __LINE__, settings)
 
 void onTheOrdinaryThings() {
   AGREE("START { print.stdout[str:*hello* \\n]; }\n");
@@ -674,6 +680,61 @@ void onTurningNumbersIntoText() {
 
 } // namespace
 
+// The four `[defaults]` settings, each at its other value. Every value of a
+// setting is a language of its own that both engines have to agree under.
+void onTheOtherValueOfEverySetting() {
+  xag::Settings asksBoth;
+  asksBoth.asksBoth = true;
+  AGREE_UNDER("fn.bool 'loud' [str 't'] { print.stdout['t' \\n]; give [*true*]; }\n"
+              "START { var.bool 'a' = [bool:*false* and loud[str:*asked*]];\n"
+              "  var.bool 'b' = [bool:*true* or loud[str:*asked too*]];\n"
+              "  print.stdout['a' str:* * 'b' \\n]; }\n",
+              asksBoth);
+  // And the default, for the difference.
+  AGREE("fn.bool 'loud' [str 't'] { print.stdout['t' \\n]; give [*true*]; }\n"
+        "START { var.bool 'a' = [bool:*false* and loud[str:*asked*]];\n"
+        "  print.stdout['a' \\n]; }\n");
+
+  xag::Settings floored;
+  floored.floored = true;
+  AGREE_UNDER("START { var.int64 'a' = [*-7*]; var.int64 'b' = [*2*];\n"
+              "  var.int8 'c' = [*-128*]; var.int8 'd' = [*3*];\n"
+              "  var.bin64 'x' = [*-7.5*]; var.bin64 'y' = [*2.0*];\n"
+              "  var.bin128 'w' = [*7.5*]; var.bin128 'v' = [*-2.0*];\n"
+              "  var.deci64 'p' = [*-6.00*]; var.deci64 'q' = [*2.0*];\n"
+              "  print.stdout[('a' / 'b') str:* * ('a' mod 'b') str:* * ('c' / 'd') str:* * ('c' mod 'd') \\n];\n"
+              "  print.stdout[('x' mod 'y') str:* * ('w' mod 'v') str:* * ('p' mod 'q') \\n]; }\n",
+              floored);
+
+  xag::Settings letters;
+  letters.letters = true;
+  AGREE_UNDER("START { var.str 't' = [*🧑‍🧑‍🧒‍🧒 🇹🇭 café*];\n"
+              "  print.stdout[count[loan 't'] \\n]; }\n",
+              letters);
+
+  xag::Settings stops;
+  stops.noNumberStops = true;
+  // A number is a number, and is handed on.
+  AGREE_UNDER("START { var.bin64 'x' = [*1.5*]; var.bin64 'y' = [*0.5*];\n"
+              "  print.stdout[('x' / 'y') str:* * ('x' mod 'y') \\n]; }\n",
+              stops);
+  // An infinity stops, in the same words from both.
+  AGREE_UNDER("START { var.bin64 'x' = [*1.5*]; var.bin64 'z' = [*0*];\n"
+              "  print.stdout[str:*before* \\n];\n"
+              "  print.stdout[('x' / 'z') \\n]; }\n",
+              stops);
+  // So does a not-a-number, and a `bin128`'s, and one that came from a sum
+  // running past the largest `bin32`.
+  AGREE_UNDER("START { var.bin64 'z' = [*0*]; print.stdout[('z' / 'z') \\n]; }\n", stops);
+  AGREE_UNDER("START { var.bin128 'x' = [*1*]; var.bin128 'z' = [*0*];\n"
+              "  print.stdout[('x' / 'z') \\n]; }\n",
+              stops);
+  AGREE_UNDER("START { var.bin32 'x' = [*3e38*]; print.stdout[('x' x 'x') \\n]; }\n", stops);
+  // And under the default, the same programs carry on.
+  AGREE("START { var.bin64 'x' = [*1.5*]; var.bin64 'z' = [*0*];\n"
+        "  print.stdout[('x' / 'z') str:* * ('z' / 'z') \\n]; }\n");
+}
+
 int main() {
   onTheOrdinaryThings();
   onEverySizeAndFamily();
@@ -689,6 +750,7 @@ int main() {
   onSayingWhereAPrintGoes();
   onGroupingNamedThings();
   onTurningNumbersIntoText();
+  onTheOtherValueOfEverySetting();
 
   if (failures == 0)
     std::cout << "the two interpreters agree everywhere asked\n";

@@ -397,6 +397,15 @@ impl<'a> Writer<'a> {
             let mut said = String::from("[defaults]\n");
             said.push_str(if rng.chance(50) { "logic = \"asks-both\"\n" } else { "logic = \"stops-early\"\n" });
             said.push_str(if rng.chance(50) { "division = \"floored\"\n" } else { "division = \"truncated\"\n" });
+            // And `characters`: the texts written here have a family emoji
+            // and a flag in them, which count 1 and 1 under `clusters` and 7
+            // and 2 under `letters`.
+            said.push_str(if rng.chance(50) { "characters = \"letters\"\n" } else { "characters = \"clusters\"\n" });
+            // And `no-number`: a `bin` divided by a zero, or a sum run past
+            // the largest `bin16`, is an infinity under `carries-on` and a
+            // stop under `stops` — and all three have to stop in the same
+            // place for the same reason.
+            said.push_str(if rng.chance(50) { "no-number = \"stops\"\n" } else { "no-number = \"carries-on\"\n" });
             said
         };
         self.manifest.push_str(&defaults(self.rng));

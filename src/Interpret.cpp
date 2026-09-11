@@ -712,6 +712,8 @@ private:
                       : op == "mod" ? (value.floored ? xag_bin128_mod_floored(x, y)
                                                      : xag_bin128_mod(x, y))
                                     : xag_bin128_pow(x, y);
+        if (value.noNumberStops)
+          xag_bin128_number(answer.wide); // stops, and does not come back
       } else {
         // -3 says the two cannot be ordered, which only `!==` answers true to.
         const int32_t order = xag_bin128_compare(x, y);
@@ -740,6 +742,8 @@ private:
         else if (op == "mod") answer.real = value.floored ? xag_bin_mod_floored(x, y, width)
                                                           : xag_bin_mod(x, y, width);
         else answer.real = xag_bin_pow(x, y, width);
+        if (value.noNumberStops)
+          xag_bin_number(answer.real); // stops, and does not come back
       } else if (op == "==") answer.number = x == y;
       else if (op == "!==") answer.number = x != y;
       else if (op == "<") answer.number = x < y;
@@ -1001,7 +1005,9 @@ private:
       Value answer;
       answer.kind = Value::Kind::Number;
       answer.number = !at ? 0
-                      : at->kind == Value::Kind::Text ? xag_str_count(&at->text)
+                      : at->kind == Value::Kind::Text
+                          ? (value.letters ? xag_str_count_letters(&at->text)
+                                           : xag_str_count(&at->text))
                       : at->kind == Value::Kind::Many
                           ? static_cast<XagInt>(at->places ? at->places->size() : 0)
                           : 0;

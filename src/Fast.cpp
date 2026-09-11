@@ -96,7 +96,8 @@ struct Code {
   // Where a fused comparison goes when it is false. On `IntAdd`, `IntSub` and
   // `IntMul` and their pooled forms it means something else and nothing jumps:
   // 1 says the sum is checked, because nothing said it was meant to come round.
-  // On `IntDiv`, `IntMod` and every `Mod`, 1 says the unit said `floored`.
+  // On `IntDiv`, `IntMod` and every `Mod`, 1 says the unit said `floored`; on
+  // the `Real` and `Wide` arithmetic, 2 says it said `no-number = "stops"`.
   uint32_t jump = 0;
 };
 
@@ -760,7 +761,8 @@ private:
                          : op == "/"   ? Op::WideDiv
                          : op == "mod" ? Op::WideMod
                                        : Op::WidePow;
-        emit(Code{which, place, x, y, 0, value.floored ? 1u : 0u});
+        emit(Code{which, place, x, y, 0,
+                  (value.floored ? 1u : 0u) | (value.noNumberStops ? 2u : 0u)});
       }
     } else if (isDecimal(answered) || isDecimal(given)) {
       const uint32_t width = widthOf(isDecimal(working) ? working : given);
@@ -790,7 +792,8 @@ private:
                          : op == "/"   ? Op::RealDiv
                          : op == "mod" ? Op::RealMod
                                        : Op::RealPow;
-        emit(Code{which, place, x, y, width, value.floored ? 1u : 0u});
+        emit(Code{which, place, x, y, width,
+                  (value.floored ? 1u : 0u) | (value.noNumberStops ? 2u : 0u)});
       }
     }
     if (through)
@@ -880,7 +883,7 @@ private:
     }
     if (value.callee == "count") {
       const uint32_t from = value.operands.empty() ? 0 : into(value.operands[0], scratch);
-      emit(Code{Op::TextCount, s.place, from, 0, 0});
+      emit(Code{Op::TextCount, s.place, from, 0, value.letters ? 1u : 0u});
       return;
     }
     const std::vector<uint32_t> froms = gather(value.operands, scratch);
@@ -936,6 +939,12 @@ private:
   // process, because this engine runs inside the compiler.
   void cameRoundAndStopped() {
     trouble_ = xag_why_a_sum_came_round();
+  }
+
+  // A `bin` that came to an infinity or a not-a-number where the unit said
+  // `no-number = "stops"`. The same arrangement.
+  void noNumberAndStopped() {
+    trouble_ = xag_why_no_number();
   }
 
   // A sum that did not fit. Worked out from the two sides rather than read off
@@ -1599,15 +1608,23 @@ private:
         at = to.whole ? one.aux >> 1 : one.jump;
         continue;
 
-      case Op::RealAdd: to.real = xag_bin_fit(read(one.a).real + read(one.b).real, one.aux); break;
-      case Op::RealSub: to.real = xag_bin_fit(read(one.a).real - read(one.b).real, one.aux); break;
-      case Op::RealMul: to.real = xag_bin_fit(read(one.a).real * read(one.b).real, one.aux); break;
-      case Op::RealDiv: to.real = xag_bin_fit(read(one.a).real / read(one.b).real, one.aux); break;
+      case Op::RealAdd: to.real = xag_bin_fit(read(one.a).real + read(one.b).real, one.aux); goto numbered;
+      case Op::RealSub: to.real = xag_bin_fit(read(one.a).real - read(one.b).real, one.aux); goto numbered;
+      case Op::RealMul: to.real = xag_bin_fit(read(one.a).real * read(one.b).real, one.aux); goto numbered;
+      case Op::RealDiv: to.real = xag_bin_fit(read(one.a).real / read(one.b).real, one.aux); goto numbered;
       case Op::RealMod:
-        to.real = (one.jump ? xag_bin_mod_floored : xag_bin_mod)(read(one.a).real,
-                                                                 read(one.b).real, one.aux);
+        to.real = ((one.jump & 1) ? xag_bin_mod_floored : xag_bin_mod)(
+            read(one.a).real, read(one.b).real, one.aux);
+        goto numbered;
+      case Op::RealPow:
+        to.real = xag_bin_pow(read(one.a).real, read(one.b).real, one.aux);
+      numbered:
+        // `no-number = "stops"`: an infinity or a not-a-number stops here.
+        if ((one.jump & 2) && !std::isfinite(to.real)) {
+          noNumberAndStopped();
+          return;
+        }
         break;
-      case Op::RealPow: to.real = xag_bin_pow(read(one.a).real, read(one.b).real, one.aux); break;
       case Op::RealLt: to.whole = read(one.a).real < read(one.b).real; break;
       case Op::RealGt: to.whole = read(one.a).real > read(one.b).real; break;
       case Op::RealLe: to.whole = read(one.a).real <= read(one.b).real; break;
@@ -1615,15 +1632,22 @@ private:
       case Op::RealEq: to.whole = read(one.a).real == read(one.b).real; break;
       case Op::RealNe: to.whole = read(one.a).real != read(one.b).real; break;
 
-      case Op::WideAdd: to.whole = xag_bin128_add(read(one.a).whole, read(one.b).whole); break;
-      case Op::WideSub: to.whole = xag_bin128_sub(read(one.a).whole, read(one.b).whole); break;
-      case Op::WideMul: to.whole = xag_bin128_mul(read(one.a).whole, read(one.b).whole); break;
-      case Op::WideDiv: to.whole = xag_bin128_div(read(one.a).whole, read(one.b).whole); break;
+      case Op::WideAdd: to.whole = xag_bin128_add(read(one.a).whole, read(one.b).whole); goto wideNumbered;
+      case Op::WideSub: to.whole = xag_bin128_sub(read(one.a).whole, read(one.b).whole); goto wideNumbered;
+      case Op::WideMul: to.whole = xag_bin128_mul(read(one.a).whole, read(one.b).whole); goto wideNumbered;
+      case Op::WideDiv: to.whole = xag_bin128_div(read(one.a).whole, read(one.b).whole); goto wideNumbered;
       case Op::WideMod:
-        to.whole = (one.jump ? xag_bin128_mod_floored : xag_bin128_mod)(read(one.a).whole,
-                                                                        read(one.b).whole);
+        to.whole = ((one.jump & 1) ? xag_bin128_mod_floored : xag_bin128_mod)(
+            read(one.a).whole, read(one.b).whole);
+        goto wideNumbered;
+      case Op::WidePow:
+        to.whole = xag_bin128_pow(read(one.a).whole, read(one.b).whole);
+      wideNumbered:
+        if ((one.jump & 2) && !xag_bin128_is_number(to.whole)) {
+          noNumberAndStopped();
+          return;
+        }
         break;
-      case Op::WidePow: to.whole = xag_bin128_pow(read(one.a).whole, read(one.b).whole); break;
       case Op::WideCompare:
         to.whole = xag_bin128_compare(read(one.a).whole, read(one.b).whole);
         break;
@@ -1667,8 +1691,9 @@ private:
 
       case Op::TextCount: {
         Slot &of = read(one.a);
-        to.whole = of.places ? static_cast<XagInt>(of.places->size())
-                             : xag_str_count(&of.text);
+        to.whole = of.places  ? static_cast<XagInt>(of.places->size())
+                   : one.aux  ? xag_str_count_letters(&of.text)
+                              : xag_str_count(&of.text);
         break;
       }
 

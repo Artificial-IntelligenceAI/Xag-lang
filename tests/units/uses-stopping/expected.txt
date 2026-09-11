@@ -1,0 +1,2 @@
+infinity not-a-number infinity
+0.25 0.125

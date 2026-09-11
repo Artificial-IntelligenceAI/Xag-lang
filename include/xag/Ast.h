@@ -171,6 +171,8 @@ struct Param {
 struct Settings {
   bool asksBoth = false; // logic = "asks-both": `and` and `or` ask both sides
   bool floored = false;  // division = "floored": `/` rounds down, `mod` follows the divisor
+  bool letters = false;  // characters = "letters": `count` counts scalars, not clusters
+  bool noNumberStops = false; // no-number = "stops": a `bin` with no number to give stops
 };
 
 struct Item {

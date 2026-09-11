@@ -90,6 +90,9 @@ void xag_note_given(void);
 void xag_str_from(XagStr *out, const char *bytes, uint64_t length);
 void xag_str_join(XagStr *out, const XagStr *pieces, uint64_t count);
 int64_t xag_str_count(const XagStr *text);
+// `characters = "letters"`: one per Unicode scalar, which needs no table and
+// never changes. `xag_str_count` is `clusters`, the default.
+int64_t xag_str_count_letters(const XagStr *text);
 
 // Less than, equal to, or greater than — as one implementation, so that no
 // engine has its own idea of how text orders.
@@ -160,6 +163,12 @@ void xag_print_int(XagInt value, uint32_t width, int32_t is_signed);
 // Nothing here stops. Dividing by zero is infinity, not an error: `infinity`
 // and `not-a-number` are values of these types rather than accidents of them.
 double xag_bin_fit(double value, uint32_t width);
+// `no-number = "stops"`: a `bin` answer that is an infinity or a not-a-number
+// stops the program. One reason, spelled here, so every engine stops in the
+// same words; `xag_bin_number` hands the number back when there is one.
+const char *xag_why_no_number(void);
+void xag_no_number(void);
+double xag_bin_number(double value);
 double xag_bin_mod(double a, double b, uint32_t width);
 // `mod` under `division = "floored"`: the remainder takes the divisor's sign.
 // A zero remainder takes it too, as IEEE's `fmod` gives it the dividend's.
@@ -181,6 +190,10 @@ XagBin128 xag_bin128_mul(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_div(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_mod(XagBin128 a, XagBin128 b);
 XagBin128 xag_bin128_mod_floored(XagBin128 a, XagBin128 b);
+// `no-number = "stops"` at 128 bits: whether there is a number, and the number
+// or a stop.
+int32_t xag_bin128_is_number(XagBin128 value);
+XagBin128 xag_bin128_number(XagBin128 value);
 
 // A power takes a whole-number exponent. Xag has no transcendental functions,
 // so raising to a fraction has no answer to give and says so.

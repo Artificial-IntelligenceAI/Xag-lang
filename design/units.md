@@ -168,8 +168,7 @@ is refused (`E0608`), in the program and in a library alike.
 
 - **Constants across a unit.** `t.'LIMIT'` — how a program spells a library's
   constant — has no syntax yet. Functions and types do.
-- **Settings per unit.** Built for `logic` and `division`; `characters` and
-  `no-number` are decided in the manifest and nothing reads them yet. The
+- **Settings per unit.** All four `[defaults]` are read and answered. The
   program's override — its settings winning everywhere, or a library whose
   settings differ refused — has no spelling yet.
 - **A program of several files.** A library is all the `.xag` files in its
@@ -220,3 +219,18 @@ is refused (`E0608`), in the program and in a library alike.
   `tests/units/flooring` is a library on `floored` under a program on the
   default, checked against expected output on all three engines. The oracle
   tosses `division` per unit too.
+- **2026-09-11, `characters`** — read per unit and carried on the `count`
+  call (`RValue.letters`). `xag_str_count_letters` counts scalars — every
+  byte that is not a continuation byte — beside `xag_str_count`, which is
+  the cluster count. `tests/units/lettering` counts the family emoji, a flag
+  and `café` both ways. The oracle tosses it per unit; its texts already had
+  both emoji in them.
+- **2026-09-11, `no-number`** — the last of the four. Carried on every `bin`
+  arithmetic operation (`RValue.noNumberStops`); the test interpreter and the
+  runtime's `xag_bin_number` / `xag_bin128_number` stop through `xag_stop`,
+  native checks `v - v` for order and branches to `xag_no_number`, fast hands
+  the stop back the way it hands a sum that came round. A library on `stops`
+  whose ITMT reaches an infinity is refused (`tests/units/no-number`); a
+  program on the default beside a library on `stops` prints its own
+  infinities (`tests/units/stopping`). `fast_tests` runs every setting at its
+  other value through both interpreters, stops included.

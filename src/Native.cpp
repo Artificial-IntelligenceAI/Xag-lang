@@ -654,6 +654,7 @@ private:
     add("xag_str_from", voidTy, {ptr, ptr, i64});
     add("xag_str_join", voidTy, {ptr, ptr, i64});
     add("xag_str_count", i64, {ptr});
+    add("xag_str_count_letters", i64, {ptr});
     add("xag_str_compare", i64, {ptr, ptr});
     add("xag_str_drop", voidTy, {ptr});
     add("xag_str_push", voidTy, {ptr, ptr});
@@ -667,6 +668,8 @@ private:
     add("xag_print_bin", voidTy, {f64, i32});
     add("xag_bin_mod", f64, {f64, f64, i32});
     add("xag_bin_mod_floored", f64, {f64, f64, i32});
+    add("xag_no_number", voidTy, {});
+    add("xag_bin128_is_number", i32, {i128});
     add("xag_bin_pow", f64, {f64, f64, i32});
     add("xag_print_bin128", voidTy, {i128});
     add("xag_bin128_compare", i32, {i128, i128});
@@ -799,6 +802,20 @@ private:
   }
 
   // ---- reading
+
+  // Goes on only while `fine` holds; otherwise the program stops for want of a
+  // number. The block that stops is out of line, so the path that carries on is
+  // the one that falls through.
+  void stopUnless(llvm::Value *fine) {
+    llvm::Function *function = builder_.GetInsertBlock()->getParent();
+    auto *stops = llvm::BasicBlock::Create(context_, "nonumber", function);
+    auto *goes = llvm::BasicBlock::Create(context_, "numbered", function);
+    builder_.CreateCondBr(fine, goes, stops);
+    builder_.SetInsertPoint(stops);
+    builder_.CreateCall(runtime_["xag_no_number"], {});
+    builder_.CreateUnreachable();
+    builder_.SetInsertPoint(goes);
+  }
 
   llvm::Value *textOf(const std::string &bytes) {
     auto *global = builder_.CreateGlobalString(bytes, "text");
@@ -1672,7 +1689,12 @@ private:
                              : op == "mod" ? (value.floored ? "xag_bin128_mod_floored"
                                                              : "xag_bin128_mod")
                                            : "xag_bin128_pow";
-        return builder_.CreateCall(runtime_[called], {left, right});
+        llvm::Value *answered = builder_.CreateCall(runtime_[called], {left, right});
+        if (value.noNumberStops)
+          stopUnless(builder_.CreateICmpNE(
+              builder_.CreateCall(runtime_["xag_bin128_is_number"], {answered}),
+              builder_.getInt32(0)));
+        return answered;
       }
       auto *order = builder_.CreateCall(runtime_["xag_bin128_compare"], {left, right});
       auto *unordered = builder_.CreateICmpEQ(order, builder_.getInt32(-3));
@@ -1691,10 +1713,21 @@ private:
                          : builder_.CreateAnd(asked, builder_.CreateNot(unordered));
     }
     if (isBinary(given)) {
-      if (op == "+") return builder_.CreateFAdd(left, right);
-      if (op == "-") return builder_.CreateFSub(left, right);
-      if (op == "x") return builder_.CreateFMul(left, right);
-      if (op == "/") return builder_.CreateFDiv(left, right);
+      // `no-number = "stops"`: the answer is looked at before it is handed on.
+      // `v - v` is a not-a-number exactly when `v` is an infinity or one
+      // already, and an unordered compare of it with itself says so — two
+      // instructions, no call, and nothing at all under `carries-on`.
+      const auto numbered = [&](llvm::Value *answer) -> llvm::Value * {
+        if (value.noNumberStops) {
+          auto *gap = builder_.CreateFSub(answer, answer);
+          stopUnless(builder_.CreateFCmpORD(gap, gap));
+        }
+        return answer;
+      };
+      if (op == "+") return numbered(builder_.CreateFAdd(left, right));
+      if (op == "-") return numbered(builder_.CreateFSub(left, right));
+      if (op == "x") return numbered(builder_.CreateFMul(left, right));
+      if (op == "/") return numbered(builder_.CreateFDiv(left, right));
       // An ordered comparison answers false when either side is not a number,
       // which is what IEEE says and what the interpreter does.
       if (op == "==") return builder_.CreateFCmpOEQ(left, right);
@@ -1709,7 +1742,7 @@ private:
                                : "xag_bin_pow"],
           {builder_.CreateFPExt(left, wide), builder_.CreateFPExt(right, wide),
            builder_.getInt32(widthOf(given))});
-      return builder_.CreateFPTrunc(answered, typeFor(typing(value.type)));
+      return numbered(builder_.CreateFPTrunc(answered, typeFor(typing(value.type))));
     }
     const Type made = typing(value.type).lent().held;
     const Type working = isWhole(made) ? made : given;
@@ -2016,7 +2049,9 @@ private:
       }
       auto *text = value.operands.empty() ? nullptr : textPointer(value.operands[0]);
       return text ? static_cast<llvm::Value *>(
-                        builder_.CreateCall(runtime_["xag_str_count"], {text}))
+                        builder_.CreateCall(
+                            runtime_[value.letters ? "xag_str_count_letters" : "xag_str_count"],
+                            {text}))
                   : static_cast<llvm::Value *>(builder_.getInt64(0));
     }
 

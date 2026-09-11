@@ -1,0 +1,18 @@
+READ_ME {
+This program says nothing about `characters`, so its own `count` counts
+grapheme clusters. The library's counts scalars, because the library said so.
+The family emoji is one cluster and seven scalars; the flag is one and two;
+`café` is four either way.
+}
+PREP {
+    import 'lettering';
+}
+START {
+    var.str 'family' = [str:*🧑‍🧑‍🧒‍🧒*];
+    var.str 'flag' = [str:*🇹🇭*];
+    var.str 'cafe' = [str:*café*];
+    print.stdout[count[loan 'family'] str:* * count[loan 'flag'] str:* * count[loan 'cafe'] \n];
+    print.stdout[le.letters-in[loan 'family'] str:* * le.letters-in[loan 'flag'] str:* * le.letters-in[loan 'cafe'] \n];
+}
+ITMT {
+}

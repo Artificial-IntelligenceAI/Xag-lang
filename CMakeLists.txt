@@ -255,6 +255,25 @@ add_test(NAME units_division_is_per_unit
                  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-flooring/main.xag
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
 
+# And for `characters`: a library on `letters` counts scalars, the program on
+# the default counts clusters, of the same three texts.
+add_test(NAME units_characters_are_per_unit
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-lettering/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+
+# And for `no-number`: a program on the default prints its infinities and
+# not-a-numbers; a library on `stops` whose ITMT reaches one is refused.
+add_test(NAME units_no_number_is_per_unit
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-stopping/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+add_test(NAME units_no_number_stops_refuses
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/no-number/a.xag)
+set_tests_properties(units_no_number_stops_refuses PROPERTIES WILL_FAIL TRUE)
+
 # A mistake inside a library points into the library's file.
 add_test(NAME units_diagnostic_points_into_library
          COMMAND ${CMAKE_COMMAND}

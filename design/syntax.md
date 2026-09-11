@@ -217,7 +217,12 @@ print.stdout[('z' / 'z') \n];           # not-a-number
 
 A not-a-number is equal to nothing at all, itself included. Asking to stop
 instead is `no-number = "stops"` — asking for something narrower than the type
-you named.
+you named. Under it, `+ - x / ^ mod` on a `bin` of any width stops the program
+the moment its answer is an infinity or a not-a-number, in the words `a `bin`
+had no number to give back` — whether the answer came from a zero divisor, a
+sum run past the largest `bin32`, or an infinity that was already there.
+Comparisons never stop; they answer. It is a `bin` setting: the manifest says
+so, and a `deci` is left as it is. Per unit, like every `[defaults]` setting.
 
 A narrower `bin` is cut back to its width after **every** step, not only when it
 is stored, which is what makes a `bin32` sum a `bin32` sum:
@@ -723,6 +728,13 @@ before the bracket is reached.
 question, and the type already says what is being counted. Asking a name that
 holds one value for its first is `E0514`: a name holding one value **is** that
 value, and there is no first of it.
+
+What one character of a `str` is, is the unit's `characters` setting. The
+default, `clusters`, is a grapheme cluster as UAX #29 defines it — what a person
+counts: `count[str:*🧑‍🧑‍🧒‍🧒*]` is 1. `letters` is one Unicode scalar, which needs no
+table and never changes with a Unicode version: the same family is 7. `café` is
+4 either way. A `many` is unaffected; it has places, not characters. Per unit,
+like every `[defaults]` setting.
 
 An index is an `int64`, because that is what `count` answers with and two sizes
 never meet on their own.

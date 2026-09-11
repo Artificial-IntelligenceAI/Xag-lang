@@ -263,6 +263,8 @@ private:
     static const Knob knobs[] = {
         {"logic", "asks-both", "stops-early", &Settings::asksBoth},
         {"division", "floored", "truncated", &Settings::floored},
+        {"characters", "letters", "clusters", &Settings::letters},
+        {"no-number", "stops", "carries-on", &Settings::noNumberStops},
     };
     for (const Knob &knob : knobs) {
       const Said *said = find(m, "defaults", knob.key);

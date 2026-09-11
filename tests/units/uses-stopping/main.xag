@@ -1,0 +1,19 @@
+READ_ME {
+This program says nothing about `no-number`, so its own `bin` arithmetic
+carries on: one over zero is infinity and zero over zero is not-a-number. The
+library's `ratio` is called only with numbers here — with a zero it would stop,
+which `tests/units/no-number` shows.
+}
+PREP {
+    import 'stopping';
+}
+START {
+    var.bin64 'one' = [*1*];
+    var.bin64 'zero' = [*0*];
+    var.bin128 'wide' = [*1*];
+    var.bin128 'wide-zero' = [*0*];
+    print.stdout[('one' / 'zero') str:* * ('zero' / 'zero') str:* * ('wide' / 'wide-zero') \n];
+    print.stdout[st.ratio['one', bin64:*4*] str:* * st.wide-ratio['wide', bin128:*8*] \n];
+}
+ITMT {
+}

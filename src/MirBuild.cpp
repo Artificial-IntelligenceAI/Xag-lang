@@ -477,7 +477,8 @@ private:
       emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Binary, e.text, {}, 0,
                             {std::move(left), std::move(right)}, typeRef(type),
-                            false, wrapsHere_, settings_.floored}});
+                            false, wrapsHere_, settings_.floored, false,
+                            settings_.noNumberStops}});
       return into;
     }
 
@@ -616,7 +617,8 @@ private:
         body_.locals[into].copies = copies(type);
       emit(Statement{StatementKind::Assign, e.span, into, {}, {},
                      RValue{RValueKind::Call, {}, e.name, 0, std::move(arguments),
-                            typeRef(answers)}});
+                            typeRef(answers), false, false, false,
+                            e.name == "count" && settings_.letters}});
       return into;
     }
     }
