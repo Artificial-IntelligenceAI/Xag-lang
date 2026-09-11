@@ -1,5 +1,6 @@
 #include "xag/Units.h"
 
+#include "xag/Ast.h"
 #include "xag/Check.h"
 #include "xag/Parser.h"
 
@@ -383,6 +384,141 @@ private:
 } // namespace
 
 UnitsResult unitsFor(const std::string &sourcePath) { return Reader().run(sourcePath); }
+
+namespace {
+
+// ---- writing a library's call name onto what it declares
+
+struct Renames {
+  std::unordered_map<std::string, std::string> types;     // struct, one-of
+  std::unordered_map<std::string, std::string> functions; // fn
+  std::unordered_map<std::string, std::string> constants; // const
+};
+
+bool exported(const Chain &chain) {
+  for (const ChainSegment &seg : chain.segments)
+    if (!seg.isName && seg.text == "export")
+      return true;
+  return false;
+}
+
+std::string renamed(const std::unordered_map<std::string, std::string> &map,
+                    const std::string &name) {
+  auto found = map.find(name);
+  return found == map.end() ? name : found->second;
+}
+
+void qualifyChain(Chain &chain, const Renames &r) {
+  if (chain.segments.empty())
+    return;
+  ChainSegment &type = chain.segments.back();
+  if (!type.isName)
+    type.text = renamed(r.types, type.text);
+}
+
+void qualifyBlock(Block &block, const Renames &r);
+void qualifyValues(ValueList &list, const Renames &r);
+
+void qualifyExpr(Expr *e, const Renames &r) {
+  if (!e)
+    return;
+  switch (e->kind) {
+  case ExprKind::Call:
+    // `twice[…]` and `point[…]` — a function called, or a struct made where it
+    // stands. Both are a word before a bracket, and both are renamed the same
+    // way. A dotted callee is a built-in — `print.stdout` — and is left alone.
+    if (e->path.size() == 1) {
+      const std::string was = e->path.front();
+      e->path.front() = renamed(r.functions, was);
+      if (e->path.front() == was)
+        e->path.front() = renamed(r.types, was);
+    }
+    break;
+  case ExprKind::Typed:
+    // `answer:*7*` names a type; `ok:*7*` names a case, and a case is left as
+    // it was — it belongs to its type, and is reached through the type.
+    e->text = renamed(r.types, e->text);
+    break;
+  case ExprKind::Name:
+    e->text = renamed(r.constants, e->text);
+    break;
+  default:
+    break;
+  }
+  for (ExprPtr &child : e->children)
+    qualifyExpr(child.get(), r);
+  qualifyValues(e->args, r);
+}
+
+void qualifyValues(ValueList &list, const Renames &r) {
+  for (Value &value : list.values)
+    for (ExprPtr &item : value.items)
+      qualifyExpr(item.get(), r);
+}
+
+void qualifyStmt(Stmt &s, const Renames &r) {
+  qualifyChain(s.chain, r);
+  qualifyValues(s.value, r);
+  qualifyExpr(s.index.get(), r);
+  qualifyExpr(s.condition.get(), r);
+  qualifyExpr(s.call.get(), r);
+  for (Branch &branch : s.branches) {
+    qualifyExpr(branch.condition.get(), r);
+    qualifyBlock(branch.body, r);
+  }
+  qualifyBlock(s.body, r);
+}
+
+void qualifyBlock(Block &block, const Renames &r) {
+  for (StmtPtr &s : block.stmts)
+    if (s)
+      qualifyStmt(*s, r);
+}
+
+} // namespace
+
+void qualify(Program &library, const Unit &unit) {
+  Renames r;
+  for (const Item &item : library.items) {
+    const std::string as =
+        exported(item.chain) ? unit.called + "." + item.name : unit.called + "$" + item.name;
+    switch (item.kind) {
+    case ItemKind::Struct:
+    case ItemKind::OneOf:
+      r.types[item.name] = as;
+      break;
+    case ItemKind::Function:
+      r.functions[item.name] = as;
+      break;
+    case ItemKind::Const:
+      r.constants[item.name] = as;
+      break;
+    default:
+      break;
+    }
+  }
+  for (Item &item : library.items) {
+    switch (item.kind) {
+    case ItemKind::Struct:
+    case ItemKind::OneOf:
+      item.name = renamed(r.types, item.name);
+      break;
+    case ItemKind::Function:
+      item.name = renamed(r.functions, item.name);
+      break;
+    case ItemKind::Const:
+      item.name = renamed(r.constants, item.name);
+      break;
+    default:
+      break;
+    }
+    qualifyChain(item.chain, r);
+    for (Param &param : item.params)
+      qualifyChain(param.chain, r);
+    qualifyValues(item.value, r);
+    qualifyBlock(item.body, r);
+  }
+}
 
 const Unit *unitNamed(const UnitsResult &units, const std::string &name) {
   for (const Unit &one : units.libraries)

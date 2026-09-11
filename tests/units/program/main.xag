@@ -3,6 +3,8 @@ PREP {
     import 'text';
 }
 START {
-    print.stdout[str:*hello* \n];
+    var.int64 'n' = [t.twice[*21*]];
+    var.t.point 'p' = [*3* *4*];
+    print.stdout['n' str:* * (t.across[loan 'p']) \n];
 }
 ITMT { }

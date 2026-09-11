@@ -120,10 +120,48 @@ wants to say otherwise.
 The first five are about a manifest and point into it; the last is about the
 file being compiled.
 
+## How a library's code is read
+
+Its files are read alongside the program's as one program, and nothing below
+the parser knows what a unit is. What makes that possible is a rename: every
+name a library declares is written under its call name before its items join
+the program's.
+
+| declared as | becomes | who can write it |
+| --- | --- | --- |
+| `fn.export.int64 'twice'` | `t.twice` | anyone — it is what a use site writes |
+| `fn.int64 'helper'` | `t$helper` | nobody: `$` is not a word character |
+
+Every reference inside the library follows — a call, the type in a chain, a
+written value's type, a constant's name — so the library's own code still reads
+itself, and a program writing `t.twice[…]` names the function with no lookup on
+the way. The wall between a library's private names and everything outside is
+the same wall generics already use: a spelling nothing can produce.
+
+The parser is told each library's call name so it can read `var.t.point 'p'` as
+one type, and `t.uer:*…*` as one type before a `:`. A `struct` or `one-of` says
+`export` the way a function does — `struct.export 'point' […]`.
+
+## Not yet enforced
+
+- **`import` per file.** A file's `import` lines are checked against the
+  manifest, but nothing yet checks that a file reaching for `t.` actually
+  imported `t`. Every file is read with every prefix the program knows.
+- **`file` and `program` visibility within a unit.** Both are read as
+  unit-wide today. A library with two files whose `file`-visible names collide
+  would be refused as a duplicate rather than allowed.
+- **Constants across a unit.** `t.'LIMIT'` — how a program spells a library's
+  constant — has no syntax yet. Functions and types do.
+- **Settings per unit.** Decided, and nothing to attach to yet: the four
+  semantic knobs are decided in the manifest but nothing branches on them.
+
 ## What is built
 
 - **2026-09-11, slice 1** — the two file shapes, `ITMT`, and `import` parse;
   every file has an `ITMT`; `ITMT` lowers to a body but is not yet run.
 - **2026-09-11, slice 2** — manifests read (`src/Units.cpp`), `[uses]`
   followed, cycles refused, every `import` checked against what was reached.
-  Nothing below the parser consumes a library's files yet.
+- **2026-09-11, slice 3** — a library's files are read, qualified under its
+  call name, and compiled with the program. `t.twice[…]`, `var.t.point 'p'`,
+  `struct.export`. Private names are unreachable. All three engines agree on
+  `tests/units/program`, which is now a test.

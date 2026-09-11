@@ -1,9 +1,20 @@
 READ_ME {
-Counting things in text.
+Counting things in text. `twice` is what a program reaches; `helper` is not.
 }
 LIBRARY {
+    struct 'pair' [int64 'a', int64 'b']
+    struct.export 'point' [int64 'x', int64 'y']
+
+    fn.int64 'helper' [int64 'n'] {
+        give ['n' + *1*];
+    }
+
     fn.export.int64 'twice' [int64 'n'] {
-        give ['n' + 'n'];
+        give [helper['n'] + helper['n'] - *2*];
+    }
+
+    fn.export.int64 'across' [loan.point 'p'] {
+        give ['p'.x + 'p'.y];
     }
 }
 ITMT {

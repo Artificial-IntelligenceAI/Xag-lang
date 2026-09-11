@@ -276,11 +276,13 @@ void aChainHasOneOrder() {
   CHECK(inStart("var.mut.loan.str 's' = [*hi*];").ok());
 }
 
-void visibilityHasNowhereToGoYet() {
-  CHECK(run("fn.export.int64 'f' [] { give [*7*]; }\n").code(0) == "E0206");
-  CHECK(run("const.program.int64 'L' = [*1*];\n").code(0) == "E0206");
-  // And it is not a word a file may open with either, so there is still no way
-  // to write more than one file.
+// `export` and `program` say who may see a thing, now that there is somewhere
+// else to see it from. `file` is the default and is refused like every default.
+void visibilityIsSaidOnTheDeclaration() {
+  CHECK(run("fn.export.int64 'f' [] { give [*7*]; }\n").ok());
+  CHECK(run("const.program.int64 'L' = [*1*];\n").ok());
+  CHECK(run("fn.file.int64 'f' [] { give [*7*]; }\n").code(0) == "E0201");
+  // It is not a word a file may open with: the kind comes first.
   CHECK(run("export.fn.int64 'f' [] { give [*1*]; }\n").code(0) == "E0104");
 }
 
@@ -629,7 +631,7 @@ int main() {
   eachChainAsksItsOwnQuestions();
   oneQuestionIsAnsweredOnce();
   aChainHasOneOrder();
-  visibilityHasNowhereToGoYet();
+  visibilityIsSaidOnTheDeclaration();
   aLoopSaysWhichKindItIs();
   anElementIsReadAndWritten();
   manyStandsWithTheType();

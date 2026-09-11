@@ -117,10 +117,12 @@ const Role kParam{"a parameter", "", true,
                   {Slot::Mutability, Slot::Ownership, Slot::Overflow, Slot::Lifetime}};
 const Role kFn{"a `fn`", "fn", true,
                {Slot::Visibility, Slot::Ownership, Slot::Lifetime, Slot::Unknown}};
+// A type says who may see it and nothing else: what it holds is written in its
+// fields, each with a chain of its own.
 const Role kStruct{"a `struct`", "struct", false,
-                   {Slot::Unknown, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
+                   {Slot::Visibility, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 const Role kOneOf{"a `one-of`", "one-of", false,
-                  {Slot::Unknown, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
+                  {Slot::Visibility, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 const Role kConst{"a `const`", "const", true,
                   {Slot::Visibility, Slot::Unknown, Slot::Unknown, Slot::Unknown}};
 // `no-itmt` comes first, because it is about the loop rather than about the name
@@ -147,8 +149,9 @@ int placeIn(const Role &role, Slot slot) {
 
 class Parser {
 public:
-  Parser(const Source &source, const std::vector<Token> &tokens)
-      : source_(source), tokens_(tokens) {}
+  Parser(const Source &source, const std::vector<Token> &tokens,
+         const std::vector<std::string> &prefixes)
+      : source_(source), tokens_(tokens), prefixes_(prefixes) {}
 
   // A file is one of two shapes, and every block in the shape is written
   // whether or not there is anything in it:
@@ -290,8 +293,16 @@ public:
 private:
   const Source &source_;
   const std::vector<Token> &tokens_;
+  const std::vector<std::string> &prefixes_;
   unsigned at_ = 0;
   ParseResult result_;
+
+  bool isPrefix(std::string_view word) const {
+    for (const std::string &one : prefixes_)
+      if (one == word)
+        return true;
+    return false;
+  }
 
   // ---- token access
 
@@ -403,6 +414,20 @@ private:
         complain(peek().span, "E0102", "a chain segment is a word, or a name for a loan.",
                  {}, {}, std::string("found ") + describe(peek().kind));
         break;
+      }
+    }
+    // `var.t.point 'p'` — a type from a library, reached through its call
+    // name. Read as one segment, `t.point`, so that everything that asks a
+    // chain what its type is gets the whole name and looks it up whole. The
+    // prefix has to be one the manifests named; a word there that is not one is
+    // the mistake `validate` was already reporting.
+    if (c.segments.size() >= 2) {
+      ChainSegment &before = c.segments[c.segments.size() - 2];
+      ChainSegment &last = c.segments.back();
+      if (!before.isName && !last.isName && isPrefix(before.text)) {
+        last.text = before.text + "." + last.text;
+        last.span.begin = before.span.begin;
+        c.segments.erase(c.segments.end() - 2);
       }
     }
     c.span.end = previous().span.end;
@@ -545,15 +570,6 @@ private:
         continue;
       }
 
-      if (slot == Slot::Visibility) {
-        complain(seg.span, "E0206",
-                 "`" + seg.text + "` says who may see this, and there is nowhere else "
-                 "to see it from.",
-                 {"a word is written where there is a choice"},
-                 {"a program is one file for now, so everything in it is already as "
-                  "visible as it can be."});
-        continue;
-      }
 
       if (filled[place]) {
         complainAt(seg.span, "E0204",
@@ -738,12 +754,20 @@ private:
     }
     case TokenKind::Word: {
       // `str:*hello*` — a written value saying its own type, where no chain has.
-      if (peek(1).kind == TokenKind::Colon) {
+      // `t.uer:*hello*` — the same, with a type from a library.
+      if (peek(1).kind == TokenKind::Colon ||
+          (peek(1).kind == TokenKind::Dot && peek(2).kind == TokenKind::Word &&
+           peek(3).kind == TokenKind::Colon && isPrefix(token.text))) {
         const Token typeWord = advance();
+        std::string named = typeWord.text;
+        if (check(TokenKind::Dot)) {
+          advance();
+          named += "." + advance().text;
+        }
         advance(); // ':'
         ExprPtr inner = primary();
         Span span{typeWord.span.begin, inner->span.end};
-        auto typed = make(ExprKind::Typed, span, typeWord.text);
+        auto typed = make(ExprKind::Typed, span, named);
         typed->children.push_back(std::move(inner));
         return typed;
       }
@@ -1424,9 +1448,9 @@ private:
     } else if (out.chain.startsWith("struct")) {
       out.kind = ItemKind::Struct;
       validate(out.chain, kStruct);
-      if (out.chain.segments.size() > 1)
+      if (out.chain.segments.size() > 2)
         complain(out.chain.span, "E0212",
-                 "a `struct` says nothing but what it is called.",
+                 "a `struct` says who may see it, and nothing else.",
                  {"a chain says what is unusual, and says nothing else"},
                  {"what a `struct` holds is written in its fields, and each of "
                   "them has a chain of its own."});
@@ -1452,9 +1476,9 @@ private:
       // of them rather than all of them, which is a question for the checker.
       out.kind = ItemKind::OneOf;
       validate(out.chain, kOneOf);
-      if (out.chain.segments.size() > 1)
+      if (out.chain.segments.size() > 2)
         complain(out.chain.span, "E0212",
-                 "a `one-of` says nothing but what it is called.",
+                 "a `one-of` says who may see it, and nothing else.",
                  {"a chain says what is unusual, and says nothing else"},
                  {"what a `one-of` can be is written in its cases, and each of "
                   "them has a chain of its own."});
@@ -1510,8 +1534,9 @@ bool isChainWord(std::string_view word) {
          word == "or-nothing" || word == "any" || word == "ref" || word == "refmut";
 }
 
-ParseResult parse(const Source &source, const std::vector<Token> &tokens) {
-  return Parser(source, tokens).run();
+ParseResult parse(const Source &source, const std::vector<Token> &tokens,
+                  const std::vector<std::string> &prefixes) {
+  return Parser(source, tokens, prefixes).run();
 }
 
 } // namespace xag

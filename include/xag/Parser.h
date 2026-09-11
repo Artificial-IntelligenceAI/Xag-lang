@@ -24,7 +24,11 @@ struct ParseResult {
 // library.
 bool isChainWord(std::string_view word);
 
-ParseResult parse(const Source &source, const std::vector<Token> &tokens);
+// `prefixes` is every library's call name, from the manifests. A chain reads
+// `t.point` as one type when `t` is one of them and as a mistake otherwise —
+// so the parser has to be told, because nothing about the word says which.
+ParseResult parse(const Source &source, const std::vector<Token> &tokens,
+                  const std::vector<std::string> &prefixes = {});
 
 // The tree, printed. Used by `xagc parse` and by the tests.
 void print(const Program &program, std::ostream &out);

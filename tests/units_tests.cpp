@@ -1,6 +1,10 @@
 #include "xag/Units.h"
 
+#include "xag/Lexer.h"
+#include "xag/Parser.h"
+
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -58,9 +62,50 @@ void aCycleIsRefused() {
   CHECK(r.about.size() == r.diagnostics.size());
 }
 
+// A library's names are written under its call name: what it exports as
+// `t.name`, which is what a use site writes, and what it keeps as `t$name`,
+// which nothing can spell. Every reference inside it follows.
+void aLibraryIsQualified() {
+  const xag::Source source("lib.xag",
+                           "READ_ME { }\nLIBRARY {\n"
+                           "  struct 'pair' [int64 'a', int64 'b']\n"
+                           "  struct.export 'point' [int64 'x', int64 'y']\n"
+                           "  const.int64 'K' = [*3*];\n"
+                           "  fn.int64 'helper' [int64 'n'] { give ['n' + 'K']; }\n"
+                           "  fn.export.int64 'twice' [loan.point 'p'] {\n"
+                           "    var.pair 'q' = [*1* *2*];\n"
+                           "    give [helper['p'.x] + 'q'.a]; }\n"
+                           "}\nITMT { }\n");
+  const xag::LexResult lexed = xag::lex(source);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  CHECK(lexed.ok() && parsed.ok());
+  xag::Unit unit;
+  unit.name = "text";
+  unit.called = "t";
+  xag::qualify(parsed.program, unit);
+  std::ostringstream out;
+  xag::print(parsed.program, out);
+  const std::string tree = out.str();
+  CHECK(tree.find("struct t$pair") != std::string::npos);
+  CHECK(tree.find("struct t.point") != std::string::npos);
+  CHECK(tree.find("'t$K'") != std::string::npos);
+  CHECK(tree.find("fn fn.int64 t$helper") != std::string::npos);
+  CHECK(tree.find("fn.export.int64 t.twice") != std::string::npos);
+  // The chain that names `point` now names `t.point`, and `pair` `t$pair`.
+  CHECK(tree.find("loan.t.point") != std::string::npos);
+  CHECK(tree.find("var.t$pair") != std::string::npos);
+  // A call to the helper, and the constant it reads.
+  CHECK(tree.find("call t$helper") != std::string::npos);
+  CHECK(tree.find("name 't$K'") != std::string::npos);
+  // Nothing bare is left of any of them.
+  CHECK(tree.find("call helper") == std::string::npos);
+  CHECK(tree.find("name 'K'") == std::string::npos);
+}
+
 } // namespace
 
 int main() {
+  aLibraryIsQualified();
   aProgramReachesALibrary();
   noManifestIsNotAMistake();
   aCycleIsRefused();

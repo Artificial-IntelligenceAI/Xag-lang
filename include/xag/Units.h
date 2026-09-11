@@ -1,5 +1,6 @@
 #pragma once
 
+#include "xag/Ast.h"
 #include "xag/Diagnostic.h"
 #include "xag/Source.h"
 
@@ -59,5 +60,20 @@ UnitsResult unitsFor(const std::string &sourcePath);
 
 // The unit `import 'name';` reaches, or nothing.
 const Unit *unitNamed(const UnitsResult &units, const std::string &name);
+
+// Writes a library's call name onto everything it declares, so that its files
+// can be read alongside a program's as one program and nothing collides.
+//
+// What the library exports is renamed to `called.name`, which is exactly what a
+// use site in the program writes — so a call written `t.twice[…]` names the
+// function without any lookup on the way. What it does not export is renamed to
+// `called$name`, which no program can spell, because `$` is not a word
+// character. Every reference inside the library is rewritten to match: calls,
+// the type in every chain, a written value's type, a constant's name.
+//
+// This is the same trick generics use — a copy named `twice$int64` that nothing
+// can collide with — and it is why nothing below the parser had to learn what a
+// unit is.
+void qualify(Program &library, const Unit &unit);
 
 } // namespace xag

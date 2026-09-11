@@ -536,6 +536,22 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   if (!readSource(path, text))
     return false;
   const xag::Source source(path, text);
+
+  // What this file may reach for: the manifest beside it, and every library the
+  // manifest's `[uses]` leads to. Read first, because the parser has to know a
+  // library's call name to read `var.t.point 'p'` — and refused here if a
+  // manifest is wrong or a loop closes, since nothing after this could mean
+  // anything.
+  const xag::UnitsResult units = xag::unitsFor(path);
+  if (!units.ok()) {
+    for (std::size_t i = 0; i < units.diagnostics.size(); ++i)
+      report(units.about[i] ? *units.about[i] : source, {units.diagnostics[i]});
+    return false;
+  }
+  std::vector<std::string> prefixes;
+  for (const xag::Unit &one : units.libraries)
+    prefixes.push_back(one.called);
+
   // Every pass is reported whether or not it refused. A warning shown only when
   // something else already went wrong is a warning nobody ever reads.
   const xag::LexResult lexed = xag::lex(source);
@@ -545,20 +561,9 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   // lifts the arm a `whichever` chose out of the statement holding it. Both
   // write into the tree the checker walked, because what the checker worked out
   // is keyed by those nodes and a copy's nodes are not those.
-  xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  xag::ParseResult parsed = xag::parse(source, lexed.tokens, prefixes);
   if (report(source, parsed.diagnostics) != 0)
     return false;
-
-  // What this file may reach for: the manifest beside it, and every library the
-  // manifest's `[uses]` leads to. Read before checking, because a name the
-  // checker meets may be one of theirs — and refused here if a manifest is
-  // wrong or a loop closes, since nothing after this could mean anything.
-  const xag::UnitsResult units = xag::unitsFor(path);
-  if (!units.ok()) {
-    for (std::size_t i = 0; i < units.diagnostics.size(); ++i)
-      report(units.about[i] ? *units.about[i] : source, {units.diagnostics[i]});
-    return false;
-  }
   // Every `import` names a library the manifest reached. Said here rather than
   // in the checker because it is about the manifest, not about the program.
   {
@@ -581,6 +586,55 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
     }
     if (report(source, unknown) != 0)
       return false;
+  }
+
+  // Each library's files, read and written into this program under the
+  // library's call name — so that from here on there is one program, and
+  // nothing below the parser has to know what a unit is.
+  //
+  // Read with every prefix the program knows rather than only the ones the
+  // library's own manifest names. That lets a library reach a prefix it never
+  // imported, which is a rule not yet enforced anywhere — a file's `import`
+  // lines are not yet checked against what the file actually reaches for, in
+  // the program either. Noted in design/units.md.
+  //
+  // Kept alive alongside the entry, because a diagnostic about a line in a
+  // library has to be able to show that line.
+  static std::vector<std::pair<std::unique_ptr<xag::Source>, std::string>> librarySources;
+  librarySources.clear();
+  for (const xag::Unit &library : units.libraries) {
+    for (const std::string &file : library.files) {
+      std::string held;
+      if (!readSource(file, held))
+        return false;
+      librarySources.emplace_back(std::make_unique<xag::Source>(file, held), file);
+      const xag::Source &theirSource = *librarySources.back().first;
+      const xag::LexResult theirLexed = xag::lex(theirSource);
+      if (report(theirSource, theirLexed.diagnostics) != 0)
+        return false;
+      xag::ParseResult theirParsed = xag::parse(theirSource, theirLexed.tokens, prefixes);
+      if (report(theirSource, theirParsed.diagnostics) != 0)
+        return false;
+      if (!theirParsed.program.library) {
+        report(theirSource,
+               {xag::Diagnostic{xag::Span{0, 0}, "E0607",
+                                "`" + library.name + "` is used as a library, and this "
+                                "file of it is a program.",
+                                "here", {"a library's files are `READ_ME`, `LIBRARY`, `ITMT`"},
+                                {"a file with `PREP` and `START` is a program, and a "
+                                 "program is not something another program imports."}}});
+        return false;
+      }
+      xag::qualify(theirParsed.program, library);
+      for (xag::Item &item : theirParsed.program.items) {
+        // A library's `ITMT` is its own business — run when the library is
+        // built on its own, not when a program that uses it is. Its imports
+        // were resolved when its manifest was.
+        if (item.kind == xag::ItemKind::Itmt || item.kind == xag::ItemKind::Import)
+          continue;
+        parsed.program.items.push_back(std::move(item));
+      }
+    }
   }
   // Read, and read again after every round of writing generics out. Only what
   // refuses is said as it happens; what is only *said* waits until the rounds

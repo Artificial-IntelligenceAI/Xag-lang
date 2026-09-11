@@ -205,6 +205,14 @@ foreach(example ${XAG_EXAMPLES})
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/example_agrees.cmake)
 endforeach()
 
+# A program that imports a library, both ways — the one place more than one
+# file is compiled together, and the same check every example gets.
+add_test(NAME units_program_agrees
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/program/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/example_agrees.cmake)
+
 # The decimal knob, asked of the compiler itself rather than of a library: what
 # a build has is a fact about the build, and the only way to ask it is to run it.
 add_test(NAME decimal_software
