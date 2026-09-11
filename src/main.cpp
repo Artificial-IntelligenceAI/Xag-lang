@@ -549,7 +549,14 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
   status = 1;
   if (!readSource(path, text))
     return false;
-  const xag::Source source(path, text);
+  // One source for the program and every library it imports, held end to end.
+  // Everything below the parser keys what it knows by span, so the spans have to
+  // share one space — a library's items join the program's, and a mistake in
+  // one of them has to point into the library's file. It is `static` for the
+  // same reason `librarySources` was: what is built here outlives this function.
+  static std::unique_ptr<xag::Source> whole;
+  whole = std::make_unique<xag::Source>(path, text);
+  const xag::Source &source = *whole;
 
   // What this file may reach for: the manifest beside it, and every library the
   // manifest's `[uses]` leads to. Read first, because the parser has to know a
@@ -601,55 +608,88 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
     if (report(source, unknown) != 0)
       return false;
   }
+  // And every prefix this file reaches for is one it imported.
+  if (report(source, xag::importsCover(parsed.program, units)) != 0)
+    return false;
 
-  // Each library's files, read and written into this program under the
-  // library's call name — so that from here on there is one program, and
-  // nothing below the parser has to know what a unit is.
+  // One library's files, read from the one source and renamed together under
+  // the library's call name. All of them first, then the rename: what a name
+  // is renamed to depends on whether the file that declared it shares it with
+  // the rest of the library, and that is only known with every file read.
   //
   // Read with every prefix the program knows rather than only the ones the
-  // library's own manifest names. That lets a library reach a prefix it never
-  // imported, which is a rule not yet enforced anywhere — a file's `import`
-  // lines are not yet checked against what the file actually reaches for, in
-  // the program either. Noted in design/units.md.
+  // library's own manifest names; a file reaching for a prefix it did not
+  // import is caught by `importsCover` either way.
   //
-  // Kept alive alongside the entry, because a diagnostic about a line in a
-  // library has to be able to show that line.
-  static std::vector<std::pair<std::unique_ptr<xag::Source>, std::string>> librarySources;
-  librarySources.clear();
-  for (const xag::Unit &library : units.libraries) {
+  // `keepItmt` is for the entry's own unit: a library built on its own runs
+  // its `ITMT`, and with several files their `ITMT`s are one body, in file
+  // order — the library's, not any one file's.
+  const auto readLibrary = [&](const xag::Unit &library, bool keepItmt,
+                               std::vector<xag::Item> &into) -> bool {
+    std::vector<xag::Program> theirs;
     for (const std::string &file : library.files) {
       std::string held;
       if (!readSource(file, held))
         return false;
-      librarySources.emplace_back(std::make_unique<xag::Source>(file, held), file);
-      const xag::Source &theirSource = *librarySources.back().first;
-      const xag::LexResult theirLexed = xag::lex(theirSource);
-      if (report(theirSource, theirLexed.diagnostics) != 0)
+      const unsigned begin = whole->append(file, held);
+      const unsigned end = begin + static_cast<unsigned>(held.size());
+      const xag::LexResult theirLexed = xag::lex(source, begin, end);
+      if (report(source, theirLexed.diagnostics) != 0)
         return false;
-      xag::ParseResult theirParsed = xag::parse(theirSource, theirLexed.tokens, prefixes);
-      if (report(theirSource, theirParsed.diagnostics) != 0)
+      xag::ParseResult theirParsed = xag::parse(source, theirLexed.tokens, prefixes);
+      if (report(source, theirParsed.diagnostics) != 0)
         return false;
       if (!theirParsed.program.library) {
-        report(theirSource,
-               {xag::Diagnostic{xag::Span{0, 0}, "E0607",
-                                "`" + library.name + "` is used as a library, and this "
-                                "file of it is a program.",
+        report(source,
+               {xag::Diagnostic{xag::Span{begin, begin}, "E0607",
+                                "`" + library.name + "` is a library, and this file of it "
+                                "is a program.",
                                 "here", {"a library's files are `READ_ME`, `LIBRARY`, `ITMT`"},
                                 {"a file with `PREP` and `START` is a program, and a "
                                  "program is not something another program imports."}}});
         return false;
       }
-      xag::qualify(theirParsed.program, library);
-      for (xag::Item &item : theirParsed.program.items) {
-        // A library's `ITMT` is its own business — run when the library is
-        // built on its own, not when a program that uses it is. Its imports
-        // were resolved when its manifest was.
-        if (item.kind == xag::ItemKind::Itmt || item.kind == xag::ItemKind::Import)
-          continue;
-        parsed.program.items.push_back(std::move(item));
-      }
+      if (report(source, xag::importsCover(theirParsed.program, units)) != 0)
+        return false;
+      theirs.push_back(std::move(theirParsed.program));
     }
+    xag::qualify(theirs, library);
+    xag::Item *itmt = nullptr;
+    for (xag::Program &file : theirs)
+      for (xag::Item &item : file.items) {
+        if (item.kind == xag::ItemKind::Import)
+          continue; // resolved when the manifest was
+        if (item.kind == xag::ItemKind::Itmt) {
+          if (!keepItmt)
+            continue; // a library's own business, not the importer's
+          if (!itmt) {
+            into.push_back(std::move(item));
+            itmt = &into.back();
+          } else {
+            for (xag::StmtPtr &s : item.body.stmts)
+              itmt->body.stmts.push_back(std::move(s));
+          }
+          continue;
+        }
+        into.push_back(std::move(item));
+      }
+    return true;
+  };
+
+  // The entry is a library: what is being built is the whole unit it belongs
+  // to, not the one file named. Its files replace the one already read — that
+  // one is among them — so that `xagc build lib/a.xag` and `xagc build
+  // lib/b.xag` build the same thing.
+  if (parsed.program.library && !units.self.files.empty()) {
+    std::vector<xag::Item> all;
+    if (!readLibrary(units.self, /*keepItmt=*/true, all))
+      return false;
+    parsed.program.items = std::move(all);
   }
+
+  for (const xag::Unit &library : units.libraries)
+    if (!readLibrary(library, /*keepItmt=*/false, parsed.program.items))
+      return false;
   // Read, and read again after every round of writing generics out. Only what
   // refuses is said as it happens; what is only *said* waits until the rounds
   // have settled, because a warning about a name is the same warning every

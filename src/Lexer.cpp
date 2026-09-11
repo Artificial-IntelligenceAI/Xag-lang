@@ -48,6 +48,11 @@ bool continuesWord(char c) { return std::isalnum(static_cast<unsigned char>(c)) 
 class Lexer {
 public:
   Lexer(const Source &source) : text_(source.text()) {}
+  // One file of several held in one source: the lexer reads only its slice,
+  // and every span it makes is shifted to where the slice sits, so that a span
+  // means one place in the whole and a diagnostic can find the file it is in.
+  Lexer(const Source &source, unsigned begin, unsigned end)
+      : text_(source.text().substr(begin, end - begin)), base_(begin) {}
 
   LexResult run() {
     while (true) {
@@ -56,27 +61,31 @@ public:
         break;
       one();
     }
-    result_.tokens.push_back(Token{TokenKind::End, Span{at_, at_}, {}});
+    result_.tokens.push_back(Token{TokenKind::End, shifted(Span{at_, at_}), {}});
     return std::move(result_);
   }
 
 private:
   std::string_view text_;
+  unsigned base_ = 0;
   unsigned at_ = 0;
   LexResult result_;
+
+  Span shifted(Span span) const { return Span{span.begin + base_, span.end + base_}; }
 
   char peek(unsigned ahead = 0) const {
     return at_ + ahead < text_.size() ? text_[at_ + ahead] : '\0';
   }
 
   void emit(TokenKind kind, unsigned begin, std::string body = {}) {
-    result_.tokens.push_back(Token{kind, Span{begin, at_}, std::move(body)});
+    result_.tokens.push_back(Token{kind, shifted(Span{begin, at_}), std::move(body)});
   }
 
   void complain(Span span, std::string code, std::string message,
                 std::vector<std::string> rules, std::vector<std::string> tips) {
-    result_.diagnostics.push_back(Diagnostic{span, std::move(code), std::move(message),
-                                             "here", std::move(rules), std::move(tips), {}});
+    result_.diagnostics.push_back(Diagnostic{shifted(span), std::move(code),
+                                             std::move(message), "here", std::move(rules),
+                                             std::move(tips), {}});
   }
 
   void skipTrivia() {
@@ -365,5 +374,9 @@ private:
 } // namespace
 
 LexResult lex(const Source &source) { return Lexer(source).run(); }
+
+LexResult lex(const Source &source, unsigned begin, unsigned end) {
+  return Lexer(source, begin, end).run();
+}
 
 } // namespace xag

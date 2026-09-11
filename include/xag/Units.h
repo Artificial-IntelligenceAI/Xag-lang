@@ -62,18 +62,30 @@ UnitsResult unitsFor(const std::string &sourcePath);
 const Unit *unitNamed(const UnitsResult &units, const std::string &name);
 
 // Writes a library's call name onto everything it declares, so that its files
-// can be read alongside a program's as one program and nothing collides.
+// can be read alongside a program's as one program and nothing collides. All
+// of a library's files together, because what a name is renamed to depends on
+// who may see it:
 //
-// What the library exports is renamed to `called.name`, which is exactly what a
-// use site in the program writes — so a call written `t.twice[…]` names the
-// function without any lookup on the way. What it does not export is renamed to
-// `called$name`, which no program can spell, because `$` is not a word
-// character. Every reference inside the library is rewritten to match: calls,
-// the type in every chain, a written value's type, a constant's name.
+//   fn.export.int64 'twice'    →  t.twice      what a use site writes
+//   fn.program.int64 'shared'  →  t$shared     every file of the library
+//   fn.int64 'helper'          →  t$2$helper   this file — the third — alone
+//
+// `$` is not a word character, so nothing outside can spell the last two. A
+// `file`-visible name reached from another file of the same library is left
+// as written, and the checker says it is not declared, which is the truth.
+// Every reference inside the library is rewritten to match: calls, the type in
+// every chain, a written value's type, a constant's name.
 //
 // This is the same trick generics use — a copy named `twice$int64` that nothing
 // can collide with — and it is why nothing below the parser had to learn what a
 // unit is.
-void qualify(Program &library, const Unit &unit);
+void qualify(std::vector<Program> &files, const Unit &unit);
+
+// Every place a file reaches into a library — `t.twice[…]`, `var.t.point`,
+// `t.uer:*…*` — checked against the file's own `import` lines. A file uses what
+// it imports and nothing else: the manifest says what the program *could* use,
+// and `import` says what *this file* does. Answers a diagnostic per file that
+// reaches for a prefix it never imported (E0608).
+std::vector<Diagnostic> importsCover(const Program &file, const UnitsResult &units);
 
 } // namespace xag

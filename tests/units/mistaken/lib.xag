@@ -1,0 +1,8 @@
+READ_ME {
+A library with a mistake on line 6, so a test can see the diagnostic point here
+rather than into the program that imports it.
+}
+LIBRARY {
+    fn.export.int64 'f' [int64 'n'] { var.str 's' = ['n']; give ['n']; }
+}
+ITMT { }

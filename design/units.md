@@ -116,6 +116,8 @@ wants to say otherwise.
 | `E0604` | the walk came round: a unit is used by something it uses |
 | `E0605` | two libraries answer to one import name |
 | `E0606` | `import` names a library the manifest does not reach |
+| `E0607` | a file of a library has `PREP` and `START` — it is a program |
+| `E0608` | a file reaches into `t.` without `import 'text';` |
 
 The first five are about a manifest and point into it; the last is about the
 file being compiled.
@@ -142,18 +144,35 @@ The parser is told each library's call name so it can read `var.t.point 'p'` as
 one type, and `t.uer:*…*` as one type before a `:`. A `struct` or `one-of` says
 `export` the way a function does — `struct.export 'point' […]`.
 
+## Within a unit
+
+A library's files are renamed together, because what a name becomes depends on
+who may see it:
+
+| declared as | becomes | reachable from |
+| --- | --- | --- |
+| `fn.export.int64 'answer'` | `t.answer` | anywhere |
+| `fn.program.int64 'shared'` | `t$shared` | every file of the library |
+| `fn.int64 'helper'` | `t$1$helper` | the file that declared it — the second |
+
+So two files may each have a `helper`, and a file reaching for another file's
+`helper` is told it is not a function, in the name it wrote. A library built on
+its own is all of its files, whichever one was named on the command line, and
+with several files their `ITMT` blocks are one body in file order — the
+library's `ITMT`, not any one file's.
+
+A file uses what it imports. A file reaching for `t.` without `import 'text';`
+is refused (`E0608`), in the program and in a library alike.
+
 ## Not yet enforced
 
-- **`import` per file.** A file's `import` lines are checked against the
-  manifest, but nothing yet checks that a file reaching for `t.` actually
-  imported `t`. Every file is read with every prefix the program knows.
-- **`file` and `program` visibility within a unit.** Both are read as
-  unit-wide today. A library with two files whose `file`-visible names collide
-  would be refused as a duplicate rather than allowed.
 - **Constants across a unit.** `t.'LIMIT'` — how a program spells a library's
   constant — has no syntax yet. Functions and types do.
 - **Settings per unit.** Decided, and nothing to attach to yet: the four
   semantic knobs are decided in the manifest but nothing branches on them.
+- **A program of several files.** A library is all the `.xag` files in its
+  directory; a program is still the one file named. Which file has `START`,
+  and what several `ITMT`s mean, is not decided.
 
 ## What is built
 

@@ -1,0 +1,12 @@
+READ_ME {
+One of two files. `helper` is this file's alone; `shared` is the library's;
+`answer` is exported.
+}
+LIBRARY {
+    fn.int64 'helper' [int64 'n'] { give ['n' + *1*]; }
+    fn.program.int64 'shared' [int64 'n'] { give [helper['n'] x *10*]; }
+    fn.export.int64 'answer' [int64 'n'] { give [shared['n'] + other['n']]; }
+}
+ITMT {
+    print.stdout[answer[*1*] \n];
+}

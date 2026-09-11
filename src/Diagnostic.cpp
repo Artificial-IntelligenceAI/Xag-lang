@@ -115,7 +115,7 @@ namespace {
 void pointAt(const Source &source, Span span, const std::string &label, unsigned gutter,
              unsigned &shown, std::ostream &out) {
   const Source::Position start = source.positionOf(span.begin);
-  const std::string_view line = source.lineText(start.line);
+  const std::string_view line = source.lineText(start);
   const std::string number = std::to_string(start.line);
 
   // A span that runs past the end of its line is clipped to it, so the underline
@@ -158,9 +158,13 @@ void render(const Source &source, const Diagnostic &diagnostic, std::ostream &ou
   }
 
   const Source::Position start = source.positionOf(diagnostic.span.begin);
+  // The file the span is in, which is not always the one the source was made
+  // with: a library's items join the program's, and a mistake in one of them
+  // is in the library's file.
+  const std::string_view named = source.nameOf(start);
 
-  out << "\nfile: " << source.name() << ", line: " << start.line
-      << ", column: " << start.column << " (" << source.name() << ':' << start.line
+  out << "\nfile: " << named << ", line: " << start.line
+      << ", column: " << start.column << " (" << named << ':' << start.line
       << ':' << start.column << ")\n\n";
 
   out << diagnostic.message << "\n\n";

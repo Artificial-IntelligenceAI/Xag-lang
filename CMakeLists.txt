@@ -223,6 +223,26 @@ add_test(NAME units_library_itmt_refuses
          COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/overflowing/a.xag)
 set_tests_properties(units_library_itmt_refuses PROPERTIES WILL_FAIL TRUE)
 
+# A library of two files: `file`-visible names are each file's own, `program`
+# crosses the files, `export` crosses the unit. Built through a program, and
+# alone from either of its files.
+add_test(NAME units_two_files_agrees
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-twofile/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/example_agrees.cmake)
+add_test(NAME units_two_files_build_alone_from_a
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/a.xag)
+add_test(NAME units_two_files_build_alone_from_b
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/b.xag)
+
+# A mistake inside a library points into the library's file.
+add_test(NAME units_diagnostic_points_into_library
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-mistaken/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/diagnostic_points_into_library.cmake)
+
 # The decimal knob, asked of the compiler itself rather than of a library: what
 # a build has is a fact about the build, and the only way to ask it is to run it.
 add_test(NAME decimal_software

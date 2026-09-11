@@ -1,0 +1,4 @@
+READ_ME { }
+PREP { import 'mistaken'; }
+START { print.stdout[m.f[*1*] \n]; }
+ITMT { }

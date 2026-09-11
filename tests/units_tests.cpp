@@ -82,29 +82,73 @@ void aLibraryIsQualified() {
   xag::Unit unit;
   unit.name = "text";
   unit.called = "t";
-  xag::qualify(parsed.program, unit);
+  std::vector<xag::Program> files;
+  files.push_back(std::move(parsed.program));
+  xag::qualify(files, unit);
   std::ostringstream out;
-  xag::print(parsed.program, out);
+  xag::print(files.front(), out);
   const std::string tree = out.str();
-  CHECK(tree.find("struct t$pair") != std::string::npos);
+  // `file` is the default, so what says nothing is this file's alone — the
+  // first file, so `t$0$`.
+  CHECK(tree.find("struct t$0$pair") != std::string::npos);
   CHECK(tree.find("struct t.point") != std::string::npos);
-  CHECK(tree.find("'t$K'") != std::string::npos);
-  CHECK(tree.find("fn fn.int64 t$helper") != std::string::npos);
+  CHECK(tree.find("'t$0$K'") != std::string::npos);
+  CHECK(tree.find("fn fn.int64 t$0$helper") != std::string::npos);
   CHECK(tree.find("fn.export.int64 t.twice") != std::string::npos);
-  // The chain that names `point` now names `t.point`, and `pair` `t$pair`.
+  // The chain that names `point` now names `t.point`, and `pair` `t$0$pair`.
   CHECK(tree.find("loan.t.point") != std::string::npos);
-  CHECK(tree.find("var.t$pair") != std::string::npos);
+  CHECK(tree.find("var.t$0$pair") != std::string::npos);
   // A call to the helper, and the constant it reads.
-  CHECK(tree.find("call t$helper") != std::string::npos);
-  CHECK(tree.find("name 't$K'") != std::string::npos);
+  CHECK(tree.find("call t$0$helper") != std::string::npos);
+  CHECK(tree.find("name 't$0$K'") != std::string::npos);
   // Nothing bare is left of any of them.
   CHECK(tree.find("call helper") == std::string::npos);
   CHECK(tree.find("name 'K'") == std::string::npos);
 }
 
+// Two files of one library: a name that says nothing is its own file's; one
+// that says `program` is every file's; one that says `export` is everyone's.
+void twoFilesKeepTheirOwnNames() {
+  auto file = [](const char *text) {
+    const xag::Source source("f.xag", text);
+    const xag::LexResult lexed = xag::lex(source);
+    return xag::parse(source, lexed.tokens).program;
+  };
+  std::vector<xag::Program> files;
+  files.push_back(file("READ_ME { }\nLIBRARY {\n"
+                       "  fn.int64 'helper' [int64 'n'] { give ['n']; }\n"
+                       "  fn.program.int64 'shared' [int64 'n'] { give [helper['n']]; }\n"
+                       "  fn.export.int64 'answer' [int64 'n'] { give [shared['n']]; }\n"
+                       "}\nITMT { }\n"));
+  files.push_back(file("READ_ME { }\nLIBRARY {\n"
+                       "  fn.int64 'helper' [int64 'n'] { give ['n']; }\n"
+                       "  fn.int64 'peek' [int64 'n'] { give [helper['n'] + shared['n'] + "
+                       "answer['n'] + secret['n']]; }\n"
+                       "}\nITMT { }\n"));
+  xag::Unit unit;
+  unit.name = "two";
+  unit.called = "tw";
+  xag::qualify(files, unit);
+  std::ostringstream a, b;
+  xag::print(files[0], a);
+  xag::print(files[1], b);
+  // Each file's `helper` is its own.
+  CHECK(a.str().find("fn fn.int64 tw$0$helper") != std::string::npos);
+  CHECK(b.str().find("fn fn.int64 tw$1$helper") != std::string::npos);
+  CHECK(b.str().find("call tw$1$helper") != std::string::npos);
+  CHECK(b.str().find("call tw$0$helper") == std::string::npos);
+  // `program` and `export` reach across.
+  CHECK(b.str().find("call tw$shared") != std::string::npos);
+  CHECK(b.str().find("call tw.answer") != std::string::npos);
+  // A name the other file kept to itself is left as written, for the checker
+  // to say is not there.
+  CHECK(b.str().find("call secret") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
+  twoFilesKeepTheirOwnNames();
   aLibraryIsQualified();
   aProgramReachesALibrary();
   noManifestIsNotAMistake();

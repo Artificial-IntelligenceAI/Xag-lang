@@ -395,13 +395,6 @@ struct Renames {
   std::unordered_map<std::string, std::string> constants; // const
 };
 
-bool exported(const Chain &chain) {
-  for (const ChainSegment &seg : chain.segments)
-    if (!seg.isName && seg.text == "export")
-      return true;
-  return false;
-}
-
 std::string renamed(const std::unordered_map<std::string, std::string> &map,
                     const std::string &name) {
   auto found = map.find(name);
@@ -475,48 +468,203 @@ void qualifyBlock(Block &block, const Renames &r) {
       qualifyStmt(*s, r);
 }
 
+// ---- what a file reaches for
+
+// Every prefix a file's code names, with where it named it — the first place
+// each, since one complaint per missing import is what a reader wants.
+struct Reached {
+  std::vector<std::pair<std::string, Span>> prefixes;
+  void note(const std::string &prefix, Span at) {
+    for (const auto &[had, where] : prefixes)
+      if (had == prefix)
+        return;
+    prefixes.emplace_back(prefix, at);
+  }
+};
+
+void reachedInChain(const Chain &chain, Reached &r) {
+  if (chain.segments.empty())
+    return;
+  const ChainSegment &type = chain.segments.back();
+  const std::size_t dot = type.text.find('.');
+  if (!type.isName && dot != std::string::npos)
+    r.note(type.text.substr(0, dot), type.span);
+}
+
+void reachedInBlock(const Block &block, Reached &r);
+void reachedInValues(const ValueList &list, Reached &r);
+
+void reachedInExpr(const Expr *e, Reached &r) {
+  if (!e)
+    return;
+  if (e->kind == ExprKind::Call && e->path.size() == 2)
+    r.note(e->path.front(), e->span);
+  if (e->kind == ExprKind::Typed) {
+    const std::size_t dot = e->text.find('.');
+    if (dot != std::string::npos)
+      r.note(e->text.substr(0, dot), e->span);
+  }
+  for (const ExprPtr &child : e->children)
+    reachedInExpr(child.get(), r);
+  reachedInValues(e->args, r);
+}
+
+void reachedInValues(const ValueList &list, Reached &r) {
+  for (const Value &value : list.values)
+    for (const ExprPtr &item : value.items)
+      reachedInExpr(item.get(), r);
+}
+
+void reachedInStmt(const Stmt &s, Reached &r) {
+  reachedInChain(s.chain, r);
+  reachedInValues(s.value, r);
+  reachedInExpr(s.index.get(), r);
+  reachedInExpr(s.condition.get(), r);
+  reachedInExpr(s.call.get(), r);
+  for (const Branch &branch : s.branches) {
+    reachedInExpr(branch.condition.get(), r);
+    reachedInBlock(branch.body, r);
+  }
+  reachedInBlock(s.body, r);
+}
+
+void reachedInBlock(const Block &block, Reached &r) {
+  for (const StmtPtr &s : block.stmts)
+    if (s)
+      reachedInStmt(*s, r);
+}
+
 } // namespace
 
-void qualify(Program &library, const Unit &unit) {
-  Renames r;
-  for (const Item &item : library.items) {
-    const std::string as =
-        exported(item.chain) ? unit.called + "." + item.name : unit.called + "$" + item.name;
-    switch (item.kind) {
-    case ItemKind::Struct:
-    case ItemKind::OneOf:
-      r.types[item.name] = as;
-      break;
-    case ItemKind::Function:
-      r.functions[item.name] = as;
-      break;
-    case ItemKind::Const:
-      r.constants[item.name] = as;
-      break;
-    default:
-      break;
+std::vector<Diagnostic> importsCover(const Program &file, const UnitsResult &units) {
+  Reached reached;
+  std::vector<std::string> imported;
+  for (const Item &item : file.items) {
+    if (item.kind == ItemKind::Import) {
+      imported.push_back(item.name);
+      continue;
+    }
+    reachedInChain(item.chain, reached);
+    for (const Param &param : item.params)
+      reachedInChain(param.chain, reached);
+    reachedInValues(item.value, reached);
+    reachedInBlock(item.body, reached);
+  }
+
+  std::vector<Diagnostic> out;
+  for (const auto &[prefix, where] : reached.prefixes) {
+    // Which library this prefix is. A dotted callee that is no library's call
+    // name — `print.stdout` — is a built-in and is nobody's to import.
+    const Unit *library = nullptr;
+    for (const Unit &one : units.libraries)
+      if (one.called == prefix)
+        library = &one;
+    if (!library)
+      continue;
+    bool covered = false;
+    for (const std::string &name : imported)
+      covered = covered || name == library->name;
+    if (covered)
+      continue;
+    out.push_back(Diagnostic{
+        where, "E0608",
+        "this file reaches into `" + prefix + "` without importing it.", "here",
+        {"a file uses what it imports"},
+        {"`import '" + library->name + "';` in this file's `PREP` or `LIBRARY` says so. "
+         "The manifest says what the program could use; `import` says what this file "
+         "does, so a reader sees where a name came from without leaving the file."}});
+  }
+  return out;
+}
+
+// Who may see a declaration: this file, the unit, or everyone.
+enum class Sees { File, Program, Export };
+
+Sees visibilityOf(const Chain &chain) {
+  for (const ChainSegment &seg : chain.segments) {
+    if (seg.isName)
+      continue;
+    if (seg.text == "export")
+      return Sees::Export;
+    if (seg.text == "program")
+      return Sees::Program;
+  }
+  return Sees::File;
+}
+
+void qualify(std::vector<Program> &files, const Unit &unit) {
+  // Names the whole unit shares, and the names each file keeps to itself. A
+  // reference is looked up in its own file's first, then the unit's, so a file
+  // that declares its own `helper` gets its own and one that does not gets
+  // nothing — never another file's.
+  Renames shared;
+  std::vector<Renames> own(files.size());
+  for (std::size_t f = 0; f < files.size(); ++f) {
+    for (const Item &item : files[f].items) {
+      std::unordered_map<std::string, std::string> *shareMap = nullptr;
+      std::unordered_map<std::string, std::string> *ownMap = nullptr;
+      switch (item.kind) {
+      case ItemKind::Struct:
+      case ItemKind::OneOf:
+        shareMap = &shared.types;
+        ownMap = &own[f].types;
+        break;
+      case ItemKind::Function:
+        shareMap = &shared.functions;
+        ownMap = &own[f].functions;
+        break;
+      case ItemKind::Const:
+        shareMap = &shared.constants;
+        ownMap = &own[f].constants;
+        break;
+      default:
+        continue;
+      }
+      switch (visibilityOf(item.chain)) {
+      case Sees::Export:
+        (*shareMap)[item.name] = unit.called + "." + item.name;
+        break;
+      case Sees::Program:
+        (*shareMap)[item.name] = unit.called + "$" + item.name;
+        break;
+      case Sees::File:
+        (*ownMap)[item.name] = unit.called + "$" + std::to_string(f) + "$" + item.name;
+        break;
+      }
     }
   }
-  for (Item &item : library.items) {
-    switch (item.kind) {
-    case ItemKind::Struct:
-    case ItemKind::OneOf:
-      item.name = renamed(r.types, item.name);
-      break;
-    case ItemKind::Function:
-      item.name = renamed(r.functions, item.name);
-      break;
-    case ItemKind::Const:
-      item.name = renamed(r.constants, item.name);
-      break;
-    default:
-      break;
+
+  for (std::size_t f = 0; f < files.size(); ++f) {
+    // This file's view: its own names in front of the unit's.
+    Renames r = shared;
+    for (const auto &[from, to] : own[f].types)
+      r.types[from] = to;
+    for (const auto &[from, to] : own[f].functions)
+      r.functions[from] = to;
+    for (const auto &[from, to] : own[f].constants)
+      r.constants[from] = to;
+
+    for (Item &item : files[f].items) {
+      switch (item.kind) {
+      case ItemKind::Struct:
+      case ItemKind::OneOf:
+        item.name = renamed(r.types, item.name);
+        break;
+      case ItemKind::Function:
+        item.name = renamed(r.functions, item.name);
+        break;
+      case ItemKind::Const:
+        item.name = renamed(r.constants, item.name);
+        break;
+      default:
+        break;
+      }
+      qualifyChain(item.chain, r);
+      for (Param &param : item.params)
+        qualifyChain(param.chain, r);
+      qualifyValues(item.value, r);
+      qualifyBlock(item.body, r);
     }
-    qualifyChain(item.chain, r);
-    for (Param &param : item.params)
-      qualifyChain(param.chain, r);
-    qualifyValues(item.value, r);
-    qualifyBlock(item.body, r);
   }
 }
 
