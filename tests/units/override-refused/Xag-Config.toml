@@ -1,0 +1,7 @@
+# `different = "refused"` with nothing overridden: `flooring.xaglib` is on
+# `floored`, this program is on the default, and the build is refused.
+[uses]
+paths = ["../flooring.xaglib"]
+
+[defaults]
+different = "refused"

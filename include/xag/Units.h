@@ -38,6 +38,15 @@ struct Unit {
   std::vector<std::string> files;  // a program's, `main` first; a library's one file
   std::vector<std::string> uses;   // paths, as written
   Settings settings;               // the manifest's `[defaults]`, or the `LIBRARY` line's
+  // A program's manifest may say a setting is its own in every library too —
+  // `division = "floored everywhere"` — and that a library whose settings
+  // differ from the program's is refused — `different = "refused"`. A library
+  // says neither. What `everywhere` says wins before `different` is asked, since
+  // an overridden setting cannot differ.
+  struct Everywhere {
+    bool logic = false, division = false, characters = false, noNumber = false;
+  } everywhere;
+  bool refusesDifferent = false;
   bool library = false;
   // What a diagnostic about the unit points into: a program's manifest, or
   // the library's own file.

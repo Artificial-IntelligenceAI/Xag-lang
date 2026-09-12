@@ -332,6 +332,8 @@ public:
     std::vector<std::string> path{canonical(manifest)};
     follow(self, path);
     if (result_.ok())
+      overrideLibraries(self);
+    if (result_.ok())
       writeWhatWasReached(manifest, self);
     return std::move(result_);
   }
@@ -354,37 +356,111 @@ private:
   // them is refused rather than read as the default — a manifest that says
   // `logic = "short-circuit"` meant something, and quietly giving it the other
   // thing is how a program comes to run under a language it did not ask for.
+  //
+  // A value may say ` everywhere` after it — `"floored everywhere"` — and then
+  // it is the program's in every library too. And `different = "refused"`
+  // refuses a library whose settings differ from the program's.
   bool readDefaults(const Manifest &m, Unit &out) {
     struct Knob {
       const char *key;
       const char *yes;   // the value that sets the flag
       const char *no;    // the default
       bool Settings::*flag;
+      bool Unit::Everywhere::*forced;
     };
     static const Knob knobs[] = {
-        {"logic", "asks-both", "stops-early", &Settings::asksBoth},
-        {"division", "floored", "truncated", &Settings::floored},
-        {"characters", "letters", "clusters", &Settings::letters},
-        {"no-number", "stops", "carries-on", &Settings::noNumberStops},
+        {"logic", "asks-both", "stops-early", &Settings::asksBoth, &Unit::Everywhere::logic},
+        {"division", "floored", "truncated", &Settings::floored, &Unit::Everywhere::division},
+        {"characters", "letters", "clusters", &Settings::letters,
+         &Unit::Everywhere::characters},
+        {"no-number", "stops", "carries-on", &Settings::noNumberStops,
+         &Unit::Everywhere::noNumber},
     };
     for (const Knob &knob : knobs) {
       const Said *said = find(m, "defaults", knob.key);
       if (!said)
         continue;
-      const std::string value = said->values.size() == 1 ? said->values.front() : "";
+      std::string value = said->values.size() == 1 ? said->values.front() : "";
+      const std::string tail = " everywhere";
+      if (value.size() > tail.size() &&
+          value.compare(value.size() - tail.size(), tail.size(), tail) == 0) {
+        value.erase(value.size() - tail.size());
+        out.everywhere.*knob.forced = true;
+      }
       if (value == knob.yes) {
         out.settings.*knob.flag = true;
       } else if (value != knob.no) {
         complain(m.source,
                  Diagnostic{said->valueSpan, "E0609",
-                            "`" + std::string(knob.key) + "` cannot be `" + value + "`.", "here",
+                            "`" + std::string(knob.key) + "` cannot be `" +
+                                (said->values.empty() ? "" : said->values.front()) + "`.",
+                            "here",
                             {"a setting has the values its manifest names, and no others"},
                             {"`" + std::string(knob.key) + "` is `\"" + knob.no + "\"` or `\"" +
-                             knob.yes + "\"`."}});
+                             knob.yes + "\"`, and either may be followed by ` everywhere` to "
+                             "be the program's in every library too."}});
         return false;
       }
     }
+    if (const Said *different = find(m, "defaults", "different")) {
+      const std::string value = different->values.size() == 1 ? different->values.front() : "";
+      if (value != "refused") {
+        complain(m.source,
+                 Diagnostic{different->valueSpan, "E0609",
+                            "`different` cannot be `" + value + "`.", "here",
+                            {"a setting has the values its manifest names, and no others"},
+                            {"`different = \"refused\"` refuses a library whose settings "
+                             "differ from this program's. Not saying it is the other "
+                             "answer: each library runs as it said."}});
+        return false;
+      }
+      out.refusesDifferent = true;
+    }
     return true;
+  }
+
+  // What the program's manifest said about its libraries' settings, applied
+  // once every library is read: `everywhere` writes the program's value over
+  // the library's, and `different = "refused"` refuses a library that still
+  // differs after that.
+  void overrideLibraries(const Unit &self) {
+    struct Knob {
+      const char *key;
+      const char *yes, *no;
+      bool Settings::*flag;
+      bool Unit::Everywhere::*forced;
+    };
+    static const Knob knobs[] = {
+        {"logic", "asks-both", "stops-early", &Settings::asksBoth, &Unit::Everywhere::logic},
+        {"division", "floored", "truncated", &Settings::floored, &Unit::Everywhere::division},
+        {"characters", "letters", "clusters", &Settings::letters,
+         &Unit::Everywhere::characters},
+        {"no-number", "stops", "carries-on", &Settings::noNumberStops,
+         &Unit::Everywhere::noNumber},
+    };
+    for (Unit &library : result_.libraries) {
+      for (const Knob &knob : knobs) {
+        if (self.everywhere.*knob.forced) {
+          library.settings.*knob.flag = self.settings.*knob.flag;
+          continue;
+        }
+        if (!self.refusesDifferent || library.settings.*knob.flag == self.settings.*knob.flag)
+          continue;
+        const auto word = [&](bool flag) { return std::string(flag ? knob.yes : knob.no); };
+        complain(library.manifest,
+                 Diagnostic{library.nameSpan, "E0620",
+                            "`" + library.name + "` is on `" + knob.key + " = \"" +
+                                word(library.settings.*knob.flag) + "\"`, and the program is on `\"" +
+                                word(self.settings.*knob.flag) + "\"` and refuses a library that differs.",
+                            "here",
+                            {"a program that says `different = \"refused\"` runs no library "
+                             "under settings other than its own"},
+                            {"the program's manifest can say `" + std::string(knob.key) + " = \"" +
+                             word(self.settings.*knob.flag) +
+                             " everywhere\"` to run this library under its own value instead, "
+                             "or drop `different` and let the library run as it said."}});
+      }
+    }
   }
 
   // The program: its manifest, and the file that was named.

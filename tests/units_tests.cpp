@@ -210,7 +210,28 @@ void aLibrarysConstantIsAPrefixedName() {
   }
 }
 
+// `everywhere` and `different = "refused"` in the program's manifest.
+void aProgramMayOverrideItsLibrariesSettings() {
+  const xag::UnitsResult over = xag::unitsFor(kUnits + "override-everywhere/main.xag");
+  CHECK(over.ok());
+  CHECK(over.self.everywhere.division && !over.self.everywhere.logic);
+  CHECK(over.self.refusesDifferent);
+  CHECK(over.libraries.size() == 1 && !over.libraries.front().settings.floored);
+
+  const xag::UnitsResult refused = xag::unitsFor(kUnits + "override-refused/main.xag");
+  CHECK(!refused.ok());
+  CHECK(!refused.diagnostics.empty() && refused.diagnostics.front().code == "E0620");
+  // Pointing into the library, at its name.
+  CHECK(!refused.about.empty() && refused.about.front() &&
+        refused.about.front()->name().find("flooring.xaglib") != std::string::npos);
+
+  const xag::UnitsResult agreeing = xag::unitsFor(kUnits + "override-agreeing/main.xag");
+  CHECK(agreeing.ok());
+  CHECK(agreeing.libraries.size() == 1 && agreeing.libraries.front().settings.floored);
+}
+
 int main() {
+  aProgramMayOverrideItsLibrariesSettings();
   aProgramIsTheFilesItsManifestNames();
   aLibrarysConstantIsAPrefixedName();
   twoFilesKeepTheirOwnNames();

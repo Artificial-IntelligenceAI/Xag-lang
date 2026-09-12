@@ -133,8 +133,11 @@ engine = "test-interpreter"
 # Every `[defaults]` setting is read, and `decimal`; `optimise` and `engine`
 # are decided and not yet asked about. The file is looked for beside the
 # source and then upward, so a project decides for every file under it. A
-# `[defaults]` setting is per unit: a library's code runs under the library's
-# manifest whichever program calls it. A single run may say otherwise —
+# `[defaults]` setting is per unit: a library's code runs under its own
+# `LIBRARY` line whichever program calls it — unless a value here says
+# ` everywhere` after it (`division = "floored everywhere"`), which makes it
+# this program's in every library too, or `different = "refused"` is said,
+# which refuses a library whose settings differ from these. A single run may say otherwise —
 # `xagc --decimal=hardware` — which is how a build that has both decimals is
 # asked for each in turn.
 #

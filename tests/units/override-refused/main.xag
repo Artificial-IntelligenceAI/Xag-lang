@@ -1,0 +1,22 @@
+READ_ME {
+This program says nothing about `division`, so its own `/` and `mod` truncate.
+The library's floor, because the library said so — and `written` is worked out
+before anything runs, so the folding is under the library's setting too.
+}
+PREP {
+    import 'flooring';
+    fn.int64 'quotient' [int64 'a', int64 'b'] { give ['a' / 'b']; }
+    fn.int64 'remainder' [int64 'a', int64 'b'] { give ['a' mod 'b']; }
+}
+START {
+    print.stdout[fl.quotient[*-7*, *2*] str:* * fl.remainder[*-7*, *2*] str:* * fl.quotient[*7*, *-2*] str:* * fl.remainder[*7*, *-2*] str:* * fl.quotient[*-7*, *-2*] str:* * fl.remainder[*-7*, *-2*] \n];
+    print.stdout[quotient[*-7*, *2*] str:* * remainder[*-7*, *2*] str:* * quotient[*7*, *-2*] str:* * remainder[*7*, *-2*] str:* * quotient[*-7*, *-2*] str:* * remainder[*-7*, *-2*] \n];
+    print.stdout[fl.remainder8[*-128*, *3*] str:* * fl.remainder8[*127*, *-3*] str:* * fl.remainder8[*-128*, *-1*] \n];
+    print.stdout[fl.remainder-bin[*-7.5*, *2.0*] str:* * fl.remainder-bin[*7.5*, *-2.0*] str:* * fl.remainder-bin[*-6.0*, *2.0*] str:* * fl.remainder-bin[*6.0*, *-2.0*] \n];
+    print.stdout[fl.remainder-wide[*-7.5*, *2.0*] str:* * fl.remainder-wide[*7.5*, *-2.0*] str:* * fl.remainder-wide[*-6.0*, *2.0*] \n];
+    print.stdout[fl.remainder-deci[*-7.5*, *2.0*] str:* * fl.remainder-deci[*7.5*, *-2.0*] str:* * fl.remainder-deci[*-6.00*, *2.0*] \n];
+    var.many.int64 'm' = [*1* *2* *3* *4* *5*];
+    print.stdout[fl.written[] str:* * 'm'[(int64:*-9* / int64:*4*) + int64:*5*] \n];
+}
+ITMT {
+}

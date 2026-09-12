@@ -321,6 +321,24 @@ add_test(NAME units_library_constant
 add_test(NAME units_library_with_constants_builds_alone
          COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/limits.xaglib)
 
+# The program's say over its libraries' settings: `everywhere` on a value makes
+# it the program's in every library (the floored library truncates); `different
+# = "refused"` refuses a library whose settings still differ, and lets one that
+# agrees run as it said.
+add_test(NAME units_setting_everywhere
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/override-everywhere/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+add_test(NAME units_different_refused
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/override-refused/main.xag)
+set_tests_properties(units_different_refused PROPERTIES WILL_FAIL TRUE)
+add_test(NAME units_different_refused_but_agreeing
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/override-agreeing/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+
 # A mistake inside a library points into the library's file.
 add_test(NAME units_diagnostic_points_into_library
          COMMAND ${CMAKE_COMMAND}

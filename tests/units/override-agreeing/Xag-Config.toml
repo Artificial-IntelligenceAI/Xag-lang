@@ -1,0 +1,8 @@
+# `different = "refused"` where nothing differs: the program is on `floored`
+# too, so the library is not refused, and runs as it said.
+[uses]
+paths = ["../flooring.xaglib"]
+
+[defaults]
+division = "floored"
+different = "refused"

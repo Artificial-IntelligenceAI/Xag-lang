@@ -116,8 +116,22 @@ calls it gets the floored answer — the author tested one thing and shipped tha
 thing. Settings attach to the item rather than the build, and an expanded generic
 keeps its home unit's, so a library's source is never compiled two ways.
 
-The program's manifest may instead say the program's settings win everywhere, or
-that a library whose settings differ is refused. Spelling not yet chosen.
+The program's manifest may say otherwise, two ways (decided 2026-09-12):
+
+```toml
+[defaults]
+division = "floored everywhere"   # this program's division, in every library too
+logic = "asks-both"               # per unit, as above: each library's own
+different = "refused"             # a library whose settings differ from these is refused
+```
+
+`everywhere` after a value makes that one setting the program's in every
+library it reaches; the library's own word for it is overridden. `different =
+"refused"` refuses a library whose settings still differ from the program's
+(`E0620`, pointing at the library's `LIBRARY` line, naming the setting and
+both values) — it is asked of the settings without `everywhere`, since an
+overridden setting cannot differ. `"refused"` is its only value: not saying it
+is the other answer. Neither said, each library runs as it said.
 
 The C++ disaster this looks like — `-ffast-math` in one translation unit and not
 another — is the *same* source compiled two ways in one binary, through a header.
@@ -151,6 +165,7 @@ built on its own.
 | `E0617` | a path in a library's `uses` is not written as text |
 | `E0618` | `files` without `main`; a listed file missing; a file named that the manifest does not list |
 | `E0619` | a file other than `main` has something in its `START` |
+| `E0620` | `different = "refused"`, and a library's setting differs from the program's |
 
 The ones about a manifest point into it; the ones about a `LIBRARY` line point
 at the line.
@@ -212,9 +227,7 @@ is refused (`E0608`), in the program and in a library alike.
 
 ## Not yet enforced
 
-- **Settings per unit.** All four `[defaults]` are read and answered. The
-  program's override — its settings winning everywhere, or a library whose
-  settings differ refused — has no spelling yet.
+Nothing in this document. What is decided is built.
 
 ## What is built
 
@@ -274,6 +287,11 @@ is refused (`E0608`), in the program and in a library alike.
   `tests/units/chain` is a library using a library, run on a copy so the
   written-in line can be checked. The oracle writes two-file programs some of
   the time and every library as a `.xaglib`.
+- **2026-09-12, override** — `everywhere` on a `[defaults]` value and
+  `different = "refused"`. `tests/units/override-*`: the floored library
+  truncating under `everywhere`, refused under `different`, and running as it
+  said where the program agrees. The oracle says `everywhere` on a setting a
+  fifth of the time.
 - **2026-09-12, constants** — `t.'LIMIT'` parses to the name `t.LIMIT`;
   `tests/units/limits` shares two constants (one a struct) and keeps one; the
   oracle's library exports constants and the program reads them.

@@ -1,0 +1,10 @@
+# `everywhere`: this program's division is the division in every library it
+# reaches, whatever the library said. `flooring.xaglib` said `floored`; here it
+# truncates. And with the difference overridden there is none left for
+# `different = "refused"` to refuse.
+[uses]
+paths = ["../flooring.xaglib"]
+
+[defaults]
+division = "truncated everywhere"
+different = "refused"
