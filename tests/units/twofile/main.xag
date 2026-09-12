@@ -1,0 +1,15 @@
+READ_ME {
+The door of a two-file program: the manifest's `main`. `helper` is this file's
+own — the other file has a `helper` too, and neither sees the other's;
+`shared` says `program` and crosses the files.
+}
+PREP {
+    fn.int64 'helper' [int64 'n'] { give ['n' + *1*]; }
+    fn.program.int64 'shared' [int64 'n'] { give [helper['n'] x *10*]; }
+}
+START {
+    print.stdout[answer[*1*] str:* * shared[*2*] \n];
+}
+ITMT {
+    print.stdout[str:*main's ITMT* \n];
+}

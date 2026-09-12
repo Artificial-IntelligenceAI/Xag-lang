@@ -2,6 +2,7 @@
 
 #include "xag/Ast.h"
 #include "xag/Check.h"
+#include "xag/Lexer.h"
 #include "xag/Parser.h"
 
 #include <dirent.h>
@@ -11,6 +12,7 @@
 #include <sys/stat.h>
 #include <unordered_map>
 #include <algorithm>
+#include <cstring>
 #include <unordered_set>
 
 namespace xag {
@@ -214,34 +216,133 @@ bool spellable(const std::string &word) {
   return true;
 }
 
+// ---- a library's account of itself, read off its `LIBRARY` line
+
+// The tokens of a `.xaglib`, walked as far as its `LIBRARY` line goes. The
+// parser reads the same line properly later, with every library's call name in
+// hand; this is the reading that produces those call names, so it has to come
+// first and cannot be the parser. It takes what it can and says nothing about
+// what is malformed — the parser will, in its own words, in the same place.
+struct Header {
+  std::string name, called;
+  std::vector<std::string> uses;
+  std::vector<Span> usesSpans;
+  Span nameSpan, calledSpan;
+  Settings settings;
+  bool found = false; // a `LIBRARY` line at all
+};
+
+Header readHeader(const Source &source) {
+  Header out;
+  const LexResult lexed = lex(source);
+  const std::vector<Token> &t = lexed.tokens;
+  std::size_t at = 0;
+  while (at < t.size() && !(t[at].kind == TokenKind::Word && t[at].text == "LIBRARY"))
+    ++at;
+  if (at == t.size())
+    return out;
+  out.found = true;
+  ++at;
+  while (at + 1 < t.size() && t[at].kind == TokenKind::Dot && t[at + 1].kind == TokenKind::Word) {
+    settingWord(t[at + 1].text, out.settings);
+    at += 2;
+  }
+  if (at < t.size() && t[at].kind == TokenKind::Name) {
+    out.name = t[at].text;
+    out.nameSpan = t[at].span;
+    ++at;
+  }
+  if (at + 1 < t.size() && t[at].kind == TokenKind::Word && t[at].text == "called" &&
+      t[at + 1].kind == TokenKind::Name) {
+    out.called = t[at + 1].text;
+    out.calledSpan = t[at + 1].span;
+    at += 2;
+  }
+  if (at + 1 < t.size() && t[at].kind == TokenKind::Word && t[at].text == "uses" &&
+      t[at + 1].kind == TokenKind::LBracket) {
+    at += 2;
+    while (at < t.size() && t[at].kind != TokenKind::RBracket && t[at].kind != TokenKind::LBrace) {
+      if (t[at].kind == TokenKind::Written) {
+        out.uses.push_back(t[at].text);
+        out.usesSpans.push_back(t[at].span);
+      }
+      ++at;
+    }
+  }
+  return out;
+}
+
+bool endsWith(const std::string &text, const char *tail) {
+  const std::size_t n = std::strlen(tail);
+  return text.size() >= n && text.compare(text.size() - n, n, tail) == 0;
+}
+
+// `to`, written against `from`'s directory: what goes into a manifest so that
+// the manifest reads the same wherever the project is moved to.
+std::string relativeTo(const std::string &directory, const std::string &to) {
+  std::vector<std::string> a, b;
+  std::stringstream sa(canonical(directory)), sb(to);
+  std::string piece;
+  while (std::getline(sa, piece, '/'))
+    if (!piece.empty())
+      a.push_back(piece);
+  while (std::getline(sb, piece, '/'))
+    if (!piece.empty())
+      b.push_back(piece);
+  std::size_t same = 0;
+  while (same < a.size() && same < b.size() && a[same] == b[same])
+    ++same;
+  std::string out;
+  for (std::size_t i = same; i < a.size(); ++i)
+    out += "../";
+  for (std::size_t i = same; i < b.size(); ++i)
+    out += (i > same ? "/" : "") + b[i];
+  return out.empty() ? "." : out;
+}
+
 // ---- reading a unit, and everything it reaches
 
 class Reader {
 public:
   UnitsResult run(const std::string &sourcePath) {
-    const std::string manifest = manifestFor(sourcePath);
-    if (manifest.empty()) {
-      // No manifest is a unit with nothing to say: no name, nothing used. Most
-      // programs are this, and it is not a mistake.
-      result_.self.directory = directoryOf(sourcePath);
+    // A library named directly: built alone. It is its own unit, and what it
+    // uses is followed from it.
+    if (endsWith(sourcePath, ".xaglib")) {
+      Unit self;
+      if (!readLibrary(canonical(sourcePath), self))
+        return std::move(result_);
+      result_.self = self;
+      std::vector<std::string> path{canonical(sourcePath)};
+      follow(self, path);
       return std::move(result_);
     }
-    // The entry's own unit is read the way every library is, and then walked
-    // from. A cycle back to it is a cycle like any other.
+
+    const std::string manifest = manifestFor(sourcePath);
+    if (manifest.empty()) {
+      // No manifest is a unit with nothing to say: one file, no name, nothing
+      // used. Most programs are this, and it is not a mistake.
+      result_.self.directory = directoryOf(sourcePath);
+      result_.self.files.push_back(sourcePath);
+      return std::move(result_);
+    }
     Unit self;
-    if (!readUnit(manifest, self, /*mustBeNamed=*/false))
+    if (!readProgram(manifest, sourcePath, self))
       return std::move(result_);
     result_.self = self;
-    std::vector<std::string> path{canonical(directoryOf(manifest))};
+    std::vector<std::string> path{canonical(manifest)};
     follow(self, path);
+    if (result_.ok())
+      writeWhatWasReached(manifest, self);
     return std::move(result_);
   }
 
 private:
   UnitsResult result_;
-  // Libraries already read, by directory, so a library two programs' paths
-  // both reach is read once and appears once.
+  // Libraries already read, by file, so a library two paths both reach is
+  // read once and appears once.
   std::unordered_map<std::string, unsigned> seen_;
+  // Which libraries the program's own manifest listed, by canonical file.
+  std::unordered_set<std::string> listed_;
 
   void complain(const std::shared_ptr<Source> &in, Diagnostic d) {
     result_.diagnostics.push_back(std::move(d));
@@ -286,7 +387,8 @@ private:
     return true;
   }
 
-  bool readUnit(const std::string &manifestPath, Unit &out, bool mustBeNamed) {
+  // The program: its manifest, and the file that was named.
+  bool readProgram(const std::string &manifestPath, const std::string &named, Unit &out) {
     Manifest m = readManifest(manifestPath);
     for (Diagnostic &d : m.trouble)
       complain(m.source, std::move(d));
@@ -295,100 +397,154 @@ private:
 
     out.manifest = m.source;
     out.directory = canonical(directoryOf(manifestPath));
-    out.files = xagFilesIn(out.directory);
-
-    if (const Said *name = find(m, "unit", "name")) {
-      out.name = name->values.empty() ? std::string() : name->values.front();
-      out.nameSpan = name->valueSpan;
-    }
-    if (const Said *called = find(m, "unit", "called")) {
-      out.called = called->values.empty() ? std::string() : called->values.front();
-      out.calledSpan = called->valueSpan;
-    }
-    if (const Said *uses = find(m, "uses", "paths"))
+    if (const Said *uses = find(m, "uses", "paths")) {
       out.uses = uses->values;
+      out.usesSpans.assign(uses->values.size(), uses->valueSpan);
+    }
     if (!readDefaults(m, out))
       return false;
 
-    if (mustBeNamed) {
-      if (out.name.empty()) {
-        complain(m.source, Diagnostic{Span{0, 0}, "E0602",
-                                      "this library's manifest gives it no name.", "here",
-                                      {"a library says what it is called, both ways"},
-                                      {"`[unit]`, then `name = \"text\"` for `import "
-                                       "'text';` and `called = \"t\"` for `t.thing[…]`."}});
+    // Which files. `main` and `files` name them; without `main`, the program
+    // is the one file that was named, which is what every single-file
+    // program is.
+    const Said *main = find(m, "unit", "main");
+    const Said *files = find(m, "unit", "files");
+    if (!main) {
+      if (files) {
+        complain(m.source, Diagnostic{files->span, "E0618",
+                                      "`files` without `main` says which files and not which "
+                                      "one runs.",
+                                      "here", {"a program of several files says which one is its door"},
+                                      {"`main = \"main.xag\"` beside it — that file's `START` "
+                                       "runs, and the others' must be empty."}});
         return false;
       }
-      if (out.called.empty()) {
-        complain(m.source, Diagnostic{out.nameSpan, "E0602",
-                                      "`" + out.name + "` says no name for its use sites.",
-                                      "here", {"a library says what it is called, both ways"},
-                                      {"`called = \"t\"` is what a use site writes: "
-                                       "`t.thing[…]`. Bare names are the language's own, so "
-                                       "every library has one."}});
+      out.files.push_back(named);
+      return true;
+    }
+    const std::string mainFile = main->values.size() == 1 ? main->values.front() : "";
+    out.files.push_back(joined(out.directory, mainFile));
+    if (files)
+      for (const std::string &file : files->values)
+        if (joined(out.directory, file) != out.files.front())
+          out.files.push_back(joined(out.directory, file));
+    for (std::size_t i = 0; i < out.files.size(); ++i) {
+      const std::string &file = out.files[i];
+      if (!exists(file) || !endsWith(file, ".xag")) {
+        complain(m.source, Diagnostic{i == 0 ? main->valueSpan : files->valueSpan, "E0618",
+                                      "there is no program file at `" +
+                                          (i == 0 ? mainFile : files->values[i - 1]) + "`.",
+                                      "here", {"a program's files are the `.xag` files its manifest names"},
+                                      {"the path is written against this manifest's own "
+                                       "directory, which is `" + out.directory + "`."}});
         return false;
       }
     }
+    // The file that was named has to be one of them, or it is a file the
+    // manifest says nothing about, in a directory the manifest speaks for.
+    const std::string here = canonical(named);
+    bool among = false;
+    for (const std::string &file : out.files)
+      among = among || file == here;
+    if (!among) {
+      complain(m.source, Diagnostic{main->span, "E0618",
+                                    "`" + named + "` is not one of this program's files.",
+                                    "here", {"a program is the files its manifest names"},
+                                    {"`main` and `files` in this manifest say which files the "
+                                     "program is. Add it, or take the file somewhere the "
+                                     "manifest does not reach."}});
+      return false;
+    }
+    return true;
+  }
+
+  // One `.xaglib`, read off its `LIBRARY` line.
+  bool readLibrary(const std::string &file, Unit &out) {
+    std::ifstream in(file);
+    std::stringstream whole;
+    whole << in.rdbuf();
+    out.manifest = std::make_shared<Source>(file, whole.str());
+    out.library = true;
+    out.directory = directoryOf(file);
+    out.files.push_back(file);
+    const Header header = readHeader(*out.manifest);
+    if (!header.found) {
+      complain(out.manifest, Diagnostic{Span{0, 0}, "E0616",
+                                        "this `.xaglib` has no `LIBRARY` line.", "here",
+                                        {"a library is `READ_ME`, `LIBRARY` and `ITMT`"},
+                                        {"`LIBRARY 'text' called 't' {` names it both ways."}});
+      return false;
+    }
+    out.name = header.name;
+    out.called = header.called;
+    out.nameSpan = header.nameSpan;
+    out.calledSpan = header.calledSpan;
+    out.uses = header.uses;
+    out.usesSpans = header.usesSpans;
+    out.settings = header.settings;
+    if (out.name.empty() || out.called.empty())
+      return false; // the parser says what is missing, at the line itself
     for (const auto &[which, span] : {std::pair{&out.name, out.nameSpan},
                                       std::pair{&out.called, out.calledSpan}}) {
-      if (which->empty())
-        continue;
       if (!spellable(*which)) {
-        complain(m.source, Diagnostic{span, "E0602",
-                                      "`" + *which + "` cannot be spelled as a name.", "here",
-                                      {"a name is letters, digits, `-` and `_`"}});
+        complain(out.manifest, Diagnostic{span, "E0602",
+                                          "`" + *which + "` cannot be spelled as a name.", "here",
+                                          {"a name is letters, digits, `-` and `_`"}});
         return false;
       }
       if (isChainWord(*which) || typeNamed(*which) != Type::Unknown) {
-        complain(m.source, Diagnostic{span, "E0602",
-                                      "`" + *which + "` is a word a chain already reads.",
-                                      "here",
-                                      {"a unit's name cannot be a word a chain asks its "
-                                       "questions with"},
-                                      {"`var.t.point 'p'` reads `t` as answering a question "
-                                       "unless nothing asks one by that word. Pick another."}});
+        complain(out.manifest, Diagnostic{span, "E0602",
+                                          "`" + *which + "` is a word a chain already reads.",
+                                          "here",
+                                          {"a unit's name cannot be a word a chain asks its "
+                                           "questions with"},
+                                          {"`var.t.point 'p'` reads `t` as answering a question "
+                                           "unless nothing asks one by that word. Pick another."}});
         return false;
       }
     }
     return true;
   }
 
-  // Walks `[uses]` from a unit, reading each library once and refusing a loop.
-  // `path` is the chain of directories being walked, for saying where the loop
+  // Walks what a unit uses, reading each library once and refusing a loop.
+  // `path` is the chain of files being walked, for saying where the loop
   // closes.
   void follow(const Unit &from, std::vector<std::string> &path) {
-    for (const std::string &use : from.uses) {
-      const std::string directory = joined(from.directory, use);
-      const std::string manifest = directory + "/Xag-Config.toml";
-      if (!exists(manifest)) {
+    for (std::size_t i = 0; i < from.uses.size(); ++i) {
+      const std::string &use = from.uses[i];
+      const Span at = i < from.usesSpans.size() ? from.usesSpans[i] : Span{};
+      const std::string file = joined(from.directory, use);
+      if (!exists(file) || !endsWith(file, ".xaglib")) {
         complain(from.manifest,
-                 Diagnostic{spanOfUse(from, use), "E0603",
-                            "there is no library at `" + use + "`.", "here",
-                            {"a path in `[uses]` is a directory holding a "
-                             "`Xag-Config.toml` with a `[unit]` in it"},
-                            {"the path is written against this manifest's own directory, "
-                             "which is `" + from.directory + "`."}});
+                 Diagnostic{at, "E0603", "there is no library at `" + use + "`.", "here",
+                            {"a library is one `.xaglib` file, and a path to one names it"},
+                            {"the path is written against " +
+                             std::string(from.library ? "the library's own directory"
+                                                      : "this manifest's own directory") +
+                             ", which is `" + from.directory + "`."}});
         continue;
       }
-      // A directory already on the path being walked is a loop.
+      if (!from.library)
+        listed_.insert(file);
+      // A file already on the path being walked is a loop.
       for (const std::string &walking : path)
-        if (walking == directory) {
+        if (walking == file) {
           std::string around;
           for (const std::string &step : path)
             around += (around.empty() ? "" : " uses ") + step;
           complain(from.manifest,
-                   Diagnostic{spanOfUse(from, use), "E0604",
+                   Diagnostic{at, "E0604",
                               "`" + use + "` is already being used by something it uses.",
                               "here", {"a unit does not use itself, however far round"},
-                              {"the loop is: " + around + " uses " + directory +
+                              {"the loop is: " + around + " uses " + file +
                                ". Two things that need each other are one thing, or "
                                "there is a third thing inside them that both use."}});
           return;
         }
-      if (seen_.count(directory))
+      if (seen_.count(file))
         continue; // read already, by another route, and it goes in once
       Unit library;
-      if (!readUnit(manifest, library, /*mustBeNamed=*/true))
+      if (!readLibrary(file, library))
         continue;
       // Two libraries may not answer to one import name: `import 'text';`
       // has to mean one thing.
@@ -398,26 +554,51 @@ private:
                    Diagnostic{library.nameSpan, "E0605",
                               "two libraries are both called `" + library.name + "`.",
                               "here", {"an import name means one library"},
-                              {"the other is at `" + other.directory + "`."}});
+                              {"the other is at `" + other.files.front() + "`."}});
           return;
         }
-      path.push_back(directory);
+      path.push_back(file);
       follow(library, path);
       path.pop_back();
       // After what it uses, so the list reads in an order where nothing comes
       // before what it depends on.
-      seen_[directory] = static_cast<unsigned>(result_.libraries.size());
+      seen_[file] = static_cast<unsigned>(result_.libraries.size());
       result_.libraries.push_back(std::move(library));
     }
   }
 
-  static Span spanOfUse(const Unit &in, const std::string &use) {
-    if (!in.manifest)
-      return Span{};
-    const std::size_t at = in.manifest->text().find("\"" + use + "\"");
-    if (at == std::string::npos)
-      return Span{};
-    return Span{static_cast<unsigned>(at), static_cast<unsigned>(at + use.size() + 2)};
+  // The program's manifest lists every library the program reaches. One
+  // reached only through another library's `uses` is written in, and said —
+  // the library carried the path, so there is nothing the reader would have
+  // had to work out, and a manifest that lists everything is a manifest a
+  // reader can trust.
+  void writeWhatWasReached(const std::string &manifestPath, const Unit &self) {
+    std::vector<std::string> missing;
+    for (const Unit &library : result_.libraries)
+      if (!listed_.count(library.files.front()))
+        missing.push_back(relativeTo(self.directory, library.files.front()));
+    if (missing.empty())
+      return;
+    std::string text(self.manifest->text());
+    Manifest m = readManifest(manifestPath);
+    std::string added;
+    for (const std::string &one : missing)
+      added += (added.empty() ? "" : ", ") + std::string("\"") + one + "\"";
+    if (const Said *uses = find(m, "uses", "paths")) {
+      // Into the list as written: before its closing bracket.
+      const std::size_t close = text.rfind(']', uses->valueSpan.end);
+      if (close != std::string::npos && close >= uses->valueSpan.begin)
+        text.insert(close, (uses->values.empty() ? "" : ", ") + added);
+    } else {
+      if (!text.empty() && text.back() != '\n')
+        text += '\n';
+      text += "\n[uses]\npaths = [" + added + "]\n";
+    }
+    std::ofstream out(manifestPath);
+    out << text;
+    for (const std::string &one : missing)
+      result_.notes.push_back("xagc: `" + one + "` was added to `" + manifestPath +
+                              "` — a library the program uses uses it.");
   }
 };
 
@@ -675,12 +856,19 @@ void qualify(std::vector<Program> &files, const Unit &unit) {
       default:
         continue;
       }
+      // A program's own files: nothing is exported, because nothing imports a
+      // program, so `export` and `program` both mean the whole program — and
+      // the name stays as written. A `file`-visible name is still walled off
+      // from the other files, with `$` and no call name in front.
+      const bool program = unit.called.empty();
       switch (visibilityOf(item.chain)) {
       case Sees::Export:
-        (*shareMap)[item.name] = unit.called + "." + item.name;
+        if (!program)
+          (*shareMap)[item.name] = unit.called + "." + item.name;
         break;
       case Sees::Program:
-        (*shareMap)[item.name] = unit.called + "$" + item.name;
+        if (!program)
+          (*shareMap)[item.name] = unit.called + "$" + item.name;
         break;
       case Sees::File:
         (*ownMap)[item.name] = unit.called + "$" + std::to_string(f) + "$" + item.name;

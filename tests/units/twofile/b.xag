@@ -1,9 +1,0 @@
-READ_ME {
-The other file. Its own `helper`, a different one, and `other` which the
-first file's `answer` calls through `program` visibility.
-}
-LIBRARY {
-    fn.int64 'helper' [int64 'n'] { give ['n' x *100*]; }
-    fn.program.int64 'other' [int64 'n'] { give [helper['n']]; }
-}
-ITMT { }

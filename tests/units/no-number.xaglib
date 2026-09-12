@@ -1,0 +1,11 @@
+READ_ME {
+A library on `no-number = "stops"` whose ITMT divides a `bin` by zero inside
+one of its own functions. Building this alone is refused: the run the compiler
+watches stops there, both ways it has of running it.
+}
+LIBRARY.stops 'no-number' called 'nn' {
+    fn.export.bin64 'ratio' [bin64 'a', bin64 'b'] { give ['a' / 'b']; }
+}
+ITMT {
+    print.stdout[ratio[*1*, *0*] \n];
+}

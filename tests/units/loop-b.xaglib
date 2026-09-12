@@ -1,0 +1,3 @@
+READ_ME { }
+LIBRARY 'b' called 'b' uses [*loop-a.xaglib*] { }
+ITMT { }

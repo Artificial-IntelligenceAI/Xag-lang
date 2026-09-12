@@ -1,2 +1,2 @@
 [uses]
-paths = ["../stopping"]
+paths = ["../stopping.xaglib"]

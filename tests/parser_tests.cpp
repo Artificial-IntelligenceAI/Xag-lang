@@ -577,18 +577,33 @@ void aFileIsOneOfTwoShapes() {
   CHECK(program.has("START"));
   CHECK(program.has("ITMT"));
 
-  const Parsed library = run("READ_ME { }\nLIBRARY {\n"
+  // A library names itself on its `LIBRARY` line: what an importer writes,
+  // what a use site writes, what it uses, and its settings as chain words.
+  const Parsed library = run("READ_ME { }\nLIBRARY.floored.asks-both 'text' called 't' "
+                             "uses [*../net.xaglib*, *../more.xaglib*] {\n"
                              "  fn.int64 'twice' [int64 'n'] { give ['n' + 'n']; }\n"
                              "}\nITMT { }\n");
   CHECK(library.ok());
   CHECK(library.parsed.program.library);
+  CHECK(library.parsed.program.name == "text");
+  CHECK(library.parsed.program.called == "t");
+  CHECK(library.parsed.program.uses.size() == 2);
+  CHECK(library.parsed.program.uses.size() == 2 && library.parsed.program.uses[1] == "../more.xaglib");
+  CHECK(library.parsed.program.settings.floored && library.parsed.program.settings.asksBoth);
+  CHECK(!library.parsed.program.settings.letters);
   CHECK(library.has("fn fn.int64 twice"));
   CHECK(!library.has("START"));
+  // Without the names, or with a word that is no setting.
+  CHECK(run("READ_ME { }\nLIBRARY { }\nITMT { }\n").code(0) == "E0616");
+  CHECK(run("READ_ME { }\nLIBRARY 'text' { }\nITMT { }\n").code(0) == "E0616");
+  CHECK(run("READ_ME { }\nLIBRARY.rounded 'text' called 't' { }\nITMT { }\n").code(0) ==
+        "E0615");
 
   // Each shape is missed by its own blocks.
   CHECK(run("READ_ME { }\nPREP { }\nSTART { }\n").code(0) == "E0111");
-  CHECK(run("READ_ME { }\nLIBRARY { }\n").code(0) == "E0111");
-  CHECK(run("READ_ME { }\nLIBRARY { }\nSTART { }\nITMT { }\n").code(0) == "E0111");
+  CHECK(run("READ_ME { }\nLIBRARY 'text' called 't' { }\n").code(0) == "E0111");
+  CHECK(run("READ_ME { }\nLIBRARY 'text' called 't' { }\nSTART { }\nITMT { }\n").code(0) ==
+        "E0111");
   // `ITMT` holds statements, like `START`.
   CHECK(run("READ_ME { }\nPREP { }\nSTART { }\n"
             "ITMT { var.int64 'n' = [*1*]; print.stdout['n' \\n]; }\n").ok());
@@ -601,7 +616,7 @@ void anImportNamesAUnit() {
   CHECK(p.ok());
   CHECK(p.has("import 'text'"));
   // In a library too, which may use other libraries.
-  CHECK(run("READ_ME { }\nLIBRARY {\n  import 'text';\n}\nITMT { }\n").ok());
+  CHECK(run("READ_ME { }\nLIBRARY 'net' called 'n' {\n  import 'text';\n}\nITMT { }\n").ok());
   // A bare word is not a name.
   CHECK(run("READ_ME { }\nPREP {\n  import text;\n}\nSTART { }\nITMT { }\n").code(0) ==
         "E0101");

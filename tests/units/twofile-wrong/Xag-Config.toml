@@ -1,0 +1,3 @@
+[unit]
+main = "main.xag"
+files = ["other.xag"]

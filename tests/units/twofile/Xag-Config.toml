@@ -1,3 +1,4 @@
+# A program of two files. `main` is the door; `files` is the rest of it.
 [unit]
-name = "two"
-called = "tw"
+main = "main.xag"
+files = ["other.xag"]

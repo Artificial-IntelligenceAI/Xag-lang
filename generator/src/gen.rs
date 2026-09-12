@@ -224,12 +224,13 @@ pub struct Writer<'a> {
     // The library being written beside the program, when there is one, and
     // whether what is being written right now goes into it.
     library: &'a mut String,
-    // Each unit's manifest. `[defaults]` are chosen here, per unit, so that a
-    // library and the program importing it are as often as not under
-    // different settings — which is the case the rule "settings attach to the
-    // item" exists for.
+    // The program's manifest, and its second file when it has one. Settings
+    // are chosen here per unit — the program's in its `[defaults]`, the
+    // library's on its `LIBRARY` line — so that a library and the program
+    // importing it are as often as not under different settings, which is the
+    // case the rule "settings attach to the item" exists for.
     manifest: &'a mut String,
-    library_manifest: &'a mut String,
+    part: &'a mut String,
     in_library: bool,
     scopes: Vec<Vec<Var>>,
     funs: Vec<Fun>,
@@ -269,9 +270,12 @@ pub struct Writer<'a> {
 pub struct Case {
     pub program: String,
     pub library: String,
-    /// The program's `Xag-Config.toml`, and the library's.
+    /// The program's `Xag-Config.toml`. A library has none: what it says
+    /// about itself is on its `LIBRARY` line.
     pub manifest: String,
-    pub library_manifest: String,
+    /// A second file of the program, `part.xag`, when the program is two
+    /// files; empty when it is one.
+    pub part: String,
 }
 
 /// A whole program, written into `case`.
@@ -288,13 +292,13 @@ pub fn generate(seed: u64, size: u32, case: &mut Case) {
     case.program.clear();
     case.library.clear();
     case.manifest.clear();
-    case.library_manifest.clear();
+    case.part.clear();
     let mut rng = Rng::from_seed(seed);
     let mut writer = Writer {
         rng: &mut rng,
         may_wrap: false,
         library: &mut case.library,
-        library_manifest: &mut case.library_manifest,
+        part: &mut case.part,
         manifest: &mut case.manifest,
         in_library: false,
         out: &mut case.program,
@@ -411,8 +415,23 @@ impl<'a> Writer<'a> {
         self.out.push_str(&self.seed.to_string());
         self.out.push_str(".\n}\n\nPREP {\n");
 
-        self.out.push_str(PREAMBLE);
-        self.out.push_str(&arith_preamble(false));
+        // Some of the time the program is two files: the preamble — its fixed
+        // functions and the `arith` struct — goes into `part.xag`, every
+        // declaration saying `program` so that `main` sees it, and the
+        // manifest names both files. What `main` writes is the same either
+        // way, which is the point: a name that crosses files is the same name.
+        let split = self.rng.chance(30);
+        if split {
+            self.part.push_str("READ_ME {\nThe other file of a program written by xag-oracle from seed ");
+            self.part.push_str(&self.seed.to_string());
+            self.part.push_str(".\n}\n\nPREP {\n");
+            self.part.push_str(&PREAMBLE.replace("fn.", "fn.program."));
+            self.part.push_str(&arith_preamble(false).replace("fn.", "fn.program.").replace("struct ", "struct.program "));
+            self.part.push_str("}\n\nSTART {\n}\n\nITMT {\n}\n");
+        } else {
+            self.out.push_str(PREAMBLE);
+            self.out.push_str(&arith_preamble(false));
+        }
         self.funs.push(Fun {
             name: "consume".to_string(),
             params: vec![Ty::Str],
@@ -451,11 +470,21 @@ impl<'a> Writer<'a> {
             said.push_str(if rng.chance(50) { "no-number = \"stops\"\n" } else { "no-number = \"carries-on\"\n" });
             said
         };
+        if split {
+            self.manifest.push_str("[unit]\nmain = \"case.xag\"\nfiles = [\"part.xag\"]\n\n");
+        }
         self.manifest.push_str(&defaults(self.rng));
         if self.rng.chance(40) {
-            self.manifest.push_str("\n[uses]\npaths = [\"lib\"]\n");
-            self.library_manifest.push_str("[unit]\nname = \"lib\"\ncalled = \"lib\"\n\n");
-            self.library_manifest.push_str(&defaults(self.rng));
+            self.manifest.push_str("\n[uses]\npaths = [\"lib.xaglib\"]\n");
+            // The library's settings, as the chain words its `LIBRARY` line
+            // takes: the other value of each, or nothing for the default.
+            let mut words = String::new();
+            for word in ["asks-both", "floored", "letters", "stops"] {
+                if self.rng.chance(50) {
+                    words.push('.');
+                    words.push_str(word);
+                }
+            }
             let start = self.out.len();
             self.in_library = true;
             // A constant or two the library exports, of a whole type, so that
@@ -483,7 +512,7 @@ impl<'a> Writer<'a> {
             self.out.truncate(start);
             self.library.push_str("READ_ME {\nA library written by xag-oracle from seed ");
             self.library.push_str(&self.seed.to_string());
-            self.library.push_str(".\n}\nLIBRARY {\n");
+            self.library.push_str(&format!(".\n}}\nLIBRARY{words} 'lib' called 'lib' {{\n"));
             self.library.push_str(PREAMBLE);
             self.library.push_str(&arith_preamble(true));
             self.library.push_str(&written);

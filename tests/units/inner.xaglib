@@ -1,0 +1,8 @@
+READ_ME {
+A library another library uses. Nothing here knows about `outer`.
+}
+LIBRARY 'inner' called 'in' {
+    fn.export.int64 'core' [int64 'n'] { give ['n' x *2*]; }
+}
+ITMT {
+}

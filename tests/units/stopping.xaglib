@@ -1,0 +1,10 @@
+READ_ME {
+A library whose manifest says a `bin` with no number to give back stops the
+program. A program importing it carries on through its own infinities.
+}
+LIBRARY.stops 'stopping' called 'st' {
+    fn.export.bin64 'ratio' [bin64 'a', bin64 'b'] { give ['a' / 'b']; }
+    fn.export.bin128 'wide-ratio' [bin128 'a', bin128 'b'] { give ['a' / 'b']; }
+}
+ITMT {
+}

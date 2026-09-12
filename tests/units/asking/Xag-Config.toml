@@ -1,6 +1,0 @@
-[unit]
-name = "asking"
-called = "ask"
-
-[defaults]
-logic = "asks-both"

@@ -1,0 +1,8 @@
+READ_ME {
+A file in the program's directory that the manifest does not name. Running it
+is refused: the manifest speaks for this directory, and this is not one of the
+program's files.
+}
+PREP { }
+START { print.stdout[str:*stray* \n]; }
+ITMT { }

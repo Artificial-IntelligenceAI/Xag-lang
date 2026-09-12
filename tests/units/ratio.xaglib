@@ -1,0 +1,40 @@
+READ_ME {
+A library type that answers operators: an exact fraction. `+`, `x`, `==`,
+`!==`, `<` and `convert-to-str` are exported; `-` is this file's alone, which
+a program importing the library cannot reach. Fractions are kept as written,
+not reduced, so `1/2 == 2/4` is a comparison of cross-products.
+}
+LIBRARY 'ratio' called 'ra' {
+    struct.export 'ratio' [int64 'top', int64 'bottom']
+
+    fn.export.ratio 'over' [int64 'top', int64 'bottom'] { give [ratio['top' 'bottom']]; }
+
+    fn.export.ratio '+' [loan.ratio 'a', loan.ratio 'b'] {
+        give [ratio[(('a'.top x 'b'.bottom) + ('b'.top x 'a'.bottom)) ('a'.bottom x 'b'.bottom)]];
+    }
+    fn.ratio '-' [loan.ratio 'a', loan.ratio 'b'] {
+        give [ratio[(('a'.top x 'b'.bottom) - ('b'.top x 'a'.bottom)) ('a'.bottom x 'b'.bottom)]];
+    }
+    fn.export.ratio 'x' [loan.ratio 'a', loan.ratio 'b'] {
+        give [ratio[('a'.top x 'b'.top) ('a'.bottom x 'b'.bottom)]];
+    }
+    fn.export.bool '==' [loan.ratio 'a', loan.ratio 'b'] {
+        give [('a'.top x 'b'.bottom) == ('b'.top x 'a'.bottom)];
+    }
+    fn.export.bool '!==' [loan.ratio 'a', loan.ratio 'b'] {
+        give [('a'.top x 'b'.bottom) !== ('b'.top x 'a'.bottom)];
+    }
+    fn.export.bool '<' [loan.ratio 'a', loan.ratio 'b'] {
+        give [('a'.top x 'b'.bottom) < ('b'.top x 'a'.bottom)];
+    }
+    fn.export.str 'convert-to-str' [loan.ratio 'r'] {
+        give [convert-to-str['r'.top] str:*/* convert-to-str['r'.bottom]];
+    }
+
+    fn.export.ratio 'halved' [loan.ratio 'r'] {
+        give ['r' - ratio[('r'.top) ('r'.bottom x *2*)]];
+    }
+}
+ITMT {
+    print.stdout[(over[*1*, *2*] + over[*1*, *3*]) str:* * halved[loan over[*1*, *2*]] \n];
+}

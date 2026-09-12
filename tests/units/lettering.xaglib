@@ -1,0 +1,9 @@
+READ_ME {
+A library whose manifest says a character is one Unicode scalar, so its
+`count` counts scalars. A program importing it counts its own way.
+}
+LIBRARY.letters 'lettering' called 'le' {
+    fn.export.int64 'letters-in' [loan.str 't'] { give [count['t']]; }
+}
+ITMT {
+}

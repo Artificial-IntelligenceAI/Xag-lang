@@ -1,0 +1,4 @@
+# Names only `outer`. `inner` is reached through it, and the compiler adds it
+# here — the test runs on a copy of this directory and checks that it did.
+[uses]
+paths = ["../outer.xaglib"]

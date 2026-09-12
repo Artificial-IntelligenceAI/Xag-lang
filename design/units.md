@@ -1,12 +1,48 @@
 # Units — libraries, programs, and what crosses between them
 
-Decided 2026-09-11. Being built in slices; each says here when it lands.
+Decided 2026-09-11 and 2026-09-12. Built in slices; each says here when it lands.
 
-## A library and a program are the same kind of thing
+## A program is its manifest's files; a library is one file
 
-A set of files with a name. A program is one that has a `START`. Both have a
-`Xag-Config.toml`, and the file shapes differ only in that a library has
-`LIBRARY` where a program has `PREP` and `START` — see `syntax.md`.
+Decided 2026-09-12, replacing the first cut in which both were directories with
+manifests.
+
+**A program** is the `.xag` files its `Xag-Config.toml` names. `main` is the one
+whose `START` runs — a program has one door — and `files` is the rest of it:
+
+```toml
+[unit]
+main = "main.xag"
+files = ["helpers.xag", "parsing.xag"]
+```
+
+Every file has all four blocks. A file that is not `main` has its `START`
+written empty; anything in it is refused (`E0619`), because it would never run
+and a reader would think it does. Every file's `ITMT` runs, `main`'s first and
+then list order, as one body — a file's `ITMT` is about that file's
+declarations and belongs beside them. Naming any of the program's files on the
+command line builds the program; naming a `.xag` in that directory that the
+manifest does not list is refused (`E0618`), since the manifest speaks for the
+directory. A `.xag` with no manifest above it is a program of one file, which
+is what every program was before this and what most still are.
+
+**A library** is one `.xaglib` file, with no manifest. Everything it says about
+itself is on its `LIBRARY` line:
+
+```
+LIBRARY.floored 'text' called 't' uses [*../net.xaglib*] {
+```
+
+`'text'` is what an importer writes (`import 'text';`), `t` what a use site
+writes (`t.count-of[…]`), `uses` the libraries it needs, by path against its
+own directory, and the chain words its settings — the other value of each
+`[defaults]` setting, the default being what is not said. The author names
+their own library; renaming the file changes nothing.
+
+Why the asymmetry: a program is the thing being built, and its manifest is
+where a build is described. A library is a thing handed around, and one file
+with its account of itself on its first line is the thing that can be handed
+around.
 
 ## Three levels of seeing
 
@@ -21,30 +57,22 @@ mean what their order says:
 
 A word is written where there is a choice, and the default is the narrowest.
 
-## Two manifests, split by who owns the fact
-
-**The library's** says what it is called, both ways:
-
-```toml
-[unit]
-name = "text"        # what an importer writes:  import 'text';
-called = "t"         # what a use site writes:   t.count-of[…]
-```
-
-The author chooses both. They are separate: the first is how a program refers to
-the library, the second is how a line of code reaches into it. The directory and
-the filenames are neither, so moving or renaming the library breaks no caller.
-
-**The program's** says only where things are:
+## The manifest lists every library reached
 
 ```toml
 [uses]
-paths = ["../text", "../net"]
+paths = ["../text.xaglib", "../net.xaglib"]
 ```
 
-and the compiler reads each library's own manifest to learn what to call it. The
-manifest is the authority on what the program *could* use; `import 'text';` in a
-file is what says *this file* uses it.
+The program's manifest is the authority on what the program *could* use;
+`import 'text';` in a file is what says *this file* uses it, and a file that
+reaches `t.` without saying so is refused (`E0608`). The list is complete: it
+names every library the program reaches, the ones its libraries use included.
+A library reached only through another library's `uses` is written into the
+manifest by the compiler, which says so on standard error — the library carried
+the path, so there was nothing a reader would have had to work out, and a
+manifest that lists everything is one a reader can trust. Rust's `Cargo.lock`
+is the same instinct: the full closure, written down, by the tool.
 
 ## Bare is reserved for the language
 
@@ -81,7 +109,8 @@ fraction type answers them.
 
 ## Settings are per-unit
 
-A unit's code runs under its own `Xag-Config.toml`, wherever it is called from.
+A unit's code runs under its own settings — a program's `[defaults]`, a
+library's `LIBRARY` line — wherever it is called from.
 `text`'s `mod` is floored if `text` said so, and a program on `truncated` that
 calls it gets the floored answer — the author tested one thing and shipped that
 thing. Settings attach to the item rather than the build, and an expanded generic
@@ -104,29 +133,27 @@ interface belongs in a small third unit both sides import, and the rest is
 accretion. Refusing it costs nothing anyone wanted and is what lets a library be
 built on its own.
 
-## Which files are a library's
-
-Every `.xag` in the directory holding its manifest, in name order. Not the
-directories under it: a unit is one directory, and a directory below it is
-somebody else's. This was an assumption made while building rather than a
-decision taken; it can be a `files = [...]` under `[unit]` if a library ever
-wants to say otherwise.
-
 ## Errors
 
 | code | when |
 | --- | --- |
 | `E0601` | a manifest line is not `key = value`, or a value is not quoted |
-| `E0602` | a library's manifest gives no `name` or no `called`, or one that cannot be a name, or one a chain already reads |
-| `E0603` | a `[uses]` path has no `Xag-Config.toml` at it |
+| `E0602` | a library's name or call name cannot be a name, or is a word a chain already reads |
+| `E0603` | a path in `[uses]`, or in a library's `uses`, has no `.xaglib` at it |
 | `E0604` | the walk came round: a unit is used by something it uses |
 | `E0605` | two libraries answer to one import name |
 | `E0606` | `import` names a library the manifest does not reach |
-| `E0607` | a file of a library has `PREP` and `START` — it is a program |
+| `E0607` | a `.xaglib` is a program, or a program's file is a library |
 | `E0608` | a file reaches into `t.` without `import 'text';` |
+| `E0609` | a `[defaults]` value is neither of the two a setting has |
+| `E0615` | a word after `LIBRARY.` is not a setting |
+| `E0616` | a `LIBRARY` line lacks its name or its call name |
+| `E0617` | a path in a library's `uses` is not written as text |
+| `E0618` | `files` without `main`; a listed file missing; a file named that the manifest does not list |
+| `E0619` | a file other than `main` has something in its `START` |
 
-The first five are about a manifest and point into it; the last is about the
-file being compiled.
+The ones about a manifest point into it; the ones about a `LIBRARY` line point
+at the line.
 
 ## How a library's code is read
 
@@ -165,20 +192,20 @@ the checker.
 
 ## Within a unit
 
-A library's files are renamed together, because what a name becomes depends on
-who may see it:
+A program's files are renamed together, because what a name becomes depends on
+who may see it. A program exports nothing — nothing imports a program — so
+`export` and `program` both mean the whole program and leave the name as
+written; a name that says nothing is its file's own:
 
 | declared as | becomes | reachable from |
 | --- | --- | --- |
-| `fn.export.int64 'answer'` | `t.answer` | anywhere |
-| `fn.program.int64 'shared'` | `t$shared` | every file of the library |
-| `fn.int64 'helper'` | `t$1$helper` | the file that declared it — the second |
+| `fn.program.int64 'shared'` | `shared` | every file of the program |
+| `fn.int64 'helper'` | `$1$helper` | the file that declared it — the second |
 
 So two files may each have a `helper`, and a file reaching for another file's
-`helper` is told it is not a function, in the name it wrote. A library built on
-its own is all of its files, whichever one was named on the command line, and
-with several files their `ITMT` blocks are one body in file order — the
-library's `ITMT`, not any one file's.
+`helper` is told it is not a function, in the name it wrote. (A library is one
+file now, so the three-way table above applies to it with only `export` and
+"nothing said" in play.)
 
 A file uses what it imports. A file reaching for `t.` without `import 'text';`
 is refused (`E0608`), in the program and in a library alike.
@@ -188,9 +215,6 @@ is refused (`E0608`), in the program and in a library alike.
 - **Settings per unit.** All four `[defaults]` are read and answered. The
   program's override — its settings winning everywhere, or a library whose
   settings differ refused — has no spelling yet.
-- **A program of several files.** A library is all the `.xag` files in its
-  directory; a program is still the one file named. Which file has `START`,
-  and what several `ITMT`s mean, is not decided.
 
 ## What is built
 
@@ -242,6 +266,14 @@ is refused (`E0608`), in the program and in a library alike.
   the cluster count. `tests/units/lettering` counts the family emoji, a flag
   and `café` both ways. The oracle tosses it per unit; its texts already had
   both emoji in them.
+- **2026-09-12, files** — a program is its manifest's `main` and `files`; a
+  library is one `.xaglib` with its names, its `uses` and its settings on the
+  `LIBRARY` line. The manifest is completed by the compiler for libraries
+  reached through libraries. `tests/units/twofile` is a two-file program
+  (private `helper`s, a `program` one, empty second `START`, merged `ITMT`);
+  `tests/units/chain` is a library using a library, run on a copy so the
+  written-in line can be checked. The oracle writes two-file programs some of
+  the time and every library as a `.xaglib`.
 - **2026-09-12, constants** — `t.'LIMIT'` parses to the name `t.LIMIT`;
   `tests/units/limits` shares two constants (one a struct) and keeps one; the
   oracle's library exports constants and the program reads them.

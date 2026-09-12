@@ -155,12 +155,11 @@ fn main() {
                                     case.program
                                 );
                                 eprintln!("\n--- under this Xag-Config.toml:\n{}", case.manifest);
+                                if !case.part.is_empty() {
+                                    eprintln!("\n--- and its other file, part.xag:\n{}", case.part);
+                                }
                                 if !case.library.is_empty() {
-                                    eprintln!(
-                                        "\n--- and its library, lib/lib.xag:\n{}\n--- under \
-                                         lib/Xag-Config.toml:\n{}",
-                                        case.library, case.library_manifest
-                                    );
+                                    eprintln!("\n--- and its library, lib.xaglib:\n{}", case.library);
                                 }
                             }
                         }
@@ -281,11 +280,11 @@ fn main() {
         println!("\n──────── seed {} ────────", finding.seed);
         println!("{}", finding.case.program);
         println!("--- under this Xag-Config.toml:\n{}", finding.case.manifest);
+        if !finding.case.part.is_empty() {
+            println!("--- and its other file, part.xag:\n{}", finding.case.part);
+        }
         if !finding.case.library.is_empty() {
-            println!(
-                "--- and its library, lib/lib.xag:\n{}\n--- under lib/Xag-Config.toml:\n{}",
-                finding.case.library, finding.case.library_manifest
-            );
+            println!("--- and its library, lib.xaglib:\n{}", finding.case.library);
         }
         match finding.odd {
             Some(name) => println!(
@@ -361,27 +360,22 @@ fn ask(settings: &Settings, room: &Path, case: &gen::Case) -> Verdict {
         return Verdict::Broke("writing the case out", why.to_string());
     }
     // Every program has a manifest, because the manifest is where its
-    // `[defaults]` are. A program that imports a library needs the library
-    // beside it too, with a manifest of its own saying what it is called and
-    // what it decided. A library left over from the last case would be one
-    // this case's manifest does not reach, and is removed.
+    // `[defaults]` are and, when it is two files, which files. A program that
+    // imports a library needs the `.xaglib` beside it. A file left over from
+    // the last case would be one this case's manifest does not name, and is
+    // removed.
     if let Err(why) = std::fs::write(room.join("Xag-Config.toml"), &case.manifest) {
         return Verdict::Broke("writing the manifest out", why.to_string());
     }
-    let lib = room.join("lib");
-    if case.library.is_empty() {
-        let _ = std::fs::remove_dir_all(&lib);
-    } else {
-        let _ = std::fs::create_dir_all(&lib);
-        for (path, text) in [
-            (lib.join("Xag-Config.toml"), &case.library_manifest),
-            (lib.join("lib.xag"), &case.library),
-        ] {
-            if let Err(why) = std::fs::write(&path, text) {
-                return Verdict::Broke("writing the library out", why.to_string());
-            }
+    for (name, text) in [("part.xag", &case.part), ("lib.xaglib", &case.library)] {
+        let path = room.join(name);
+        if text.is_empty() {
+            let _ = std::fs::remove_file(&path);
+        } else if let Err(why) = std::fs::write(&path, text) {
+            return Verdict::Broke("writing the case's other files out", why.to_string());
         }
     }
+    let _ = std::fs::remove_dir_all(room.join("lib"));
 
     let interpreted = run(Command::new(&settings.xagc).arg("run").arg(&source));
     // Refused, meaning it never ran. A program that *did* run and then stopped —

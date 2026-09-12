@@ -1,0 +1,12 @@
+READ_ME {
+A library that uses `inner`, and says so with a path against its own
+directory. A program that reaches `outer` reaches `inner` through it, and
+its manifest is written to say so.
+}
+LIBRARY 'outer' called 'out' uses [*inner.xaglib*] {
+    import 'inner';
+    fn.export.int64 'wrapped' [int64 'n'] { give [in.core['n'] + *1*]; }
+}
+ITMT {
+    print.stdout[wrapped[*20*] \n];
+}

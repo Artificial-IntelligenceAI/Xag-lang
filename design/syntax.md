@@ -494,10 +494,11 @@ asking for something.**
 | ownership | `own` | `loan` / `loanmut` — asking to borrow |
 | loop counter | `temp` | `perm` — asking to keep it after the loop |
 
-Visibility — `export` / `program` against a default of `file` — is where it will
-go, and is refused for now (`E0206`): a program is one file, so there is nothing
-outside it for anything to be visible to. A word that cannot change the answer is
-not written.
+Visibility — `export` / `program` against a default of `file` — goes there too,
+on a `fn`, a `struct`, a `one-of` and a `const`: nothing said is the file's
+own, `program` is the whole unit's, `export` is what a library offers outside.
+It was refused (`E0206`) while a program was one file and there was nothing
+outside it for anything to be visible to; see `design/units.md`.
 
 `perm` keeps the counter, and what it holds afterwards is what it last took: the
 value a `break` left behind, or the last one when the loop simply ran out.
@@ -1706,7 +1707,7 @@ READ_ME {                  READ_ME {
 
 }                          }
 
-PREP {                     LIBRARY {
+PREP {                     LIBRARY 'text' called 't' {
 
 }                          }
 
@@ -1719,10 +1720,23 @@ ITMT {
 }
 ```
 
-A program on the left, a library on the right. Every block in the shape is
-written, in that order, whether or not there is anything in it. A shape that is
-sometimes there is a shape a reader has to look for; this one is always in the
-same place. The second block says which shape it is.
+A program's file on the left, `.xag`; a library on the right, `.xaglib`. Every
+block in the shape is written, in that order, whether or not there is anything
+in it. A shape that is sometimes there is a shape a reader has to look for;
+this one is always in the same place. The second block says which shape it is.
+
+**A library is one file, and its `LIBRARY` line is its account of itself**
+(decided 2026-09-12): `'text'` for `import 'text';`, `called 't'` for
+`t.count-of[…]`, `uses [*../net.xaglib*]` for the libraries it needs by path
+against its own directory, and its settings as chain words — `LIBRARY.floored
+'text' called 't' {` is a library on `division = "floored"`, and the default is
+what is not said (`floored`, `asks-both`, `letters`, `stops`). A library has no
+manifest; see `design/units.md`.
+
+**A program may be several `.xag` files**, and its manifest says which:
+`main = "main.xag"` is the file whose `START` runs, `files = [...]` the rest.
+Every file has all four blocks; a file that is not `main` has its `START`
+empty, and every file's `ITMT` runs, `main`'s first.
 
 **A library has no `START`** because it has no moment of its own. Everything in
 it is a declaration, and what runs is what a program that imports it calls. A

@@ -1,4 +1,0 @@
-READ_ME { }
-PREP { import 'two'; }
-START { print.stdout[tw.answer[*1*] \n]; }
-ITMT { }

@@ -1,6 +1,0 @@
-[unit]
-name = "no-number"
-called = "nn"
-
-[defaults]
-no-number = "stops"

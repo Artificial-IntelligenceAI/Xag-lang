@@ -1,0 +1,13 @@
+READ_ME {
+Uses `outer` only. `inner` is a library `outer` uses; it is reached, and the
+program's manifest comes to list it, but this file does not import it and may
+not write `in.core[…]` without doing so.
+}
+PREP {
+    import 'outer';
+}
+START {
+    print.stdout[out.wrapped[*20*] \n];
+}
+ITMT {
+}

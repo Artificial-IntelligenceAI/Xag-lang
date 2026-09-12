@@ -216,25 +216,44 @@ add_test(NAME units_program_agrees
 # A library built on its own: read, checked, and its ITMT run both ways. No
 # binary comes out, and that is the answer.
 add_test(NAME units_library_builds_alone
-         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/text/counting.xag)
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/text.xaglib)
 # And one whose ITMT trips an overflow inside an exported function is refused
 # — which is the whole point of a library having an ITMT.
 add_test(NAME units_library_itmt_refuses
-         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/overflowing/a.xag)
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/overflowing.xaglib)
 set_tests_properties(units_library_itmt_refuses PROPERTIES WILL_FAIL TRUE)
 
-# A library of two files: `file`-visible names are each file's own, `program`
-# crosses the files, `export` crosses the unit. Built through a program, and
-# alone from either of its files.
-add_test(NAME units_two_files_agrees
+# A program of two files: the manifest's `main` is the door and `files` the
+# rest. `file`-visible names are each file's own, `program` crosses the files;
+# the other file's `START` is empty and its `ITMT` runs after `main`'s. The
+# same program whichever of its files is named; a file the manifest does not
+# name is refused, and so is a second file with something in its `START`.
+add_test(NAME units_two_file_program
          COMMAND ${CMAKE_COMMAND}
                  -DXAGC=$<TARGET_FILE:xagc>
-                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-twofile/main.xag
-                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/example_agrees.cmake)
-add_test(NAME units_two_files_build_alone_from_a
-         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/a.xag)
-add_test(NAME units_two_files_build_alone_from_b
-         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/b.xag)
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+add_test(NAME units_two_file_program_from_the_other_file
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/other.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+add_test(NAME units_stray_file_is_refused
+         COMMAND xagc run ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile/stray.xag)
+set_tests_properties(units_stray_file_is_refused PROPERTIES WILL_FAIL TRUE)
+add_test(NAME units_second_start_is_refused
+         COMMAND xagc run ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/twofile-wrong/main.xag)
+set_tests_properties(units_second_start_is_refused PROPERTIES WILL_FAIL TRUE)
+
+# A library that uses a library. The program's manifest names only the outer
+# one; the compiler writes the inner one in and says so. Run on a copy, since
+# the fixture is what it is.
+add_test(NAME units_library_uses_a_library
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DFIXTURES=${CMAKE_CURRENT_SOURCE_DIR}/tests/units
+                 -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/units-chain
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/library_uses_a_library.cmake)
 
 # Settings are per unit: a library whose manifest says `logic = "asks-both"`
 # asks both sides of its own `and`, and the program importing it, which said
@@ -271,7 +290,7 @@ add_test(NAME units_no_number_is_per_unit
                  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-stopping/main.xag
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
 add_test(NAME units_no_number_stops_refuses
-         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/no-number/a.xag)
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/no-number.xaglib)
 set_tests_properties(units_no_number_stops_refuses PROPERTIES WILL_FAIL TRUE)
 
 # Operators on a library's type: `ratio` answers `+ x == !== <` and
@@ -286,7 +305,7 @@ add_test(NAME units_operators_on_a_library_type
                  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-ratio/main.xag
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
 add_test(NAME units_operator_library_builds_alone
-         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/ratio/ratio.xag)
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/ratio.xaglib)
 add_test(NAME units_operators_respect_the_unit
          COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-ratio-wrongly/main.xag)
 set_tests_properties(units_operators_respect_the_unit PROPERTIES WILL_FAIL TRUE)
@@ -300,7 +319,7 @@ add_test(NAME units_library_constant
                  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-limits/main.xag
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
 add_test(NAME units_library_with_constants_builds_alone
-         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/limits/limits.xag)
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/limits.xaglib)
 
 # A mistake inside a library points into the library's file.
 add_test(NAME units_diagnostic_points_into_library

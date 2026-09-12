@@ -1,0 +1,13 @@
+READ_ME {
+The other file. Its `START` is empty, because only `main`'s runs; its `ITMT`
+runs after `main`'s, as one body.
+}
+PREP {
+    fn.int64 'helper' [int64 'n'] { give ['n' + *100*]; }
+    fn.program.int64 'answer' [int64 'n'] { give [shared['n'] + helper['n']]; }
+}
+START {
+}
+ITMT {
+    print.stdout[str:*other's ITMT* \n];
+}

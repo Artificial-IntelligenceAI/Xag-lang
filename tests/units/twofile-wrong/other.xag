@@ -1,0 +1,7 @@
+READ_ME {
+A second file whose START has something in it, which is refused: only
+`main`'s runs.
+}
+PREP { }
+START { print.stdout[str:*never* \n]; }
+ITMT { }

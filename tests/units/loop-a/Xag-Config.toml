@@ -1,5 +1,0 @@
-[unit]
-name = "a"
-called = "a"
-[uses]
-paths = ["../loop-b"]

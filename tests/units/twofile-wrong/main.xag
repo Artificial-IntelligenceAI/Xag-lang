@@ -1,0 +1,4 @@
+READ_ME { }
+PREP { }
+START { print.stdout[str:*main* \n]; }
+ITMT { }

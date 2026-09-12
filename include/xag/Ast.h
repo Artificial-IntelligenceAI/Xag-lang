@@ -193,6 +193,17 @@ inline bool answersOperator(std::string_view word) {
   return false;
 }
 
+// A library says its settings on its `LIBRARY` line the way a chain says what
+// is unusual: `LIBRARY.floored.asks-both 'text' called 't'`. Each word is the
+// other value of one `[defaults]` setting; the default is what is not said.
+inline bool settingWord(std::string_view word, Settings &into) {
+  if (word == "asks-both") return into.asksBoth = true;
+  if (word == "floored") return into.floored = true;
+  if (word == "letters") return into.letters = true;
+  if (word == "stops") return into.noNumberStops = true;
+  return false;
+}
+
 struct Item {
   ItemKind kind = ItemKind::Start;
   Span span;
@@ -226,6 +237,21 @@ struct Program {
   // `START`. A library has no moment of its own: everything in it is a
   // declaration, and what runs is what a program that imports it calls.
   bool library = false;
+  // What a library says about itself on its `LIBRARY` line. A library is one
+  // `.xaglib` file with no manifest, so this is where its two names, the
+  // libraries it uses, and its settings live:
+  //
+  //     LIBRARY.floored 'text' called 't' uses [*../net.xaglib*] { … }
+  //
+  // `name` is what an importer writes (`import 'text';`), `called` what a use
+  // site writes (`t.count-of[…]`), `uses` paths written against the file's own
+  // directory, and the chain words the settings that are not the default.
+  std::string name;
+  std::string called;
+  std::vector<std::string> uses;
+  Settings settings;
+  Span nameSpan, calledSpan;
+  std::vector<Span> usesSpans;
 };
 
 } // namespace xag

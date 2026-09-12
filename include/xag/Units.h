@@ -10,53 +10,64 @@
 
 namespace xag {
 
-// A unit is a set of files with a name: a library, or the program itself. Both
-// have a `Xag-Config.toml`, and what that manifest says is what this reads.
+// A unit is a program or a library.
 //
-// The library's manifest says what it is called, both ways:
+// A program is the files its manifest lists, and its manifest is where it says
+// what it uses and what it decided:
 //
 //     [unit]
-//     name = "text"        what an importer writes:  import 'text';
-//     called = "t"         what a use site writes:   t.count-of[…]
-//
-// The program's says only where things are:
-//
+//     main = "main.xag"                  the one file whose START runs
+//     files = ["helpers.xag"]            the rest of it
 //     [uses]
-//     paths = ["../text", "../net"]
+//     paths = ["../text.xaglib"]         what its files may import
+//     [defaults]
+//     division = "floored"
 //
-// The compiler reads each library's own manifest to learn what to call it. The
-// split is by who owns the fact: an author names their library, a program says
-// which libraries it reaches for.
+// A library is one `.xaglib` file and has no manifest. Everything it says about
+// itself is on its `LIBRARY` line:
+//
+//     LIBRARY.floored 'text' called 't' uses [*../net.xaglib*] { … }
+//
+// The program's manifest lists every library the program reaches, the ones
+// its libraries use included; a library reached only through another is
+// written into the manifest by the compiler, which says so.
 struct Unit {
-  std::string name;                // `import 'name';`
-  std::string called;              // `called.thing[…]`
-  std::string directory;           // where its files are
-  std::vector<std::string> files;  // every `.xag` in that directory
-  std::vector<std::string> uses;   // the `[uses]` paths of its own manifest
-  Settings settings;               // its `[defaults]`, as far as they are read
-  // The manifest, kept so a diagnostic about it can point into it.
+  std::string name;                // `import 'name';` — empty for a program
+  std::string called;              // `called.thing[…]` — empty for a program
+  std::string directory;           // where its files are; paths are written against it
+  std::vector<std::string> files;  // a program's, `main` first; a library's one file
+  std::vector<std::string> uses;   // paths, as written
+  Settings settings;               // the manifest's `[defaults]`, or the `LIBRARY` line's
+  bool library = false;
+  // What a diagnostic about the unit points into: a program's manifest, or
+  // the library's own file.
   std::shared_ptr<Source> manifest;
   Span nameSpan, calledSpan;
+  std::vector<Span> usesSpans;
 };
 
 struct UnitsResult {
-  // The unit the entry file belongs to. A program's `[unit]` is optional — a
-  // program that nothing imports needs no name.
+  // The unit the entry file belongs to.
   Unit self;
   // Every library reachable from `self`, each once, in an order where nothing
   // comes before what it uses. Refused before this is filled if there is a
   // cycle, because then no such order exists.
   std::vector<Unit> libraries;
   std::vector<Diagnostic> diagnostics;
-  // Which manifest each diagnostic points into, alongside `diagnostics`. A
+  // Which source each diagnostic points into, alongside `diagnostics`. A
   // report renders a diagnostic against one source, and these are about a
   // file that is not the one being compiled.
   std::vector<std::shared_ptr<Source>> about;
+  // What the compiler did on its own and should say: a library written into
+  // the manifest because another library used it.
+  std::vector<std::string> notes;
   bool ok() const { return !anyErrors(diagnostics); }
 };
 
 // Reads the manifest beside `sourcePath` — or upward from it, so a project
-// decides for every file under it — and follows every `[uses]` path from there.
+// decides for every file under it — and follows every `[uses]` path from there,
+// and every `uses` of every library reached. A `.xaglib` named directly is a
+// library built alone: it is its own unit, and its `uses` are followed.
 UnitsResult unitsFor(const std::string &sourcePath);
 
 // The unit `import 'name';` reaches, or nothing.

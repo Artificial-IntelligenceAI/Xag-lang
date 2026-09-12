@@ -1,6 +1,0 @@
-[unit]
-name = "lettering"
-called = "le"
-
-[defaults]
-characters = "letters"

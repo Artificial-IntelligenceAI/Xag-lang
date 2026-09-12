@@ -1,2 +1,2 @@
 [uses]
-paths = ["../nowhere", "../loop-a"]
+paths = ["../nowhere.xaglib", "../loop-a.xaglib"]

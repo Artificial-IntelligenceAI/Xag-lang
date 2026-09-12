@@ -1,0 +1,18 @@
+READ_ME {
+A library whose manifest says division is floored: `/` rounds toward negative
+infinity and `mod` takes the divisor's sign, in every number family. A program
+importing it divides its own way.
+}
+LIBRARY.floored 'flooring' called 'fl' {
+    fn.export.int64 'quotient' [int64 'a', int64 'b'] { give ['a' / 'b']; }
+    fn.export.int64 'remainder' [int64 'a', int64 'b'] { give ['a' mod 'b']; }
+    fn.export.int8 'remainder8' [int8 'a', int8 'b'] { give ['a' mod 'b']; }
+    fn.export.bin64 'remainder-bin' [bin64 'a', bin64 'b'] { give ['a' mod 'b']; }
+    fn.export.bin128 'remainder-wide' [bin128 'a', bin128 'b'] { give ['a' mod 'b']; }
+    fn.export.deci64 'remainder-deci' [deci64 'a', deci64 'b'] { give ['a' mod 'b']; }
+    fn.export.int64 'written' [] {
+        give [(int64:*-9* / int64:*4*) + int64:*5*];
+    }
+}
+ITMT {
+}

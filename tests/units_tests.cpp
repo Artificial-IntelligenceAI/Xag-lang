@@ -56,18 +56,40 @@ void aCycleIsRefused() {
     missing = missing || d.code == "E0603";
     looped = looped || d.code == "E0604";
   }
-  CHECK(missing); // `../nowhere`
+  CHECK(missing); // `../nowhere.xaglib`
   CHECK(looped);  // loop-a uses loop-b uses loop-a
-  // Each diagnostic says which manifest it is about.
+  // Each diagnostic says which file it is about.
   CHECK(r.about.size() == r.diagnostics.size());
+}
+
+// A program of several files: `main` and `files` in the manifest, `main`
+// first. A library named directly is its own unit.
+void aProgramIsTheFilesItsManifestNames() {
+  const xag::UnitsResult r = xag::unitsFor(kUnits + "twofile/other.xag");
+  CHECK(r.ok());
+  CHECK(r.self.files.size() == 2);
+  CHECK(r.self.files.size() == 2 &&
+        r.self.files.front().find("main.xag") != std::string::npos &&
+        r.self.files.back().find("other.xag") != std::string::npos);
+  CHECK(!r.self.library);
+  const xag::UnitsResult stray = xag::unitsFor(kUnits + "twofile/stray.xag");
+  CHECK(!stray.ok());
+  CHECK(!stray.diagnostics.empty() && stray.diagnostics.front().code == "E0618");
+
+  const xag::UnitsResult lib = xag::unitsFor(kUnits + "flooring.xaglib");
+  CHECK(lib.ok());
+  CHECK(lib.self.library);
+  CHECK(lib.self.name == "flooring" && lib.self.called == "fl");
+  CHECK(lib.self.settings.floored && !lib.self.settings.asksBoth);
+  CHECK(lib.self.files.size() == 1);
 }
 
 // A library's names are written under its call name: what it exports as
 // `t.name`, which is what a use site writes, and what it keeps as `t$name`,
 // which nothing can spell. Every reference inside it follows.
 void aLibraryIsQualified() {
-  const xag::Source source("lib.xag",
-                           "READ_ME { }\nLIBRARY {\n"
+  const xag::Source source("lib.xaglib",
+                           "READ_ME { }\nLIBRARY 'text' called 't' {\n"
                            "  struct 'pair' [int64 'a', int64 'b']\n"
                            "  struct.export 'point' [int64 'x', int64 'y']\n"
                            "  const.int64 'K' = [*3*];\n"
@@ -106,8 +128,10 @@ void aLibraryIsQualified() {
   CHECK(tree.find("name 'K'") == std::string::npos);
 }
 
-// Two files of one library: a name that says nothing is its own file's; one
-// that says `program` is every file's; one that says `export` is everyone's.
+// A program's files are renamed together under their visibility words. A
+// program exports nothing — nothing imports one — so `export` and `program`
+// both leave the name as written, and a `file`-visible name is walled off
+// with `$` and no call name in front. Every reference inside follows.
 void twoFilesKeepTheirOwnNames() {
   auto file = [](const char *text) {
     const xag::Source source("f.xag", text);
@@ -115,31 +139,29 @@ void twoFilesKeepTheirOwnNames() {
     return xag::parse(source, lexed.tokens).program;
   };
   std::vector<xag::Program> files;
-  files.push_back(file("READ_ME { }\nLIBRARY {\n"
+  files.push_back(file("READ_ME { }\nPREP {\n"
                        "  fn.int64 'helper' [int64 'n'] { give ['n']; }\n"
                        "  fn.program.int64 'shared' [int64 'n'] { give [helper['n']]; }\n"
                        "  fn.export.int64 'answer' [int64 'n'] { give [shared['n']]; }\n"
-                       "}\nITMT { }\n"));
-  files.push_back(file("READ_ME { }\nLIBRARY {\n"
+                       "}\nSTART { }\nITMT { }\n"));
+  files.push_back(file("READ_ME { }\nPREP {\n"
                        "  fn.int64 'helper' [int64 'n'] { give ['n']; }\n"
                        "  fn.int64 'peek' [int64 'n'] { give [helper['n'] + shared['n'] + "
                        "answer['n'] + secret['n']]; }\n"
-                       "}\nITMT { }\n"));
-  xag::Unit unit;
-  unit.name = "two";
-  unit.called = "tw";
+                       "}\nSTART { }\nITMT { }\n"));
+  xag::Unit unit; // a program: no name, no call name
   xag::qualify(files, unit);
   std::ostringstream a, b;
   xag::print(files[0], a);
   xag::print(files[1], b);
   // Each file's `helper` is its own.
-  CHECK(a.str().find("fn fn.int64 tw$0$helper") != std::string::npos);
-  CHECK(b.str().find("fn fn.int64 tw$1$helper") != std::string::npos);
-  CHECK(b.str().find("call tw$1$helper") != std::string::npos);
-  CHECK(b.str().find("call tw$0$helper") == std::string::npos);
-  // `program` and `export` reach across.
-  CHECK(b.str().find("call tw$shared") != std::string::npos);
-  CHECK(b.str().find("call tw.answer") != std::string::npos);
+  CHECK(a.str().find("fn fn.int64 $0$helper") != std::string::npos);
+  CHECK(b.str().find("fn fn.int64 $1$helper") != std::string::npos);
+  CHECK(b.str().find("call $1$helper") != std::string::npos);
+  CHECK(b.str().find("call $0$helper") == std::string::npos);
+  // `program` and `export` reach across, as written.
+  CHECK(b.str().find("call shared") != std::string::npos);
+  CHECK(b.str().find("call answer") != std::string::npos);
   // A name the other file kept to itself is left as written, for the checker
   // to say is not there.
   CHECK(b.str().find("call secret") != std::string::npos);
@@ -189,6 +211,7 @@ void aLibrarysConstantIsAPrefixedName() {
 }
 
 int main() {
+  aProgramIsTheFilesItsManifestNames();
   aLibrarysConstantIsAPrefixedName();
   twoFilesKeepTheirOwnNames();
   aLibraryIsQualified();

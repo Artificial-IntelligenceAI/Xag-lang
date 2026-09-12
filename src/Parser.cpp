@@ -230,8 +230,84 @@ public:
 
   // `LIBRARY { … }` — the same declarations, in a file that offers them to
   // programs rather than running anything itself.
+  // `LIBRARY.floored 'text' called 't' uses [*../net.xaglib*] { … }`. The
+  // library's whole account of itself, on one line, because a library is one
+  // file and has no manifest to say any of it in.
   void libraryBlock() {
     advance(); // LIBRARY, already seen
+    Program &lib = result_.program;
+    // Settings, as chain words: what is not the default.
+    while (check(TokenKind::Dot)) {
+      advance();
+      if (!check(TokenKind::Word)) {
+        complain(peek().span, "E0615", "`LIBRARY.` is followed by a setting's word.",
+                 {"a library says its settings on its `LIBRARY` line, as a chain does"},
+                 {"`floored`, `asks-both`, `letters`, `stops` — the other value of each "
+                  "`[defaults]` setting; the default is what is not said."},
+                 std::string("found ") + describe(peek().kind));
+        break;
+      }
+      const Token word = advance();
+      if (!settingWord(word.text, lib.settings))
+        complain(word.span, "E0615", "`" + word.text + "` is not a setting.",
+                 {"a library says its settings on its `LIBRARY` line, as a chain does"},
+                 {"`floored`, `asks-both`, `letters`, `stops` — the other value of each "
+                  "`[defaults]` setting; the default is what is not said."});
+    }
+    if (check(TokenKind::Name)) {
+      const Token name = advance();
+      lib.name = name.text;
+      lib.nameSpan = name.span;
+    } else {
+      complain(peek().span, "E0616", "a library says what it is called.",
+               {"a library is one file, and names itself on its `LIBRARY` line"},
+               {"`LIBRARY 'text' called 't' {` — `'text'` is for `import 'text';`, "
+                "and `t` is what a use site writes, `t.count-of[…]`."},
+               std::string("found ") + describe(peek().kind));
+    }
+    if (checkWord("called")) {
+      advance();
+      if (check(TokenKind::Name)) {
+        const Token called = advance();
+        lib.called = called.text;
+        lib.calledSpan = called.span;
+      } else {
+        complain(peek().span, "E0616", "`called` is followed by the name a use site writes.",
+                 {"a library is one file, and names itself on its `LIBRARY` line"},
+                 {"`LIBRARY 'text' called 't' {` — bare names are the language's own, "
+                  "so every library has a call name."},
+                 std::string("found ") + describe(peek().kind));
+      }
+    } else if (!lib.name.empty()) {
+      complain(peek().span, "E0616",
+               "`" + lib.name + "` says no name for its use sites.",
+               {"a library is one file, and names itself on its `LIBRARY` line"},
+               {"`called 't'` after the name is what a use site writes: `t.thing[…]`. "
+                "Bare names are the language's own, so every library has one."},
+               std::string("found ") + describe(peek().kind));
+    }
+    // What it uses: paths, written as text against the file's own directory.
+    if (checkWord("uses")) {
+      advance();
+      if (expect(TokenKind::LBracket, "`[`")) {
+        while (!check(TokenKind::RBracket) && !atEnd()) {
+          if (check(TokenKind::Written)) {
+            const Token path = advance();
+            lib.uses.push_back(path.text);
+            lib.usesSpans.push_back(path.span);
+          } else {
+            complain(peek().span, "E0617", "a path in `uses` is written as text.",
+                     {"a library says which libraries it uses, by path"},
+                     {"`uses [*../net.xaglib*]` — against this file's own directory."},
+                     std::string("found ") + describe(peek().kind));
+            advance();
+          }
+          if (check(TokenKind::Comma))
+            advance();
+        }
+        expect(TokenKind::RBracket, "`]`");
+      }
+    }
     declarations();
   }
 

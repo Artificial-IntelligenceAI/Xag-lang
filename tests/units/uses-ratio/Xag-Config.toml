@@ -1,2 +1,2 @@
 [uses]
-paths = ["../ratio"]
+paths = ["../ratio.xaglib"]

@@ -1,2 +1,2 @@
 [uses]
-paths = ["../lettering"]
+paths = ["../lettering.xaglib"]

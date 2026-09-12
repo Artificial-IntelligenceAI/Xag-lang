@@ -1,2 +1,2 @@
 [uses]
-paths = ["../limits"]
+paths = ["../limits.xaglib"]

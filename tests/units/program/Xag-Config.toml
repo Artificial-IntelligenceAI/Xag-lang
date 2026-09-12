@@ -1,2 +1,2 @@
 [uses]
-paths = ["../text"]
+paths = ["../text.xaglib"]
