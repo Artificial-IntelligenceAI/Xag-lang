@@ -150,6 +150,19 @@ The parser is told each library's call name so it can read `var.t.point 'p'` as
 one type, and `t.uer:*…*` as one type before a `:`. A `struct` or `one-of` says
 `export` the way a function does — `struct.export 'point' […]`.
 
+**A constant is `t.'LIMIT'`** (decided 2026-09-12). A constant is a name and
+wears its marks, where a function and a type are bare words — so the library's
+call name goes in front of the marks, the same `t.` as before `t.twice[…]`. It
+goes wherever a name goes: a loop's end, a sum, a print, a `const` of the
+program's own, a field reached into (`t.'ORIGIN'.x`). The parser hands it on as
+the one name `t.LIMIT`, which is what `const.export.int64 'LIMIT'` was renamed
+to, so nothing below has a second spelling; `importsCover` sees the prefix in
+it. Two spellings were set aside: `'t.LIMIT'`, which hides the prefix inside the
+marks where nothing else in the language puts one and cannot be told from a
+local named that; and none at all, sharing numbers through `t.limit[]`, which
+costs a call where a number was meant and takes a foldable constant away from
+the checker.
+
 ## Within a unit
 
 A library's files are renamed together, because what a name becomes depends on
@@ -172,8 +185,6 @@ is refused (`E0608`), in the program and in a library alike.
 
 ## Not yet enforced
 
-- **Constants across a unit.** `t.'LIMIT'` — how a program spells a library's
-  constant — has no syntax yet. Functions and types do.
 - **Settings per unit.** All four `[defaults]` are read and answered. The
   program's override — its settings winning everywhere, or a library whose
   settings differ refused — has no spelling yet.
@@ -231,6 +242,9 @@ is refused (`E0608`), in the program and in a library alike.
   the cluster count. `tests/units/lettering` counts the family emoji, a flag
   and `café` both ways. The oracle tosses it per unit; its texts already had
   both emoji in them.
+- **2026-09-12, constants** — `t.'LIMIT'` parses to the name `t.LIMIT`;
+  `tests/units/limits` shares two constants (one a struct) and keeps one; the
+  oracle's library exports constants and the program reads them.
 - **2026-09-11, `no-number`** — the last of the four. Carried on every `bin`
   arithmetic operation (`RValue.noNumberStops`); the test interpreter and the
   runtime's `xag_bin_number` / `xag_bin128_number` stop through `xag_stop`,

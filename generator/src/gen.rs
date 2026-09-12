@@ -253,6 +253,10 @@ pub struct Writer<'a> {
     /// was declared in is, and whether it is the library's `arith` rather than
     /// the program's — two types, each answering its own operators.
     ariths: Vec<(String, usize, bool)>,
+    /// The library's exported constants, which the program reaches as
+    /// `lib.'name'` — a name with the library's call name in front of its
+    /// marks. Kept apart from `consts`, which are spelled bare.
+    lib_consts: Vec<(String, Ty)>,
     indent: usize,
     size: u32,
 }
@@ -303,6 +307,7 @@ pub fn generate(seed: u64, size: u32, case: &mut Case) {
         seed,
         stepped: Vec::new(),
         ariths: Vec::new(),
+        lib_consts: Vec::new(),
         indent: 0,
         size,
     };
@@ -453,6 +458,22 @@ impl<'a> Writer<'a> {
             self.library_manifest.push_str(&defaults(self.rng));
             let start = self.out.len();
             self.in_library = true;
+            // A constant or two the library exports, of a whole type, so that
+            // `lib.'v3'` stands where a number does in the program — a loop's
+            // end, a sum, a print.
+            let shared = self.rng.below(3);
+            for _ in 0..shared {
+                let name = self.fresh();
+                let ty = self.pick_whole();
+                self.out.push_str("const.export.");
+                self.out.push_str(ty.written());
+                self.out.push_str(" '");
+                self.out.push_str(&name);
+                self.out.push_str("' = [");
+                self.literal(ty);
+                self.out.push_str("];\n");
+                self.lib_consts.push((name, ty));
+            }
             let exported = self.rng.below(3) + 1;
             for _ in 0..exported {
                 self.function();
@@ -1174,6 +1195,10 @@ impl<'a> Writer<'a> {
         }
         if self.rng.chance(8) {
             self.arith_statement();
+            return;
+        }
+        if !self.in_library && !self.lib_consts.is_empty() && self.rng.chance(6) {
+            self.library_constant();
             return;
         }
         match self.rng.below(25) {
@@ -1988,6 +2013,32 @@ impl<'a> Writer<'a> {
             }
         }
         self.out.push_str("\\n];\n");
+    }
+
+    /// `lib.'v3'` — the library's constant, where a value of its type goes:
+    /// printed, given a name, or added to.
+    fn library_constant(&mut self) {
+        let (name, ty) = self.lib_consts[self.rng.below(self.lib_consts.len() as u32) as usize].clone();
+        self.pad();
+        match self.rng.below(3) {
+            0 => {
+                self.out.push_str(&format!("print.stdout[lib.'{name}' \\n];\n"));
+            }
+            1 => {
+                let fresh = self.fresh();
+                self.out.push_str(&format!("var.{} '{fresh}' = [lib.'{name}'];\n", ty.written()));
+                self.declare(Var { name: fresh, ty, mutable: false, many: None, moved: false, lent: false, group: None, sum: None, parts_moved: Vec::new(), inner: None, grows: false });
+            }
+            _ => {
+                // Beside a written value that says its type, compared — both
+                // sides of a comparison say what they are, and a constant does.
+                self.out.push_str(&format!("print.stdout[(lib.'{name}' == "));
+                self.out.push_str(ty.written());
+                self.out.push(':');
+                self.literal(ty);
+                self.out.push_str(") \\n];\n");
+            }
+        }
     }
 
     fn forget_ariths(&mut self) {

@@ -719,23 +719,7 @@ private:
         so_far = make(ExprKind::Name, token.span, token.text);
       }
 
-      // `'p'.x` — a field. The dot is unmistakable after a mark: a chain has no
-      // marked name before it, and a call path has no mark anywhere.
-      while (check(TokenKind::Dot)) {
-        advance();
-        if (!check(TokenKind::Word)) {
-          complain(peek().span, "E0102", "a field is named with a word.",
-                   {"a word names a field, and a name wears marks"}, {},
-                   std::string("found ") + describe(peek().kind));
-          break;
-        }
-        const Token field = advance();
-        Span span{token.span.begin, field.span.end};
-        auto reach = make(ExprKind::Field, span, field.text);
-        reach->children.push_back(std::move(so_far));
-        so_far = std::move(reach);
-      }
-      return so_far;
+      return fieldsOf(std::move(so_far), token.span.begin);
     }
     case TokenKind::Written:
       advance();
@@ -753,6 +737,19 @@ private:
       return group;
     }
     case TokenKind::Word: {
+      // `t.'LIMIT'` — a library's constant. A constant is a name and wears its
+      // marks; the library's call name goes in front of them, the same `t.`
+      // as before `t.twice[…]`. It arrives as the one name the checker knows
+      // it by — `t.LIMIT`, which is what the library's own `'LIMIT'` was
+      // renamed to — so nothing below the parser has a second spelling.
+      if (peek(1).kind == TokenKind::Dot && peek(2).kind == TokenKind::Name &&
+          isPrefix(token.text)) {
+        advance(); // the prefix
+        advance(); // `.`
+        const Token name = advance();
+        Span span{token.span.begin, name.span.end};
+        return fieldsOf(make(ExprKind::Name, span, token.text + "." + name.text), span.begin);
+      }
       // `str:*hello*` — a written value saying its own type, where no chain has.
       // `t.uer:*hello*` — the same, with a type from a library.
       if (peek(1).kind == TokenKind::Colon ||
@@ -795,6 +792,27 @@ private:
       advance();
       return make(ExprKind::Name, token.span);
     }
+  }
+
+  // `'p'.x` — a field, or several: `'p'.a.b`. The dot is unmistakable after a
+  // mark: a chain has no marked name before it, and a call path has no mark
+  // anywhere.
+  ExprPtr fieldsOf(ExprPtr so_far, unsigned begin) {
+    while (check(TokenKind::Dot)) {
+      advance();
+      if (!check(TokenKind::Word)) {
+        complain(peek().span, "E0102", "a field is named with a word.",
+                 {"a word names a field, and a name wears marks"}, {},
+                 std::string("found ") + describe(peek().kind));
+        break;
+      }
+      const Token field = advance();
+      Span span{begin, field.span.end};
+      auto reach = make(ExprKind::Field, span, field.text);
+      reach->children.push_back(std::move(so_far));
+      so_far = std::move(reach);
+    }
+    return so_far;
   }
 
   // A bare word followed by `[` is a call. Nothing announces one.

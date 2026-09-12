@@ -1,0 +1,18 @@
+READ_ME {
+A library's constant is written `lim.'MOST'`: the library's call name, then
+the constant's own marked name. It goes wherever a name goes — a loop's end, a
+sum, a print, a field reached into.
+}
+PREP {
+    import 'limits';
+    const.int64 'HALF' = [lim.'MOST' / *2*];
+}
+START {
+    var.mut.int64 'total' = [*0*];
+    loop.range.int64 'i' = [*1*, lim.'MOST'] { set 'total' = ['total' + 'i']; }
+    print.stdout[lim.'MOST' str:* * 'HALF' str:* * 'total' str:* * lim.'ORIGIN'.x str:* * lim.secretly[lim.'MOST'] \n];
+    var.many.int64 'xs' = [*1* *2* *3*];
+    print.stdout['xs'[(lim.'MOST' / *50*)] \n];
+}
+ITMT {
+}

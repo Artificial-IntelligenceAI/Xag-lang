@@ -539,6 +539,13 @@ void reachedInExpr(const Expr *e, Reached &r) {
     return;
   if (e->kind == ExprKind::Call && e->path.size() == 2)
     r.note(e->path.front(), e->span);
+  // `t.'LIMIT'` — a library's constant, which the parser hands on as the one
+  // name `t.LIMIT`.
+  if (e->kind == ExprKind::Name) {
+    const std::size_t dot = e->text.find('.');
+    if (dot != std::string::npos)
+      r.note(e->text.substr(0, dot), e->span);
+  }
   if (e->kind == ExprKind::Typed) {
     const std::size_t dot = e->text.find('.');
     if (dot != std::string::npos)

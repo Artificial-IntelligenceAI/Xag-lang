@@ -1593,8 +1593,20 @@ private:
     case ExprKind::Name: {
       const Symbol *symbol = lookup(e.text);
       if (!symbol) {
-        complain(e.span, "E0501", "`'" + e.text + "'` is not declared.",
-                 {"a name means something only after a declaration says what it means"});
+        // `lim.'SECRET'` — a library's constant that the library did not
+        // export, or never had. Said the way it was written, and with why.
+        const std::size_t dot = e.text.find('.');
+        if (dot != std::string::npos)
+          complain(e.span, "E0501",
+                   "`" + e.text.substr(0, dot) + ".'" + e.text.substr(dot + 1) +
+                       "'` is not declared.",
+                   {"a name means something only after a declaration says what it means"},
+                   {"a library's constant reaches a program when its chain says `export` "
+                    "— `const.export.int64 '" + e.text.substr(dot + 1) + "'` — and `" +
+                    e.text.substr(0, dot) + "` exports none by that name."});
+        else
+          complain(e.span, "E0501", "`'" + e.text + "'` is not declared.",
+                   {"a name means something only after a declaration says what it means"});
         return unknownFrom(e.span);
       }
       return symbol->type;

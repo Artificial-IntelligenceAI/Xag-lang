@@ -147,7 +147,49 @@ void twoFilesKeepTheirOwnNames() {
 
 } // namespace
 
+// `t.'LIMIT'` — a library's constant from outside. The parser hands it on as
+// the one name `t.LIMIT`, which is what the library's exported `'LIMIT'` is
+// renamed to, and `importsCover` sees the prefix in it.
+void aLibrarysConstantIsAPrefixedName() {
+  const std::vector<std::string> prefixes{"t"};
+  {
+    const xag::Source source("main.xag",
+                             "READ_ME { }\nPREP { import 'text'; }\n"
+                             "START { print.stdout[t.'LIMIT' str:* * t.'ORIGIN'.x \\n]; }\n"
+                             "ITMT { }\n");
+    const xag::LexResult lexed = xag::lex(source);
+    xag::ParseResult parsed = xag::parse(source, lexed.tokens, prefixes);
+    CHECK(lexed.ok() && parsed.ok());
+    std::ostringstream out;
+    xag::print(parsed.program, out);
+    const std::string tree = out.str();
+    CHECK(tree.find("name 't.LIMIT'") != std::string::npos);
+    CHECK(tree.find("name 't.ORIGIN'") != std::string::npos);
+    CHECK(tree.find("field x") != std::string::npos);
+  }
+  // Without the import, the prefix in the name is a reach the file did not
+  // say it makes.
+  {
+    const xag::Source source("main.xag",
+                             "READ_ME { }\nPREP { }\n"
+                             "START { print.stdout[t.'LIMIT' \\n]; }\n"
+                             "ITMT { }\n");
+    const xag::LexResult lexed = xag::lex(source);
+    xag::ParseResult parsed = xag::parse(source, lexed.tokens, prefixes);
+    CHECK(parsed.ok());
+    xag::UnitsResult units;
+    xag::Unit text;
+    text.name = "text";
+    text.called = "t";
+    units.libraries.push_back(text);
+    const std::vector<xag::Diagnostic> said = xag::importsCover(parsed.program, units);
+    CHECK(said.size() == 1);
+    CHECK(!said.empty() && said.front().code == "E0608");
+  }
+}
+
 int main() {
+  aLibrarysConstantIsAPrefixedName();
   twoFilesKeepTheirOwnNames();
   aLibraryIsQualified();
   aProgramReachesALibrary();

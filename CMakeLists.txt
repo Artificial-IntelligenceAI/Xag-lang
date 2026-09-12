@@ -291,6 +291,17 @@ add_test(NAME units_operators_respect_the_unit
          COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-ratio-wrongly/main.xag)
 set_tests_properties(units_operators_respect_the_unit PROPERTIES WILL_FAIL TRUE)
 
+# A library's constant: `lim.'MOST'` wherever a name goes — a loop's end, a
+# sum, a print, a `const` of the program's own, a field reached into. All
+# three engines against expected output, and the library builds alone.
+add_test(NAME units_library_constant
+         COMMAND ${CMAKE_COMMAND}
+                 -DXAGC=$<TARGET_FILE:xagc>
+                 -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/tests/units/uses-limits/main.xag
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/answers.cmake)
+add_test(NAME units_library_with_constants_builds_alone
+         COMMAND xagc build ${CMAKE_CURRENT_SOURCE_DIR}/tests/units/limits/limits.xag)
+
 # A mistake inside a library points into the library's file.
 add_test(NAME units_diagnostic_points_into_library
          COMMAND ${CMAKE_COMMAND}
