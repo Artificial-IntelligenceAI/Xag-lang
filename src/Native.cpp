@@ -1777,14 +1777,30 @@ private:
       // not the one the compiler watches, since there is nothing to report. The
       // machine's own instruction is exactly the answer and the optimiser can
       // see straight through it.
-      // `unchecked` is the same instruction in the build that ships — the
-      // programmer has guardrails — and the checked one in the build the
-      // compiler watches, which notes a sum that came round and carries on,
-      // because coming round here is still a mistake.
-      if (value.wraps || (value.unchecked && !watching_)) {
+      if (value.wraps) {
         if (op == "+") return builder_.CreateAdd(left, right);
         if (op == "-") return builder_.CreateSub(left, right);
         return builder_.CreateMul(left, right);
+      }
+      // `unchecked` in the build that ships: the programmer has guardrails, and
+      // says so, so the instruction carries `nsw`/`nuw` — the optimiser may
+      // take the sum as never coming round, which is what unlocks the loop
+      // rewrites and the vectorising that a checked sum's branch stands in the
+      // way of. It is the fastest reading of the word and the one he chose:
+      // it is already `unchecked`, inside `UNSAFE`. A guardrail that fails
+      // under it is not a wrong number but no defined answer at all — which
+      // is why the build the compiler watches takes the checked path instead,
+      // notes a sum that came round, and refuses.
+      if (value.unchecked && !watching_) {
+        const bool unsignedSum = isWhole(working) && !isSigned(working);
+        if (op == "+")
+          return unsignedSum ? builder_.CreateNUWAdd(left, right)
+                             : builder_.CreateNSWAdd(left, right);
+        if (op == "-")
+          return unsignedSum ? builder_.CreateNUWSub(left, right)
+                             : builder_.CreateNSWSub(left, right);
+        return unsignedSum ? builder_.CreateNUWMul(left, right)
+                           : builder_.CreateNSWMul(left, right);
       }
       // From `working`, the type the sum is done in — not from `given`, which
       // is what a comparison reads its two sides by. They coincide for these

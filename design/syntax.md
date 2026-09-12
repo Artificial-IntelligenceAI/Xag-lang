@@ -1430,12 +1430,23 @@ UNSAFE {
 }
 ```
 
-Nothing checks a sum into `'total'` while the program runs: the add is an add,
-as under `wrapping`. The difference is what a sum that comes round *means*. Under
-`wrapping` it is the program working. Under `unchecked` it is the guardrail
-failing — so the run the compiler makes while building still watches the name,
-and refuses the build (`E0537`) if it sees the sum come round, in words that say
-the guardrail is what needs mending. `wrapping` is never watched.
+Nothing checks a sum into `'total'` while the program runs. The difference from
+`wrapping` is what a sum that comes round *means*. Under `wrapping` it is the
+program working. Under `unchecked` it is the guardrail failing — so the run the
+compiler makes while building still watches the name, and refuses the build
+(`E0537`) if it sees the sum come round, in words that say the guardrail is what
+needs mending. `wrapping` is never watched.
+
+**And the instruction is the fastest one there is.** `wrapping` gets the plain
+`add`, which the optimiser may not reason past because coming round is meant.
+`unchecked` gets `add nsw` (`nuw` for an unsigned type): the optimiser is told
+the sum never comes round and may take that as given — which is what unlocks
+the loop rewrites and the vectorising that a checked sum's branch stands in
+the way of. It is what Rust's `unchecked_add` and C's signed overflow rule give,
+and it was chosen with the cost in view: a guardrail that fails under it does
+not give a wrong number, it gives no defined answer. That is what `UNSAFE`
+around it is for. The build the compiler watches takes the checked path, which
+is how a broken guardrail is still found wherever a run can reach it.
 
 It goes on a `var` and nowhere else. A parameter and a field are declared where
 no `UNSAFE` can stand around them, so asking there is refused (`E0212`), as

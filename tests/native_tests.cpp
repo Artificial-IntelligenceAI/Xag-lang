@@ -521,9 +521,52 @@ void aWatchedBuildStopsAtTheWorldOutside() {
   }
 }
 
+// Three states of a whole-number name, three instructions. Checked is the
+// intrinsic that answers whether it fitted; `wrapping` is the plain
+// instruction, because coming round is meant and the optimiser may not assume
+// otherwise; `unchecked` carries `nsw`/`nuw`, because coming round is promised
+// not to happen and the optimiser may take the promise — in the build that
+// ships. The build the compiler watches takes the checked path for it, since
+// that is the build that finds a promise broken.
+void anUncheckedSumTellsTheOptimiserSo() {
+  const std::string program = "START { UNSAFE {\n"
+                              "    var.mut.unchecked.int64 'signed' = [*0*];\n"
+                              "    var.mut.unchecked.uint32 'unsigned' = [*0*];\n"
+                              "    var.mut.wrapping.int64 'meant' = [*1*];\n"
+                              "    var.mut.int64 'checked' = [*0*];\n"
+                              "    loop.range.int64 'i' = [*1*, *10*] {\n"
+                              "        set 'signed' = ['signed' + 'i'];\n"
+                              "        set 'unsigned' = ['unsigned' + *2*];\n"
+                              "        set 'meant' = ['meant' x *3*];\n"
+                              "        set 'checked' = ['checked' - 'i'];\n"
+                              "    }\n"
+                              "    print.stdout['signed' 'unsigned' 'meant' 'checked' \\n];\n"
+                              "} }\n";
+  const xag::Source source("test.xag", xag::asFile(program));
+  const xag::LexResult lexed = xag::lex(source);
+  const xag::ParseResult parsed = xag::parse(source, lexed.tokens);
+  const xag::CheckResult checked = xag::check(source, parsed.program);
+  const xag::OwnResult owned = xag::own(source, parsed.program, checked);
+  CHECK(lexed.ok() && parsed.ok() && checked.ok() && owned.ok());
+  xag::MirResult built = xag::build(source, parsed.program, checked);
+  xag::elaborate(built.mir);
+  const xag::NativeResult shipped = xag::emitIr(built.mir, false);
+  CHECK(shipped.ok());
+  CHECK(shipped.ir.find("add nsw i64") != std::string::npos);
+  CHECK(shipped.ir.find("add nuw i32") != std::string::npos);
+  CHECK(shipped.ir.find("mul i64") != std::string::npos);
+  CHECK(shipped.ir.find("mul nsw i64") == std::string::npos);
+  CHECK(shipped.ir.find("llvm.ssub.with.overflow.i64") != std::string::npos);
+  const xag::NativeResult watched = xag::emitIr(built.mir, false, xag::Watching::Yes);
+  CHECK(watched.ok());
+  CHECK(watched.ir.find("add nsw i64") == std::string::npos);
+  CHECK(watched.ir.find("llvm.sadd.with.overflow.i64") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
+  anUncheckedSumTellsTheOptimiserSo();
   itKeepsASumAsSmallAsItCan();
   itSaysWhichStreamAPrintGoesTo();
   itEmitsWholePrograms();
