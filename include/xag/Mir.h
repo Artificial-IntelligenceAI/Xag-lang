@@ -149,6 +149,11 @@ struct RValue {
   // where nobody said it should is a bug, and the only reason it was not
   // checked before is that the check costs something at run time.
   bool wraps = false;
+  // Binary `+`, `-`, `x` on a whole number into a name that said `unchecked`:
+  // the programmer has guardrails, so nothing checks it while the program
+  // runs. Unlike `wraps`, coming round is still a mistake, so the run the
+  // compiler watches notices it and the build is refused.
+  bool unchecked = false;
   // Binary `/` and `mod`: the unit this was written in said `division =
   // "floored"`, so the quotient rounds toward negative infinity and the
   // remainder takes the divisor's sign. Carried on the operation because a

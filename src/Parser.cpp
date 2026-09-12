@@ -54,7 +54,7 @@ enum class Slot {
   Lifetime,   // 'life' — a name for a loan
   Counter,    // perm, default temp
   Form,       // range / while
-  Overflow,   // wrapping, default checked
+  Overflow,   // wrapping or unchecked, default checked
   Trying,     // no-itmt — the compiler does not run this one while compiling
 };
 
@@ -89,7 +89,7 @@ Slot slotOf(std::string_view word) {
     return Slot::Counter;
   if (word == "range" || word == "while" || word == "parts")
     return Slot::Form;
-  if (word == "wrapping" || word == "checked")
+  if (word == "wrapping" || word == "unchecked" || word == "checked")
     return Slot::Overflow;
   if (word == "no-itmt")
     return Slot::Trying;

@@ -305,7 +305,7 @@ constexpr long long kWorthMentioning = 1000000;
 AheadResult ahead(const Source &source, const Mir &mir,
                   const std::vector<Diagnostic> &aboutSums,
                   const std::vector<Span> &intoPlainNames, const Building &building,
-                  HowLong howLong) {
+                  HowLong howLong, const std::vector<Span> &uncheckedNames) {
   AheadResult out;
   // Something to settle, or a second engine to settle it with. With neither,
   // running the program would answer a question nobody asked.
@@ -421,10 +421,21 @@ AheadResult ahead(const Source &source, const Mir &mir,
       // straight to a call or a `give`, has no name to carry the word, and the
       // way to say it is meant is to give it one.
       const bool named = inside2(came, intoPlainNames);
+      // Into a name that said `unchecked`: the programmer said their
+      // guardrails hold, and the run says they did not. The shipped program
+      // would not stop here — it would come round without a word — which is
+      // why this refusal is the only one there is.
+      const bool unchecked = inside2(came, uncheckedNames);
       out.diagnostics.push_back(Diagnostic{
           came, "E0537", "a sum comes round here.", "here",
           {"a sum that does not fit comes round, and that is rarely what was wanted"},
-          {named ? std::string("nothing worked this out. I ran the program both ways I "
+          {unchecked ? std::string("nothing worked this out. I ran the program both ways I "
+                                   "have of running it, watching, and both saw this one "
+                                   "come round. The name said `unchecked` — that the "
+                                   "guardrails hold — and here they did not: the shipped "
+                                   "program would come round without a word. The "
+                                   "guardrail is what needs mending.")
+           : named ? std::string("nothing worked this out. I ran the program both ways I "
                                "have of running it, watching, and both saw this one "
                                "come round. `wrapping` on the declaration says it is "
                                "meant to; without it the program stops here.")

@@ -1411,6 +1411,42 @@ writing it at all.
 `checked` is the other side and is refused (`E0201`): it is what a name is when
 nothing says otherwise, and a word that cannot change the answer is not written.
 
+### `unchecked` says the guardrails hold
+
+Decided 2026-09-12. `wrapping` is the wrong word for a program that has built
+its own guard — a bound checked before every step — and wants the check gone
+for what it costs, not because coming round is meant. That is `unchecked`, and
+it is asked the way `no-itmt` is: the chain asks, `UNSAFE` grants, and neither
+alone does anything.
+
+```
+UNSAFE {
+    var.mut.unchecked.int64 'total' = [*0*];
+    loop.while read.stdin[] holds 'line' {
+        if 'total' < int64:*1000000* {            # the guardrail
+            set 'total' = ['total' + count[loan 'line']];
+        }
+    }
+}
+```
+
+Nothing checks a sum into `'total'` while the program runs: the add is an add,
+as under `wrapping`. The difference is what a sum that comes round *means*. Under
+`wrapping` it is the program working. Under `unchecked` it is the guardrail
+failing — so the run the compiler makes while building still watches the name,
+and refuses the build (`E0537`) if it sees the sum come round, in words that say
+the guardrail is what needs mending. `wrapping` is never watched.
+
+It goes on a `var` and nowhere else. A parameter and a field are declared where
+no `UNSAFE` can stand around them, so asking there is refused (`E0212`), as
+asking outside `UNSAFE` is. `wrapping` and `unchecked` share the one slot; a
+name says one or the other or neither.
+
+So the three states of a whole-number name are: **checked** (nothing said —
+stops when a sum does not fit), **`wrapping`** (meant to come round, never
+looked at), **`unchecked`** (must not come round, not checked while running,
+watched while building).
+
 ### Where it cannot be said
 
 A sum that never reaches a declaration has nowhere to carry the word:

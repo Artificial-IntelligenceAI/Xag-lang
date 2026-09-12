@@ -1777,7 +1777,11 @@ private:
       // not the one the compiler watches, since there is nothing to report. The
       // machine's own instruction is exactly the answer and the optimiser can
       // see straight through it.
-      if (value.wraps) {
+      // `unchecked` is the same instruction in the build that ships — the
+      // programmer has guardrails — and the checked one in the build the
+      // compiler watches, which notes a sum that came round and carries on,
+      // because coming round here is still a mistake.
+      if (value.wraps || (value.unchecked && !watching_)) {
         if (op == "+") return builder_.CreateAdd(left, right);
         if (op == "-") return builder_.CreateSub(left, right);
         return builder_.CreateMul(left, right);

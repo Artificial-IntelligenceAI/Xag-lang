@@ -111,6 +111,7 @@ struct TypedStmt {
   bool changeable = false;    // `mut`
   bool keepsCounter = false;  // `perm`
   bool wrapping = false;      // a sum that comes round is meant to
+  bool unchecked = false;     // nothing checks a sum here while running; one that comes round is still a mistake
   bool noItmt = false;        // a loop the chain told not to run ahead of time
   std::vector<TypedPtr> value;    // the items being assigned or given
   TypedPtr index;             // `set 'xs'[…] = …`

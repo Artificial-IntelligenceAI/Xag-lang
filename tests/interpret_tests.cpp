@@ -263,6 +263,25 @@ void itStopsOnASumThatDoesNotFit() {
   CHECK(meant.ran);
   CHECK(meant.said == "-56\n");
   given.clear();
+
+  // And the same again saying `unchecked`: the programmer has guardrails, so
+  // nothing checks — the shipped program comes round without a word. It is
+  // not `wrapping`, though: the run the compiler watches still notices, which
+  // is the next test.
+  given = "100\n";
+  const Ran trusted = run("START {\n"
+                          "  when read.stdin[] { is 'line' {\n"
+                          "    var.or-nothing.int8 'read' = [convert-to-number[loan 'line']];\n"
+                          "    when 'read' { is 'n' {\n"
+                          "      UNSAFE {\n"
+                          "        var.unchecked.int8 'big' = ['n' + *100*];\n"
+                          "        print.stdout['big' \\n];\n"
+                          "      }\n"
+                          "    } is nothing { } }\n"
+                          "  } is nothing { } } }\n");
+  CHECK(trusted.ran);
+  CHECK(trusted.said == "-56\n");
+  given.clear();
 }
 
 void itComparesAsTheTypeSaysToCompare() {
@@ -934,6 +953,17 @@ void itNoticesASumComeRound() {
                 "    var.mut.wrapping.int8 'n' = [*127*];\n"
                 "    var.int8 'one' = [*1*];\n"
                 "    set 'n' = ['n' + 'one'];\n}\n") == 0);
+  // `unchecked` says the guardrails hold, and here they did not: the watcher
+  // remembers it, so the build is refused, where the shipped program would
+  // have come round without a word.
+  CHECK(watched("START { UNSAFE {\n"
+                "    var.mut.unchecked.int8 'n' = [*127*];\n"
+                "    var.int8 'one' = [*1*];\n"
+                "    set 'n' = ['n' + 'one'];\n} }\n") == 1);
+  CHECK(watched("START { UNSAFE {\n"
+                "    var.mut.unchecked.int8 'n' = [*120*];\n"
+                "    var.int8 'one' = [*1*];\n"
+                "    set 'n' = ['n' + 'one'];\n} }\n") == 0);
 
   // Nothing came round here, and the same program is watched all the same.
   CHECK(watched("START {\n"

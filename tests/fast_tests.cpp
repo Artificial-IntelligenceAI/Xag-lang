@@ -327,6 +327,11 @@ void onShowingWhatSeveralThingsHold() {
 // the same words. What is written down is refused before it runs, so this asks
 // with a number that came from outside.
 void onASumThatDoesNotFit() {
+  // `unchecked`: no check, no stop, in both — the answer comes round.
+  AGREE("START { UNSAFE {\n"
+        "  var.mut.unchecked.int8 'n' = [*120*];\n"
+        "  loop.range.int8 'i' = [*1*, *10*] { set 'n' = ['n' + *1*]; }\n"
+        "  print.stdout['n' \\n]; } }\n");
   AGREE("START { var.mut.int8 'n' = [*100*];\n"
         "  loop.range.int8 'i' = [*1*, *10*] { set 'n' = ['n' + *20*]; }\n"
         "  print.stdout['n' \\n]; }\n");

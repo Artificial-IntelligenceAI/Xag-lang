@@ -185,6 +185,9 @@ private:
   // Whether the statement being lowered puts its answer somewhere that said
   // `wrapping`. A sum is checked while the program runs unless it did.
   bool wrapsHere_ = false;
+  // And whether it puts its answer somewhere that said `unchecked`: nothing
+  // checks the sum while running, and the watchers still notice it.
+  bool uncheckedHere_ = false;
   // What the unit the item came from decided. Read off the item, so a library's
   // function is lowered under the library's settings whichever program it is
   // lowered into.
@@ -257,9 +260,12 @@ private:
 
   // Puts the flag back however the statement left, including out of a `break`.
   struct Wrapping {
-    bool was;
+    bool was, wasUnchecked;
     Builder &of;
-    ~Wrapping() { of.wrapsHere_ = was; }
+    ~Wrapping() {
+      of.wrapsHere_ = was;
+      of.uncheckedHere_ = wasUnchecked;
+    }
   };
 
   struct Loop {
@@ -474,11 +480,15 @@ private:
       Operand left = operandOf(*e.children[0]);
       Operand right = operandOf(*e.children[1]);
       const unsigned into = addLocal("", type);
-      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
-                     RValue{RValueKind::Binary, e.text, {}, 0,
-                            {std::move(left), std::move(right)}, typeRef(type),
-                            false, wrapsHere_, settings_.floored, false,
-                            settings_.noNumberStops}});
+      // The flags by name: an aggregate with six trailing bools in a row is
+      // how `letters` once landed in `floored`.
+      RValue value{RValueKind::Binary, e.text, {}, 0, {std::move(left), std::move(right)},
+                   typeRef(type)};
+      value.wraps = wrapsHere_;
+      value.unchecked = uncheckedHere_;
+      value.floored = settings_.floored;
+      value.noNumberStops = settings_.noNumberStops;
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {}, std::move(value)});
       return into;
     }
 
@@ -615,10 +625,9 @@ private:
       const unsigned into = ownsIt ? owningTemporary(answers) : addLocal("", answers);
       if (!ownsIt)
         body_.locals[into].copies = copies(type);
-      emit(Statement{StatementKind::Assign, e.span, into, {}, {},
-                     RValue{RValueKind::Call, {}, e.name, 0, std::move(arguments),
-                            typeRef(answers), false, false, false,
-                            e.name == "count" && settings_.letters}});
+      RValue value{RValueKind::Call, {}, e.name, 0, std::move(arguments), typeRef(answers)};
+      value.letters = e.name == "count" && settings_.letters;
+      emit(Statement{StatementKind::Assign, e.span, into, {}, {}, std::move(value)});
       return into;
     }
     }
@@ -831,9 +840,10 @@ private:
   void statement(const TypedStmt &s) {
     // Held across the whole statement, because the word is written where the
     // name is and the sum is somewhere inside what the name is given.
-    const bool wrapped = wrapsHere_;
+    const bool wrapped = wrapsHere_, unchecked = uncheckedHere_;
     wrapsHere_ = s.wrapping;
-    const Wrapping restore{wrapped, *this};
+    uncheckedHere_ = s.unchecked;
+    const Wrapping restore{wrapped, unchecked, *this};
     switch (s.kind) {
     case TypedStmtKind::Declare: {
       const unsigned local = addLocal(s.name, s.type);

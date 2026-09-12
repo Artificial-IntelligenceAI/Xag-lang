@@ -739,7 +739,7 @@ private:
                   (isWhole(given) && !isSigned(given)) ? 0u : 1u});
       } else if (fromPool) {
         const Op which = op == "+" ? Op::IntAddK : op == "-" ? Op::IntSubK : Op::IntMulK;
-        emit(Code{which, place, x, y, aux, value.wraps ? 0u : 1u});
+        emit(Code{which, place, x, y, aux, (value.wraps || value.unchecked) ? 0u : 1u});
       } else {
         const Op which = op == "+"     ? Op::IntAdd
                          : op == "-"   ? Op::IntSub
@@ -747,7 +747,8 @@ private:
                          : op == "/"   ? Op::IntDiv
                          : op == "mod" ? Op::IntMod
                                        : Op::IntPow;
-        const bool checks = !value.wraps && (op == "+" || op == "-" || op == "x");
+        const bool checks =
+            !value.wraps && !value.unchecked && (op == "+" || op == "-" || op == "x");
         const bool floored = value.floored && (op == "/" || op == "mod");
         emit(Code{which, place, x, y, aux, (checks || floored) ? 1u : 0u});
       }

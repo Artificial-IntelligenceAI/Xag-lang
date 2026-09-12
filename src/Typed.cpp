@@ -358,6 +358,7 @@ private:
     // Said where the name was declared, which for a `set` is somewhere else
     // entirely — so it comes from the checker rather than from this chain.
     out->wrapping = checked_.mayWrap.count(&s) != 0;
+    out->unchecked = checked_.unchecked.count(&s) != 0;
 
     switch (s.kind) {
     case StmtKind::Declare:

@@ -266,6 +266,9 @@ struct Symbol {
   // Said `wrapping` where it was declared: a sum that does not fit is meant to
   // come round, so nothing is said about it.
   bool wraps = false;
+  // Said `unchecked`: nothing checks a sum into it while the program runs, and
+  // one that comes round is still a mistake.
+  bool unchecked = false;
   // What it was given, when that was a number written down and nothing has been
   // set into it since. It is what lets a loop be counted forward from a
   // starting point rather than guessed at.
@@ -1075,13 +1078,26 @@ private:
   // whole use of the word being in capitals is that grepping for it finds every
   // place a check was turned off — and a `no-itmt` that worked without one
   // would be a check turned off where nothing says so.
+  // `unchecked` is a `var`'s word: a parameter or a struct's field is declared
+  // where no `UNSAFE` can stand around it, so there is nothing to grant it.
+  void notOnADeclarationOutsideUnsafe(const Chain &chain, const std::string &what) {
+    for (const ChainSegment &seg : chain.segments)
+      if (!seg.isName && seg.text == "unchecked")
+        complain(seg.span, "E0212",
+                 "`unchecked` asks for something only `UNSAFE` gives, and " + what +
+                     " is declared where none can stand.",
+                 {"what is unsafe is asked for by name, inside a block that says so"},
+                 {"`unchecked` goes on a `var` inside `UNSAFE`. A sum into " + what +
+                  " is checked while the program runs, or says `wrapping`."});
+  }
+
   void askedOutsideUnsafe(const Chain &chain) {
     if (insideUnsafe_ > 0)
       return;
     for (const ChainSegment &seg : chain.segments)
-      if (!seg.isName && seg.text == "no-itmt")
+      if (!seg.isName && (seg.text == "no-itmt" || seg.text == "unchecked"))
         complain(seg.span, "E0212",
-                 "`no-itmt` asks for something only `UNSAFE` gives.",
+                 "`" + seg.text + "` asks for something only `UNSAFE` gives.",
                  {"what is unsafe is asked for by name, inside a block that says so"},
                  {"`UNSAFE` is in capitals so that looking for it finds every place a "
                   "check was turned off; one that worked without it would be a check "
@@ -1101,6 +1117,13 @@ private:
   static bool wrapsChain(const Chain &chain) {
     for (const ChainSegment &seg : chain.segments)
       if (!seg.isName && seg.text == "wrapping")
+        return true;
+    return false;
+  }
+
+  static bool uncheckedChain(const Chain &chain) {
+    for (const ChainSegment &seg : chain.segments)
+      if (!seg.isName && seg.text == "unchecked")
         return true;
     return false;
   }
@@ -1165,6 +1188,7 @@ private:
         continue;
       Shape &shape = result_.shapes[at++];
       for (const Param &field : item.params) {
+        notOnADeclarationOutsideUnsafe(field.chain, "one of the things a struct holds");
         for (const Field &already : shape.fields)
           if (already.name == field.name)
             complain(field.nameSpan, "E0502",
@@ -1299,6 +1323,7 @@ private:
           const Ty held = typeOfChain(param.chain);
           signature.params.push_back(held);
           result_.parameters[&param] = held;
+          notOnADeclarationOutsideUnsafe(param.chain, "a parameter");
         }
         if (!item.op.empty()) {
           // Says its own thing about a second answer for the same type.
@@ -2656,10 +2681,16 @@ private:
       result_.declarations[&s] = type;
       onlyValueChecked(s.value, type, s.span);
       Symbol made{type, changeable(s.chain), s.nameSpan, wrapsChain(s.chain)};
+      made.unchecked = uncheckedChain(s.chain);
+      askedOutsideUnsafe(s.chain);
       if (isWhole(type) && !made.wraps)
         result_.intoPlainNames.push_back(s.span);
       if (made.wraps)
         result_.mayWrap.insert(&s);
+      if (made.unchecked) {
+        result_.unchecked.insert(&s);
+        result_.uncheckedSpans.push_back(s.span);
+      }
       if (isWhole(type)) {
         __int128 given = 0;
         if (wholeItemOf(s.value, given)) {
@@ -2716,6 +2747,9 @@ private:
       // a struct holds is declared in the struct.
       if (const Symbol *said = lookup(s.name)) {
         bool wraps = said->wraps;
+        // `unchecked` is a `var`'s word alone — a field is declared where no
+        // `UNSAFE` can stand around it — so it does not follow a path.
+        const bool unchecked = s.fields.empty() && said->unchecked;
         Ty here = said->type;
         for (const std::string &step : s.fields) {
           const Field *field = fieldNamed(here, step);
@@ -2729,6 +2763,10 @@ private:
             result_.mayWrap.insert(&s);
           else
             result_.intoPlainNames.push_back(s.span);
+          if (unchecked) {
+            result_.unchecked.insert(&s);
+            result_.uncheckedSpans.push_back(s.span);
+          }
         }
       }
       const Symbol *symbol = lookup(s.name);

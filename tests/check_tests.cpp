@@ -900,6 +900,36 @@ void askingToSkipNeedsSayingSo() {
   // And there is no word for the ordinary case, because not writing one is it.
   CHECK(readAs("START {\n"
                "    loop.itmt.range.int64 'i' = [*1*, *3*] { }\n}\n") == "E0202");
+
+  // `unchecked` asks the same way: no check on a sum into this name while the
+  // program runs, because the programmer has guardrails. Inside `UNSAFE`, on
+  // a `var`, and nowhere else — a parameter or a field is declared where no
+  // `UNSAFE` can stand.
+  CHECK(run("START {\n"
+            "    UNSAFE {\n"
+            "        var.mut.unchecked.int64 't' = [*0*];\n"
+            "        set 't' = ['t' + *1*];\n"
+            "    }\n}\n")
+            .ok());
+  CHECK(inStart("var.mut.unchecked.int64 't' = [*0*]; set 't' = ['t' + *1*];").code(0) ==
+        "E0212");
+  CHECK(run("fn.int64 'f' [unchecked.int64 'n'] { give ['n']; }\n").code(0) == "E0212");
+  CHECK(run("struct 'p' [unchecked.int64 'x']\n").code(0) == "E0212");
+  // Not both: one slot, one word.
+  CHECK(readAs("START { UNSAFE { var.wrapping.unchecked.int64 't' = [*0*]; } }\n") != "(none)");
+  // What the checker wrote down: the statements into the name.
+  {
+    const Checked c = run("START {\n"
+                          "    UNSAFE {\n"
+                          "        var.mut.unchecked.int64 't' = [*0*];\n"
+                          "        set 't' = ['t' + *1*];\n"
+                          "        var.mut.int64 'u' = [*0*];\n"
+                          "        set 'u' = ['u' + *1*];\n"
+                          "    }\n}\n");
+    CHECK(c.ok());
+    CHECK(c.checked.unchecked.size() == 2);
+    CHECK(c.checked.mayWrap.empty());
+  }
 }
 
 // `mut` asks for something. A name nothing ever changes did not need it, and a

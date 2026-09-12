@@ -92,6 +92,7 @@ struct HowLong {
 AheadResult ahead(const Source &source, const Mir &mir,
                   const std::vector<Diagnostic> &aboutSums,
                   const std::vector<Span> &intoPlainNames = {},
-                  const Building &building = {}, HowLong howLong = {});
+                  const Building &building = {}, HowLong howLong = {},
+                  const std::vector<Span> &uncheckedNames = {});
 
 } // namespace xag

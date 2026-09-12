@@ -1230,6 +1230,10 @@ impl<'a> Writer<'a> {
             self.library_constant();
             return;
         }
+        if self.rng.chance(4) {
+            self.unchecked_counter();
+            return;
+        }
         match self.rng.below(25) {
             0..=3 => self.declaration(),
             4 => self.assignment(),
@@ -2068,6 +2072,32 @@ impl<'a> Writer<'a> {
                 self.out.push_str(") \\n];\n");
             }
         }
+    }
+
+    /// `unchecked` inside `UNSAFE`: a counter nothing checks while the program
+    /// runs, stepped a bounded number of times so that it never comes round —
+    /// which is the programmer's guardrail, and what the word promises. The
+    /// watched run still looks, so a promise this generator broke would be a
+    /// refusal, not a finding.
+    fn unchecked_counter(&mut self) {
+        let name = self.fresh();
+        let counter = self.fresh();
+        let rounds = self.rng.below(40) + 1;
+        let step = self.rng.below(9) + 1;
+        self.pad();
+        self.out.push_str("UNSAFE {\n");
+        self.indent += 1;
+        self.pad();
+        self.out.push_str(&format!("var.mut.unchecked.int64 '{name}' = [*0*];\n"));
+        self.pad();
+        self.out.push_str(&format!(
+            "loop.range.int64 '{counter}' = [*1*, *{rounds}*] {{ set '{name}' = ['{name}' + *{step}*]; }}\n"
+        ));
+        self.pad();
+        self.out.push_str(&format!("print.stdout['{name}' \\n];\n"));
+        self.indent -= 1;
+        self.pad();
+        self.out.push_str("}\n");
     }
 
     fn forget_ariths(&mut self) {

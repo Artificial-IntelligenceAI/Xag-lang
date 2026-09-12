@@ -392,6 +392,12 @@ struct CheckResult {
   // A sum in one of these is meant to come round, so nothing watches it at
   // compile time and nothing checks it while the program runs.
   std::unordered_set<const Stmt *> mayWrap;
+  // Statements whose whole-number answer goes into a name that said
+  // `unchecked`: the programmer has guardrails, so nothing checks the sum while
+  // the program runs — and a sum that comes round anyway is a bug by their own
+  // account, so the run the compiler watches still notices, and refuses.
+  std::unordered_set<const Stmt *> unchecked;
+  std::vector<Span> uncheckedSpans; // the same statements, as spans, for `ahead`
   // Reaches into a `many` that were shown to be places it has, so that nothing
   // asks again while the program runs. A `many` is a fixed length once it is
   // made, which is what makes a loop counting to `count[…]` answerable here.

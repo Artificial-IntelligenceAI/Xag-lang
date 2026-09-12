@@ -832,7 +832,8 @@ bool ready(const std::string &path, std::string &text, xag::MirResult &built, in
              : xag::ahead(source, built.mir, checked.aboutSums,
                           checked.intoPlainNames, buildAndStart,
                           xag::HowLong{static_cast<long long>(checked.mostRounds),
-                                       checked.longestLoop});
+                                       checked.longestLoop},
+                          checked.uncheckedSpans);
   bool disagreed = false;
   for (xag::Diagnostic &one : ran.diagnostics)
     if (one.severity == xag::Severity::Mine) {

@@ -787,7 +787,7 @@ private:
         // every sum came round. That run notices and carries on; it is what
         // turns a sum that comes round into a refusal before anything ships,
         // and stopping at the first one would hide the rest.
-        if (round && !value.wraps && !watching_) {
+        if (round && !value.wraps && !value.unchecked && !watching_) {
           xag_sum_came_round();
           return Value{};
         }
